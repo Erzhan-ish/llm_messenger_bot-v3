@@ -1,0 +1,67 @@
+ai_bot/
+├── app/
+│   ├── main.py
+│   ├── config.py
+│   ├── logging.py
+│
+│   ├── api/
+│   │   └── health.py
+│
+│   ├── webhooks/                      # HTTP вход
+│   │   └── telegram.py
+│
+│   ├── channels/                      # Адаптация Telegram
+│   │   ├── base.py                    # UnifiedMessage
+│   │   └── telegram_adapter.py
+│
+│   ├── processing/                    # Бизнес-логика
+│   │   ├── message_processor.py       # центр логики
+│   │   ├── dedup.py                   # защита от дублей
+│   │   └── state_detector.py          # interest / no / later
+│
+│   ├── context/                       # Сессии и история
+│   │   ├── session_manager.py
+│   │   ├── context_builder.py
+│   │   └── ttl.py
+│
+│   ├── llm/                           # Ollama
+│   │   ├── router.py
+│   │   ├── providers/
+│   │   │   └── ollama.py
+│   │   ├── fallback.py
+│   │   └── prompts/
+│   │       └── manager/
+│   │           ├── system_prompt.md
+│   │           ├── business_context.md
+│   │           ├── value_proposition.md
+│   │           ├── dialog_goals.md
+│   │           └── objections.md
+│
+│   ├── delivery/                      # Отправка сообщений
+│   │   └── telegram_sender.py
+│
+│   ├── storage/                       # SQLAlchemy async
+│   │   ├── db.py
+│   │   ├── models.py
+│   │   └── repositories/
+│   │       ├── users_repo.py
+│   │       ├── sessions_repo.py
+│   │       └── messages_repo.py
+│
+│   ├── schemas/
+│   │   ├── incoming.py                # Telegram payload
+│   │   └── internal.py                # UnifiedMessage (опц.)
+│
+│   └── utils/
+│       ├── time.py
+│       └── text.py
+│
+├── scripts/
+│   └── init_db.sql
+│
+├── tests/
+│   └── test_tg_flow.py
+│
+├── .env.example
+├── requirements.txt
+└── README.md

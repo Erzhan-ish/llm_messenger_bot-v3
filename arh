@@ -1,0 +1,28 @@
+Telegram / WhatsApp
+        │
+        ▼
+ Channel Adapter
+        │
+        ▼
+ Message Normalizer
+        │
+ ┌──────┴──────────────┐
+ │                     │
+ ▼                     ▼
+ Text Message       Audio Message
+ │                     │
+ │                     ▼
+ │              Transcription Service
+ │                     │
+ └──────────┬──────────┘
+            ▼
+     Unified Text
+            │
+            ▼
+   Knowledge + Prompt
+            │
+            ▼
+        Local LLM
+            │
+            ▼
+        Response
