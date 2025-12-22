@@ -65,3 +65,28 @@ ai_bot/
 ├── .env.example
 ├── requirements.txt
 └── README.md
+
+
+0) Итоговая цель (что считается “работает”)
+
+Telegram отправляет update на твой webhook
+
+Ты принимаешь update в FastAPI
+
+Превращаешь update в UnifiedMessage
+
+Создаёшь/находишь пользователя и сессию в БД
+
+Сохраняешь входящее сообщение в messages
+
+Собираешь контекст (последние N сообщений)
+
+Формируешь system prompt “менеджер” + история
+
+Отправляешь в Ollama /api/chat
+
+Сохраняешь ответ бота в messages
+
+Отправляешь ответ в Telegram через sendMessage
+
+Логируешь ключевые события

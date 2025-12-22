@@ -5,8 +5,12 @@ from typing import Literal, Optional
 
 @dataclass
 class UnifiedMessage:
-    channel: Literal["telegram"]
+    channel: Literal["telegram", "whatsapp"]
     user_id: str
     message_id: str
-    text: Optional[str]
-    created_at: datetime
+
+    type: Literal["text", "audio"]
+    text: Optional[str] = None
+    audio_path: Optional[str] = None
+
+    created_at: datetime = datetime.utcnow()

@@ -1,5 +1,10 @@
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import (
+    create_async_engine,
+    async_sessionmaker,
+    AsyncSession,
+)
 from sqlalchemy.orm import DeclarativeBase
+
 from app.config import settings
 
 
@@ -10,10 +15,19 @@ engine = create_async_engine(
 )
 
 AsyncSessionLocal = async_sessionmaker(
-    engine,
+    bind=engine,
+    class_=AsyncSession,
     expire_on_commit=False,
 )
 
 
 class Base(DeclarativeBase):
     pass
+
+
+def async_session() -> AsyncSession:
+    """
+    Единая точка получения AsyncSession
+    Используется во всех repositories
+    """
+    return AsyncSessionLocal()
