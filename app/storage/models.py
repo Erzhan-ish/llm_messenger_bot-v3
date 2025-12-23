@@ -1,12 +1,12 @@
 from datetime import datetime
 from typing import List, Optional
-
 from sqlalchemy import (
     String,
     Integer,
     DateTime,
     ForeignKey,
     Text,
+    Boolean,
 )
 from sqlalchemy.orm import (
     Mapped,
@@ -64,3 +64,5 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     session: Mapped["Session"] = relationship(back_populates="messages")
+
+    followup_sent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

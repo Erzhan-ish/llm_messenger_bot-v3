@@ -1,8 +1,37 @@
+from datetime import datetime, timedelta
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.storage.models import Message
 from app.storage.db import async_session
+from app.storage.models import Message, Session
+
+async def get_followup_candidates(
+    hours: int = 24,
+):
+    """
+    Возвращает bot-сообщения, на которые не ответили
+    """
+    since = datetime.utcnow() - timedelta(hours=hours)
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Message)
+            .join(Session)
+            .where(
+                Message.role == "bot",
+                Message.followup_sent.is_(False),
+                Message.created_at <= since,
+                Session.status == "active",
+            )
+        )
+        return result.scalars().all()
+
+
+async def mark_followup_sent(message_id: int):
+    async with async_session() as session:
+        msg = await session.get(Message, message_id)
+        if msg:
+            msg.followup_sent = True
+            await session.commit()
 
 
 async def save_message(
