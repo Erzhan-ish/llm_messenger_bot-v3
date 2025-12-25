@@ -2,6 +2,14 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    # WhatsApp inbound
+    WHATSAPP_VERIFY_TOKEN: str = ""
+    META_APP_SECRET: str = ""
+
+    # WhatsApp outbound (на будущее)
+    WHATSAPP_TOKEN: str = ""
+    WHATSAPP_PHONE_NUMBER_ID: str = ""
+
     # Telegram
     TELEGRAM_TOKEN: str
 

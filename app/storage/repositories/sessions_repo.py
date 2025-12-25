@@ -1,86 +1,51 @@
-from datetime import datetime, timedelta
+from __future__ import annotations
 
-from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime
+from sqlalchemy import select, update, desc
 
-from app.config import settings
-from app.storage.models import Session
 from app.storage.db import async_session
+from app.storage.models import Session
 
 
-SESSION_TTL = timedelta(hours=settings.SESSION_TTL_HOURS)
+async def get_active_session(user_id: int) -> Session | None:
+    async with async_session() as session:
+        res = await session.execute(
+            select(Session)
+            .where(Session.user_id == user_id, Session.status != "closed")
+            .order_by(desc(Session.last_activity_at))
+            .limit(1)
+        )
+        return res.scalar_one_or_none()
+
+
+async def create_new_session(user_id: int, status: str = "active") -> Session:
+    async with async_session() as session:
+        s = Session(
+            user_id=user_id,
+            status=status,
+            last_activity_at=datetime.utcnow(),
+        )
+        session.add(s)
+        await session.flush()
+        return s
 
 
 async def close_active_session(user_id: int) -> None:
     async with async_session() as session:
         await session.execute(
             update(Session)
-            .where(
-                Session.user_id == user_id,
-                Session.status == "active",
-            )
-            .values(
-                status="closed",
-                last_activity_at=datetime.utcnow(),
-            )
+            .where(Session.user_id == user_id, Session.status != "closed")
+            .values(status="closed", closed_at=datetime.utcnow())
         )
-        await session.commit()
 
 
-async def create_new_session(user_id: int) -> Session:
-    async with async_session() as session:
-        new_session = Session(
-            user_id=user_id,
-            status="active",
-        )
-        session.add(new_session)
-        await session.commit()
-        await session.refresh(new_session)
-        return new_session
-
-
-async def update_session_payload(session_id: int, payload: str):
-    async with async_session() as session:
-        await session.execute(
-            update(Session)
-            .where(Session.id == session_id)
-            .values(start_payload=payload)
-        )
-        await session.commit()
-
-
-async def get_last_session(user_id: int) -> Session | None:
-    async with async_session() as session:  # type: AsyncSession
-        result = await session.execute(
-            select(Session)
-            .where(Session.user_id == user_id)
-            .order_by(Session.last_activity_at.desc())
-            .limit(1)
-        )
-        return result.scalar_one_or_none()
-
-
-async def create_session(user_id: int) -> Session:
-    async with async_session() as session:
-        new_session = Session(
-            user_id=user_id,
-            status="new",
-            last_activity_at=datetime.utcnow(),
-        )
-        session.add(new_session)
-        await session.commit()
-        await session.refresh(new_session)
-        return new_session
-
-
-async def touch_session(session_id: int) -> None:
+async def touch_session_activity(session_id: int) -> None:
     async with async_session() as session:
         await session.execute(
             update(Session)
             .where(Session.id == session_id)
             .values(last_activity_at=datetime.utcnow())
         )
-        await session.commit()
 
 
 async def update_session_status(session_id: int, status: str) -> None:
@@ -88,10 +53,20 @@ async def update_session_status(session_id: int, status: str) -> None:
         await session.execute(
             update(Session)
             .where(Session.id == session_id)
-            .values(status=status)
+            .values(status=status, last_activity_at=datetime.utcnow())
         )
-        await session.commit()
 
 
-def is_session_expired(session: Session) -> bool:
-    return datetime.utcnow() - session.last_activity_at > SESSION_TTL
+async def get_last_inbound_time(user_id: int) -> datetime | None:
+    """
+    Время последней активности (inbound) пользователя.
+    Для WhatsApp 24h окна опираемся на last_activity_at активной/последней сессии.
+    """
+    async with async_session() as session:
+        res = await session.execute(
+            select(Session.last_activity_at)
+            .where(Session.user_id == user_id)
+            .order_by(desc(Session.last_activity_at))
+            .limit(1)
+        )
+        return res.scalar_one_or_none()

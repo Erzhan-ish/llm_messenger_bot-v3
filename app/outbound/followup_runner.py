@@ -6,7 +6,10 @@ async def run_followups():
     messages = await get_followup_candidates(hours=24)
 
     for msg in messages:
+        user = msg.session.user
+
         await send_followup(
-            telegram_user_id=msg.session.user.external_user_id,
+            channel=user.channel,
+            user_id=user.external_user_id,
             original_message_id=msg.id,
         )

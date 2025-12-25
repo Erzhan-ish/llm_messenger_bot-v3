@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.schemas.incoming import TelegramUpdate
+from app.schemas.incoming import TgUpdate
 from app.channels.telegram_adapter import TelegramAdapter
 from app.logging import logger
 
@@ -7,7 +7,7 @@ router = APIRouter()
 
 
 @router.post("/")
-async def telegram_webhook(update: TelegramUpdate):
+async def telegram_webhook(update: TgUpdate):
     if not update.message or not update.message.text:
         return {"ok": True}
 

@@ -1,4 +1,4 @@
-from app.context.session_manager import get_or_create_session
+from app.context.session_manager import get_or_create_session, reset_session
 from app.context.context_builder import build_context
 from app.llm.providers.ollama import ask_ollama
 from app.llm.prompts.manager.loader import build_manager_system_prompt
@@ -6,18 +6,17 @@ from app.processing.state_detector import detect_state
 from app.storage.repositories.messages_repo import save_message
 from app.storage.repositories.sessions_repo import update_session_status
 from app.processing.dedup import is_duplicate_message
-from app.logging import logger
 from app.processing.rate_limit import check_rate_limit, RateLimitExceeded
-from app.outbound.dispatcher import send_message
-from app.context.session_manager import reset_session
-from app.delivery.telegram_sender import send_telegram_message
+from app.outbound.dispatcher import OutboundDispatcher
+from app.logging import logger
 
 
 async def process_message(message):
+    # 0️⃣ Dedup
     if await is_duplicate_message(
-            channel=message.channel,
-            external_message_id=message.message_id,
-        ):
+        channel=message.channel,
+        external_message_id=message.message_id,
+    ):
         logger.warning(
             "Duplicate message ignored | channel={} | message_id={}",
             message.channel,
@@ -25,6 +24,7 @@ async def process_message(message):
         )
         return
 
+    # 1️⃣ Rate limit
     try:
         await check_rate_limit(
             channel=message.channel,
@@ -32,7 +32,7 @@ async def process_message(message):
             limit=5,
             window_seconds=10,
         )
-    except RateLimitExceeded as e:
+    except RateLimitExceeded:
         logger.warning(
             "Rate limit hit | user_id={} | channel={}",
             message.user_id,
@@ -40,15 +40,16 @@ async def process_message(message):
         )
         return
 
-
+    # 2️⃣ Команда /reset
     if message.text and message.text.strip() == "/reset":
         await reset_session(
             channel=message.channel,
             external_user_id=message.user_id,
         )
 
-        await send_telegram_message(
-            user_id=message.user_id,
+        await OutboundDispatcher.send(
+            channel=message.channel,
+            external_user_id=message.user_id,
             text="Контекст диалога сброшен. Начнём заново.",
         )
 
@@ -59,32 +60,30 @@ async def process_message(message):
         )
         return
 
-
     logger.info(
         "Processing message | user_id={} | message_id={}",
         message.user_id,
         message.message_id,
     )
 
-    # 1️⃣ user + session
+    # 3️⃣ Session
     session = await get_or_create_session(
-        channel="telegram",
+        channel=message.channel,
         external_user_id=message.user_id,
     )
 
-    # 2️⃣ сохраняем входящее
+    # 4️⃣ Save inbound
     await save_message(
         session_id=session.id,
         role="user",
         text=message.text,
-        channel="telegram",
+        channel=message.channel,
         external_message_id=message.message_id,
     )
 
-    # 3️⃣ контекст истории
+    # 5️⃣ Context
     history_context = await build_context(session.id)
 
-    # 4️⃣ system prompt менеджера
     system_prompt = build_manager_system_prompt()
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -92,33 +91,37 @@ async def process_message(message):
     if history_context:
         messages.append({
             "role": "system",
-            "content": f"История диалога:\n{history_context}"
+            "content": f"История диалога:\n{history_context}",
         })
 
     messages.append({
         "role": "user",
-        "content": message.text
+        "content": message.text,
     })
 
-    # 5️⃣ Ollama
-    reply = await ask_ollama(messages)
+    # 6️⃣ LLM
+    try:
+        reply = await ask_ollama(messages)
+    except Exception:
+        logger.exception("LLM failed")
+        reply = "Я на связи. Давайте продолжим чуть позже."
 
-    # 6️⃣ сохраняем ответ бота
+    # 7️⃣ Save outbound
     await save_message(
         session_id=session.id,
         role="bot",
         text=reply,
-        channel="telegram",
+        channel=message.channel,
     )
 
-    # 7️⃣ состояние по сообщению пользователя
+    # 8️⃣ State
     state = detect_state(message.text)
     await update_session_status(session.id, state.value)
 
-    # 8️⃣ отправка
-    await send_message(
+    # 9️⃣ Outbound (ЕДИНАЯ ТОЧКА)
+    await OutboundDispatcher.send(
         channel=message.channel,
-        user_id=message.user_id,
+        external_user_id=message.user_id,
         text=reply,
     )
 
