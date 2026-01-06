@@ -2,7 +2,8 @@ from app.outbound.dispatcher import OutboundDispatcher
 
 
 async def notify_new_procedure(
-    telegram_user_id: str,
+    channel: str,
+    external_user_id: str,
     procedure_name: str,
 ):
     text = (
@@ -12,7 +13,8 @@ async def notify_new_procedure(
         f"Если удобно — напишите, обсудим детали."
     )
 
-    await OutboundDispatcher.send_telegram(
-        user_id=telegram_user_id,
+    await OutboundDispatcher.send(
+        channel=channel,
+        external_user_id=external_user_id,
         text=text,
     )

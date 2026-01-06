@@ -1,7 +1,12 @@
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
+
 from sqlalchemy.ext.asyncio import (
-    create_async_engine,
-    async_sessionmaker,
     AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
 
@@ -16,8 +21,8 @@ engine = create_async_engine(
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
-    class_=AsyncSession,
     expire_on_commit=False,
+    class_=AsyncSession,
 )
 
 
@@ -25,9 +30,17 @@ class Base(DeclarativeBase):
     pass
 
 
-def async_session() -> AsyncSession:
+@asynccontextmanager
+async def async_session() -> AsyncIterator[AsyncSession]:
     """
-    Единая точка получения AsyncSession
-    Используется во всех repositories
+    Единая точка получения AsyncSession для repositories.
     """
-    return AsyncSessionLocal()
+    session: AsyncSession = AsyncSessionLocal()
+    try:
+        yield session
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+    finally:
+        await session.close()

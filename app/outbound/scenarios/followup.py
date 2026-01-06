@@ -2,19 +2,18 @@ from app.outbound.dispatcher import OutboundDispatcher
 from app.storage.repositories.messages_repo import mark_followup_sent
 
 
-async def send_followup(
-    telegram_user_id: str,
-    original_message_id: int,
-):
-    text = (
-        "Коллега, добрый день!\n\n"
-        "Понимаю, что могли быть заняты.\n"
-        "Подскажите, актуально ли сейчас рассмотреть процедуру?"
+FOLLOWUP_TEXT = (
+    "Коллега, добрый день. "
+    "Ранее обсуждали возможность работы по процедурам. "
+    "Подскажите, актуально сейчас?"
+)
+
+
+async def send_followup(user):
+    await OutboundDispatcher.send(
+        channel=user.channel,
+        external_user_id=user.external_user_id,
+        text=FOLLOWUP_TEXT,
     )
 
-    await OutboundDispatcher.send_telegram(
-        user_id=telegram_user_id,
-        text=text,
-    )
-
-    await mark_followup_sent(original_message_id)
+    await mark_followup_sent(user.id)
