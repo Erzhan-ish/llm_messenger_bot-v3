@@ -5,6 +5,14 @@ class Settings(BaseSettings):
     # Telegram
     TELEGRAM_TOKEN: str
 
+    # WhatsApp inbound
+    WHATSAPP_VERIFY_TOKEN: str = ""
+    META_APP_SECRET: str = ""
+
+    # WhatsApp outbound (на будущее)
+    WHATSAPP_TOKEN: str = ""
+    WHATSAPP_PHONE_NUMBER_ID: str = ""
+
     # Database
     DATABASE_URL: str
 
