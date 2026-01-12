@@ -20,7 +20,7 @@ class WhatsAppAdapter:
                 value = (ch.get("value") or {})
                 messages = value.get("messages") or []
                 for m in messages:
-                    msg_type = m.get("type")
+                    msg_type = m.get("message_type")
                     from_user = m.get("from")
                     msg_id = m.get("id")
 
@@ -36,7 +36,7 @@ class WhatsAppAdapter:
                         out.append(
                             UnifiedMessage(
                                 channel="whatsapp",
-                                user_id=str(from_user),
+                                external_user_id=str(from_user),
                                 message_id=str(msg_id),
                                 text=text,
                                 created_at=datetime.utcnow(),

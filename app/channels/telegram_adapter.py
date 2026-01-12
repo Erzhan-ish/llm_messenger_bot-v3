@@ -23,15 +23,15 @@ class TelegramAdapter:
 
 
     @staticmethod
-    async def handle_start(user_id: str, payload: str | None):
+    async def handle_start(external_user_id: str, payload: str | None):
         """
         payload — то, что пришло после /start
         например: invite_12345
         """
 
         logger.info(
-            "Telegram /start | user_id={} | payload={}",
-            user_id,
+            "Telegram /start | external_user_id={} | payload={}",
+            external_user_id,
             payload,
         )
 
@@ -44,9 +44,9 @@ class TelegramAdapter:
 
         unified = UnifiedMessage(
             channel="telegram",
-            user_id=user_id,
+            external_user_id=external_user_id,
             message_id=f"start:{payload or 'direct'}",
-            type="text",
+            message_type="text",
             text=text,
             audio_path=None,
             created_at=datetime.utcnow(),
