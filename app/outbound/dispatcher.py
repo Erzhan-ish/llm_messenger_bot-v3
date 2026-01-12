@@ -22,7 +22,6 @@ class OutboundDispatcher:
 
         if channel == "whatsapp":
             await send_whatsapp(
-                channel=channel,
                 external_user_id=external_user_id,
                 text=text,
             )

@@ -10,11 +10,10 @@ WHATSAPP_24H = timedelta(hours=24)
 
 
 async def send_whatsapp(
-    user_id: str,          # internal user.id
-    external_user_id: str, # phone number
+    external_user_id: str,
     text: str,
 ):
-    last_inbound = await get_last_inbound_time(user_id)
+    last_inbound = await get_last_inbound_time(external_user_id)
 
     now = datetime.utcnow()
 
@@ -22,10 +21,10 @@ async def send_whatsapp(
     if last_inbound and now - last_inbound <= WHATSAPP_24H:
         logger.info(
             "WhatsApp outbound | free window | user_id={}",
-            user_id,
+            external_user_id,
         )
         await send_whatsapp_text(
-            to=external_user_id,
+            user_id=external_user_id,
             text=text,
         )
         return
@@ -33,11 +32,11 @@ async def send_whatsapp(
     # вне окна → только template
     logger.info(
         "WhatsApp outbound | template required | user_id={}",
-        user_id,
+        external_user_id,
     )
 
     await send_whatsapp_template(
-        to=external_user_id,
+        user_id=external_user_id,
         template_name="followup_generic",
         # ⚠️ параметры ТОЛЬКО если шаблон их поддерживает
     )

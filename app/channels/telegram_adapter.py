@@ -11,9 +11,9 @@ class TelegramAdapter:
 
         unified = UnifiedMessage(
             channel="telegram",
-            user_id=str(msg.from_.id),
+            external_user_id=str(msg.from_.id),
             message_id=str(msg.message_id),
-            type="text",
+            message_type="text",
             text=msg.text,
             audio_path=None,
             created_at=datetime.utcnow(),

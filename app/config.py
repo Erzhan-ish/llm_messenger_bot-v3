@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-
+from pydantic import Field
 
 class Settings(BaseSettings):
     # WhatsApp inbound
@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     # Timeouts
     LLM_TIMEOUT: int = 60
     HTTP_TIMEOUT: int = 30
+
+    # STT (optional)
+    STT_ENGINE: str = Field(default="faster-whisper")
+    STT_MODEL_NAME: str = Field(default="small")
+    STT_DEVICE: str = Field(default="cpu")
+    STT_COMPUTE_TYPE: str = Field(default="int8")
 
     class Config:
         env_file = ".env"
