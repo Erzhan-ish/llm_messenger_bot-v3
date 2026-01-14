@@ -1,34 +1,46 @@
-from fastapi import APIRouter
-from app.schemas.incoming import TgUpdate
-from app.channels.telegram_adapter import TelegramAdapter
+# app/webhooks/telegram.py
+from __future__ import annotations
+
+import asyncio
+import json
+
+from fastapi import APIRouter, Request, HTTPException
+from fastapi.responses import JSONResponse
+
 from app.logging import logger
+from app.channels.telegram_adapter import TelegramAdapter
+from app.jobs.enqueue import enqueue_inbound_message_job
 
-router = APIRouter()
+router = APIRouter(tags=["telegram"])
 
 
-@router.post("/")
-async def telegram_webhook(update: TgUpdate):
-    if not update.message or not update.message.text:
-        return {"ok": True}
+@router.post("")
+async def telegram_webhook(request: Request):
+    raw = await request.body()
+    if not raw:
+        logger.warning("Telegram webhook | empty body")
+        raise HTTPException(status_code=400, detail="Empty body")
 
-    text = update.message.text.strip()
-    user_id = str(update.message.from_.id)
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception:
+        ct = request.headers.get("content-type")
+        logger.error(
+            "Telegram webhook | invalid json | content-type={} | raw={}",
+            ct,
+            raw[:200],
+        )
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    um = await TelegramAdapter.from_payload(payload)
 
     logger.info(
-        "Telegram update | user_id={} | text={}",
-        user_id,
-        text,
+        "Telegram inbound | external_user_id={} | message_id={}",
+        um.external_user_id,
+        um.message_id,
     )
 
-    # /start и deep-link
-    if text.startswith("/start"):
-        payload = text.replace("/start", "").strip() or None
-        await TelegramAdapter.handle_start(
-            user_id=user_id,
-            payload=payload,
-        )
-        return {"ok": True}
+    # enqueue быстро, обработку делает worker
+    asyncio.create_task(enqueue_inbound_message_job(um))
 
-    # обычные сообщения
-    await TelegramAdapter.handle(update)
-    return {"ok": True}
+    return JSONResponse({"ok": True})

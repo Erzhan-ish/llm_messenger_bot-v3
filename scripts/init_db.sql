@@ -40,3 +40,21 @@ ON messages (created_at);
 
 CREATE INDEX IF NOT EXISTS ix_messages_role
 ON messages (role);
+
+CREATE TABLE IF NOT EXISTS jobs (
+  id            BIGSERIAL PRIMARY KEY,
+  job_type      TEXT NOT NULL,                 -- inbound / followup / outbound / stt (future)
+  payload       JSONB NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'queued', -- queued/running/done/error
+  run_after     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  attempts      INT NOT NULL DEFAULT 0,
+  max_attempts  INT NOT NULL DEFAULT 5,
+  last_error    TEXT,
+  locked_at     TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ix_jobs_queue
+  ON jobs(status, run_after, id);
+

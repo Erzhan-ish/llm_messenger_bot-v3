@@ -1,72 +1,69 @@
-from datetime import datetime
-from typing import List, Optional
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any, List
 
 from app.channels.base import UnifiedMessage
 
 
 class WhatsAppAdapter:
     @staticmethod
-    def extract_messages(payload: dict) -> List[UnifiedMessage]:
+    def extract_messages(payload: dict[str, Any]) -> List[UnifiedMessage]:
         """
-        Cloud API webhook: entry[].changes[].value.messages[]
-        text: m["type"] == "text"  -> m["text"]["body"]
-        audio: m["type"] == "audio" -> m["audio"]["id"]
-        voice: m["type"] == "voice" -> m["voice"]["id"]
+        Meta webhook payload → список UnifiedMessage.
+        Поддержка: text, audio/voice (media_id).
         """
         out: List[UnifiedMessage] = []
 
-        entry = payload.get("entry") or []
-        for e in entry:
-            changes = e.get("changes") or []
-            for ch in changes:
-                value = ch.get("value") or {}
-                messages = value.get("messages") or []
-                for m in messages:
-                    msg_type = (m.get("type") or "").strip()
-                    from_user = m.get("from")
-                    msg_id = m.get("id")
+        for e in payload.get("entry", []) or []:
+            for ch in (e.get("changes", []) or []):
+                value = ch.get("value", {}) or {}
+                for m in (value.get("messages", []) or []):
+                    wa_id = (m.get("from") or "").strip()  # external_user_id
+                    msg_id = (m.get("id") or "").strip()
+                    m_type = (m.get("type") or "").strip()
 
-                    if not from_user or not msg_id:
+                    if not wa_id or not msg_id or not m_type:
                         continue
 
-                    # TEXT
-                    if msg_type == "text":
-                        text = ((m.get("text") or {}).get("body") or "").strip()
-                        if not text:
-                            continue
+                    ts = m.get("timestamp")
+                    if ts:
+                        try:
+                            created_at = datetime.fromtimestamp(int(ts), tz=timezone.utc).replace(tzinfo=None)
+                        except Exception:
+                            created_at = datetime.utcnow()
+                    else:
+                        created_at = datetime.utcnow()
 
+                    if m_type == "text":
+                        text = ((m.get("text") or {}) or {}).get("body")
                         out.append(
                             UnifiedMessage(
                                 channel="whatsapp",
-                                external_user_id=str(from_user),
-                                message_id=str(msg_id),
+                                external_user_id=wa_id,
+                                message_id=msg_id,
                                 message_type="text",
                                 text=text,
-                                created_at=datetime.utcnow(),
+                                created_at=created_at,
                             )
                         )
-                        continue
 
-                    # AUDIO / VOICE
-                    if msg_type in ("audio", "voice"):
-                        block = m.get(msg_type) or {}
-                        media_id = block.get("id")
-                        mime_type: Optional[str] = block.get("mime_type")
-
+                    elif m_type in ("audio", "voice"):
+                        media = (m.get(m_type) or {}) or {}
+                        media_id = (media.get("id") or "").strip()
                         if not media_id:
                             continue
 
                         out.append(
                             UnifiedMessage(
                                 channel="whatsapp",
-                                external_user_id=str(from_user),
-                                message_id=str(msg_id),
+                                external_user_id=wa_id,
+                                message_id=msg_id,
                                 message_type="audio",
-                                media_id=str(media_id),
-                                mime_type=mime_type,
-                                created_at=datetime.utcnow(),
+                                media_id=media_id,
+                                mime_type=media.get("mime_type"),
+                                created_at=created_at,
                             )
                         )
-                        continue
 
         return out

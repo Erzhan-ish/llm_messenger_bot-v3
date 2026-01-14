@@ -13,6 +13,9 @@ from app.logging import logger
 
 
 async def process_message(message):
+    if isinstance(message, dict):
+        from app.channels.base import UnifiedMessage
+        message = UnifiedMessage(**message)
     # 0️⃣ Dedup
     if await is_duplicate_message(
         channel=message.channel,
