@@ -11,6 +11,7 @@ from app.outbound.dispatcher import OutboundDispatcher
 from app.services.transcription_service import transcribe_audio
 from app.logging import logger
 
+from app.llm.providers import ask_llm
 
 async def process_message(message):
     if isinstance(message, dict):
@@ -123,7 +124,7 @@ async def process_message(message):
 
     # 6️⃣ LLM
     try:
-        reply = await ask_ollama(messages)
+        reply = await ask_llm(messages)
     except Exception:
         logger.exception("LLM failed")
         reply = "Я на связи. Давайте продолжим чуть позже."

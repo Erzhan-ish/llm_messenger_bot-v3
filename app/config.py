@@ -1,22 +1,32 @@
-from pydantic_settings import BaseSettings
+from __future__ import annotations
+
 from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
     # WhatsApp inbound
     WHATSAPP_VERIFY_TOKEN: str = ""
     META_APP_SECRET: str = ""
 
-    # WhatsApp outbound (на будущее)
+    # Signature check mode: off | log | strict
+    WHATSAPP_SIGNATURE_CHECK: str = "off"
+
+    # WhatsApp outbound
     WHATSAPP_TOKEN: str = ""
     WHATSAPP_PHONE_NUMBER_ID: str = ""
+    WHATSAPP_API_VERSION: str = "v19.0"
+
+    OUTBOUND_PROVIDER: str = "stub"  # real | stub
 
     # Telegram
-    TELEGRAM_TOKEN: str
+    TELEGRAM_TOKEN: str = ""
 
     # Database
     DATABASE_URL: str
 
-    # Ollama
+    # LLM
+    LLM_PROVIDER: str = Field(default="stub")  # stub | ollama
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "qwen2.5:7b-instruct"
 
@@ -35,9 +45,11 @@ class Settings(BaseSettings):
     STT_DEVICE: str = Field(default="cpu")
     STT_COMPUTE_TYPE: str = Field(default="int8")
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        extra="ignore",  # чтобы лишние env не валили запуск
+    )
 
 
 settings = Settings()
