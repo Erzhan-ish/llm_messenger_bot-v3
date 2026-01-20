@@ -42,6 +42,10 @@ class Session(Base):
 
     status: Mapped[str] = mapped_column(String(32), default="active", nullable=False) # active / closed
 
+    negative_handled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    dialog_state: Mapped[str] = mapped_column(String(32), nullable=False)
+
     last_activity_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="sessions")

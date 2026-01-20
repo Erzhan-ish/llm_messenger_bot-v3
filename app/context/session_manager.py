@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from sqlalchemy import select, update
+from sqlalchemy import select, update, desc
 from sqlalchemy.orm import load_only
 
 from app.storage.db import async_session
@@ -16,6 +16,7 @@ SESSION_TTL_HOURS = 24
 SESSION_STATUS_ACTIVE = "active"
 SESSION_STATUS_CLOSED = "closed"
 
+DEFAULT_DIALOG_STATE = "new"
 
 async def reset_session(channel: str, external_user_id: str) -> Session:
     """
@@ -49,36 +50,36 @@ async def reset_session(channel: str, external_user_id: str) -> Session:
 
 
 async def get_or_create_session(channel: str, external_user_id: str) -> Session:
-    """
-    Возвращает активную сессию.
-    Если активная сессия старше TTL — закрывает её и создаёт новую.
-
-    ВАЖНО:
-    - если активных сессий несколько (из-за гонки/старых багов) —
-      оставляем самую свежую, остальные закрываем.
-    - берём активную сессию всегда с сортировкой (последняя по last_activity_at).
-    - используем SELECT ... FOR UPDATE, чтобы снизить вероятность гонки на PostgreSQL.
-      На SQLite with_for_update() игнорируется, но логика закрытия дублей всё равно спасает.
-    """
     user = await get_or_create_user(channel, external_user_id)
 
     now = datetime.utcnow()
     ttl_border = now - timedelta(hours=SESSION_TTL_HOURS)
 
     async with async_session() as db:
-        # В идеале это работает на Postgres, на SQLite просто игнорируется.
         stmt = (
             select(Session)
-            .options(load_only(Session.id, Session.status, Session.last_activity_at, Session.user_id))
-            .where(Session.user_id == user.id, Session.status == SESSION_STATUS_ACTIVE)
+            .options(
+                load_only(
+                    Session.id,
+                    Session.status,
+                    Session.last_activity_at,
+                    Session.user_id,
+                    Session.dialog_state,
+                    Session.negative_handled,
+                )
+            )
+            .where(
+                Session.user_id == user.id,
+                Session.status == SESSION_STATUS_ACTIVE,
+            )
             .order_by(Session.last_activity_at.desc(), Session.id.desc())
-            .with_for_update()
         )
+
         res = await db.execute(stmt)
         active_sessions = list(res.scalars().all())
-
-        # Если активных несколько — оставляем самую свежую, остальные закрываем
         active_session = active_sessions[0] if active_sessions else None
+
+        # 1️⃣ если активных несколько — закрываем лишние
         if len(active_sessions) > 1:
             extra_ids = [s.id for s in active_sessions[1:]]
             await db.execute(
@@ -89,23 +90,25 @@ async def get_or_create_session(channel: str, external_user_id: str) -> Session:
             await db.commit()
             logger.warning(
                 "Multiple active sessions detected | user_id={} | kept={} | closed_ids={}",
-                user.id, active_session.id if active_session else None, extra_ids
+                user.id,
+                active_session.id if active_session else None,
+                extra_ids,
             )
 
-        # Если есть активная — проверяем TTL
+        # 2️⃣ если есть активная
         if active_session:
+            # TTL истёк → закрываем и создаём новую
             if active_session.last_activity_at and active_session.last_activity_at < ttl_border:
-                # Закрываем старую
                 await db.execute(
                     update(Session)
                     .where(Session.id == active_session.id)
                     .values(status=SESSION_STATUS_CLOSED, last_activity_at=now)
                 )
 
-                # Создаём новую
                 new_session = Session(
                     user_id=user.id,
                     status=SESSION_STATUS_ACTIVE,
+                    dialog_state=DEFAULT_DIALOG_STATE,
                     last_activity_at=now,
                 )
                 db.add(new_session)
@@ -113,7 +116,7 @@ async def get_or_create_session(channel: str, external_user_id: str) -> Session:
                 await db.refresh(new_session)
                 return new_session
 
-            # Живая — touch
+            # 🔒 АКТИВНАЯ И ЖИВАЯ — ТРОГАЕМ И ВОЗВРАЩАЕМ
             await db.execute(
                 update(Session)
                 .where(Session.id == active_session.id)
@@ -121,14 +124,24 @@ async def get_or_create_session(channel: str, external_user_id: str) -> Session:
             )
             await db.commit()
 
-            # Обновим объект минимально
-            active_session.last_activity_at = now
-            return active_session
+            # dialog_state защита
+            if not active_session.dialog_state:
+                await db.execute(
+                    update(Session)
+                    .where(Session.id == active_session.id)
+                    .values(dialog_state=DEFAULT_DIALOG_STATE)
+                )
+                await db.commit()
+                active_session.dialog_state = DEFAULT_DIALOG_STATE
 
-        # Активной нет — создаём
+            active_session.last_activity_at = now
+            return active_session  # ⬅⬅⬅ КЛЮЧЕВОЕ
+
+        # 3️⃣ активной НЕТ вообще → создаём
         new_session = Session(
             user_id=user.id,
             status=SESSION_STATUS_ACTIVE,
+            dialog_state=DEFAULT_DIALOG_STATE,
             last_activity_at=now,
         )
         db.add(new_session)

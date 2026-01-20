@@ -69,11 +69,29 @@ async def touch_session_activity(session_id: int) -> None:
         )
         await session.commit()
 
-async def update_session_status(session_id: int, status: str) -> None:
-    async with async_session() as session:
-        await session.execute(
+
+async def update_session_status(session_id: int, dialog_state: str) -> None:
+    async with async_session() as db:
+        await db.execute(
             update(Session)
             .where(Session.id == session_id)
-            .values(status=status, last_activity_at=datetime.utcnow())
+            .values(dialog_state=dialog_state)
         )
-        await session.commit()
+        await db.commit()
+
+
+async def set_dialog_state(session_id: int, dialog_state: str) -> None:
+    async with async_session() as db:
+        await db.execute(
+            update(Session).where(Session.id == session_id).values(dialog_state=dialog_state)
+        )
+        await db.commit()
+
+async def set_negative_handled(session_id: int, value: bool = True) -> None:
+    async with async_session() as db:
+        await db.execute(
+            update(Session)
+            .where(Session.id == session_id)
+            .values(negative_handled=value)
+        )
+        await db.commit()

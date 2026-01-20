@@ -18,6 +18,7 @@ async def get_user(channel: str, external_user_id: str) -> User | None:
         return res.scalar_one_or_none()
 
 
+
 async def get_or_create_user(channel: str, external_user_id: str) -> User:
     async with async_session() as session:
         res = await session.execute(
@@ -32,5 +33,8 @@ async def get_or_create_user(channel: str, external_user_id: str) -> User:
 
         user = User(channel=channel, external_user_id=external_user_id)
         session.add(user)
-        await session.flush()  # получить user.id
+
+        await session.flush()      # получить user.id
+        await session.commit()     # ВАЖНО: сохранить в БД
+        await session.refresh(user)
         return user

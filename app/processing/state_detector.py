@@ -3,10 +3,41 @@ from app.logging import logger
 
 
 class DialogState(str, Enum):
+    # 🔴 эмоциональные (приоритет)
+    AGGRESSIVE = "aggressive"
+    NEGATIVE = "negative"
+
+    # 🟢 бизнес-логика (как было)
     INTERESTED = "interested"
     NOT_INTERESTED = "not_interested"
     LATER = "later"
     IN_PROGRESS = "in_progress"
+
+class DialogTone(Enum):
+    NORMAL = "normal"
+    NEGATIVE = "negative"
+    AGGRESSIVE = "aggressive"
+
+AGGRESSIVE_KEYWORDS = (
+    "нахуй",
+    "пошел",
+    "иди",
+    "суд",
+    "прокуратур",
+    "роскомнадзор",
+    "жалоб",
+    "заявлен",
+    "угрож",
+)
+
+NEGATIVE_KEYWORDS = (
+    "не пишите",
+    "не надо",
+    "хватит",
+    "отстаньте",
+    "уберите",
+    "прекратите",
+)
 
 
 # ключевые фразы — MVP
@@ -40,13 +71,29 @@ LATER_KEYWORDS = (
 
 def detect_state(text: str) -> DialogState:
     """
-    Определяет текущее состояние диалога по тексту пользователя
+    Расширенный детектор:
+    1️⃣ агрессия
+    2️⃣ негатив
+    3️⃣ бизнес-состояния
     """
     if not text:
         return DialogState.IN_PROGRESS
 
     t = text.lower()
 
+    # 🔴 1. Агрессия — абсолютный приоритет
+    for kw in AGGRESSIVE_KEYWORDS:
+        if kw in t:
+            logger.info("Dialog state detected: AGGRESSIVE")
+            return DialogState.AGGRESSIVE
+
+    # 🟠 2. Негатив
+    for kw in NEGATIVE_KEYWORDS:
+        if kw in t:
+            logger.info("Dialog state detected: NEGATIVE")
+            return DialogState.NEGATIVE
+
+    # 🟢 3. Бизнес-состояния (как было)
     for kw in INTERESTED_KEYWORDS:
         if kw in t:
             logger.info("Dialog state detected: INTERESTED")
