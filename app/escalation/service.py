@@ -44,7 +44,7 @@ async def escalate_to_manager(session):
         manager_id=manager_id,
         client_fio=session.user_fio,
         need=session.client_need,
-        dialog_file_id=file_id,
+        dialog_file=file_id,
     )
 
     await mark_escalated(session.id)
