@@ -95,3 +95,22 @@ async def set_negative_handled(session_id: int, value: bool = True) -> None:
             .values(negative_handled=value)
         )
         await db.commit()
+
+async def mark_escalated(session_id: int):
+    async with async_session() as db:
+        await db.execute(
+            update(Session)
+            .where(Session.id == session_id)
+            .values(
+                escalated_at=datetime.utcnow(),
+                status="escalated",
+            )
+        )
+
+async def set_client_need(session_id: int, need: str):
+    async with async_session() as db:
+        await db.execute(
+            update(Session)
+            .where(Session.id == session_id, Session.client_need.is_(None))
+            .values(client_need=need)
+        )

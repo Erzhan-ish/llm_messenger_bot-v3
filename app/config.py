@@ -5,6 +5,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    # bitrix
+    BITRIX_WEBHOOK_URL: str = ""
+
     # WhatsApp inbound
     WHATSAPP_VERIFY_TOKEN: str = ""
     META_APP_SECRET: str = ""

@@ -40,6 +40,12 @@ class Session(Base):
 
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
 
+    user_fio: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    client_need: Mapped[str | None] = mapped_column(String(256), nullable=True)
+
+    escalated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     status: Mapped[str] = mapped_column(String(32), default="active", nullable=False) # active / closed
 
     negative_handled: Mapped[bool] = mapped_column(Boolean, default=False)

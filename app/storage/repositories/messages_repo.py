@@ -70,3 +70,20 @@ async def get_last_messages(
         messages = result.scalars().all()
         return list(reversed(messages))
 
+async def get_messages_by_session(session_id: int) -> list[dict]:
+    async with async_session() as session:
+        res = await session.execute(
+            select(Message)
+            .where(Message.session_id == session_id)
+            .order_by(Message.created_at.asc())
+        )
+        messages = res.scalars().all()
+
+    return [
+        {
+            "role": m.role,
+            "text": m.text,
+            "created_at": m.created_at,
+        }
+        for m in messages
+    ]

@@ -11,8 +11,22 @@ from app.outbound.dispatcher import OutboundDispatcher
 from app.services.transcription_service import transcribe_audio
 from app.logging import logger
 import random
+import datetime
+from app.services.client_need_detector import detect_client_need
+from app.storage.repositories.sessions_repo import set_client_need
+from app.storage.repositories.messages_repo import get_messages_by_session
+from app.escalation.service import is_ready_for_escalation, escalate_to_manager
 
 
+from app.storage.repositories.sessions_repo import (
+    update_session_status,
+    set_dialog_state,
+    mark_escalated,
+)
+from app.escalation.service import (
+    is_ready_for_escalation,
+    escalate_to_manager
+)
 from app.llm.providers import ask_llm
 
 manager_nickname = "Алексей"
@@ -228,6 +242,19 @@ async def process_message(message):
         channel=message.channel,
     )
 
+    # 🔹 Попытка определить потребность клиента
+    if session.client_need is None:
+        messages = await get_messages_by_session(session.id)
+        dialog_text = "\n".join(
+            f"{m['role']}: {m['text']}" for m in messages if m["text"]
+        )
+
+        need = await detect_client_need(dialog_text)
+
+        if need != "UNKNOWN":
+            await set_client_need(session.id, need)
+            session.client_need = need
+
     # 8️⃣ State (бизнес-состояние)
     state = detect_state(message.text)
     await update_session_status(session.id, state.value)
@@ -238,3 +265,10 @@ async def process_message(message):
         external_user_id=message.external_user_id,
         text=reply,
     )
+
+    # 🔟 ЭСКАЛАЦИЯ
+    if is_ready_for_escalation(session):
+        await escalate_to_manager(session)
+
+        await mark_escalated(session.id)
+        session.escalated_at = datetime.utcnow()
