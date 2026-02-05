@@ -13,11 +13,6 @@ class DialogState(str, Enum):
     LATER = "later"
     IN_PROGRESS = "in_progress"
 
-class DialogTone(Enum):
-    NORMAL = "normal"
-    NEGATIVE = "negative"
-    AGGRESSIVE = "aggressive"
-
 AGGRESSIVE_KEYWORDS = (
     "нахуй",
     "пошел",
@@ -71,43 +66,36 @@ LATER_KEYWORDS = (
 
 def detect_state(text: str) -> DialogState:
     """
-    Расширенный детектор:
-    1️⃣ агрессия
-    2️⃣ негатив
-    3️⃣ бизнес-состояния
+    Детектор ТОЛЬКО управляющих состояний.
+    Не вмешивается в нормальный диалог.
     """
     if not text:
         return DialogState.IN_PROGRESS
 
     t = text.lower()
 
-    # 🔴 1. Агрессия — абсолютный приоритет
+    # 🔴 Агрессия — абсолютный приоритет
     for kw in AGGRESSIVE_KEYWORDS:
         if kw in t:
             logger.info("Dialog state detected: AGGRESSIVE")
             return DialogState.AGGRESSIVE
 
-    # 🟠 2. Негатив
+    # 🟠 Негатив (прекратить / не писать)
     for kw in NEGATIVE_KEYWORDS:
         if kw in t:
             logger.info("Dialog state detected: NEGATIVE")
             return DialogState.NEGATIVE
 
-    # 🟢 3. Бизнес-состояния (как было)
-    for kw in INTERESTED_KEYWORDS:
-        if kw in t:
-            logger.info("Dialog state detected: INTERESTED")
-            return DialogState.INTERESTED
-
-    for kw in NOT_INTERESTED_KEYWORDS:
-        if kw in t:
-            logger.info("Dialog state detected: NOT_INTERESTED")
-            return DialogState.NOT_INTERESTED
-
+    # 🔵 Отложить
     for kw in LATER_KEYWORDS:
         if kw in t:
             logger.info("Dialog state detected: LATER")
             return DialogState.LATER
 
-    logger.info("Dialog state detected: IN_PROGRESS")
+    # ⚪ Явный отказ
+    for kw in NOT_INTERESTED_KEYWORDS:
+        if kw in t:
+            logger.info("Dialog state detected: NOT_INTERESTED")
+            return DialogState.NOT_INTERESTED
+
     return DialogState.IN_PROGRESS

@@ -26,26 +26,39 @@ async def reset_session(channel: str, external_user_id: str) -> Session:
     now = datetime.utcnow()
 
     async with async_session() as db:
-        # Закрываем все активные (если их несколько — тоже)
+        # Закрываем все активные
         await db.execute(
             update(Session)
-            .where(Session.user_id == user.id, Session.status == SESSION_STATUS_ACTIVE)
-            .values(status=SESSION_STATUS_CLOSED, last_activity_at=now)
+            .where(
+                Session.user_id == user.id,
+                Session.status == SESSION_STATUS_ACTIVE,
+            )
+            .values(
+                status=SESSION_STATUS_CLOSED,
+                last_activity_at=now,
+            )
         )
 
+        # 🔹 СОЗДАЁМ НОВУЮ СЕССИЮ С dialog_state
         new_session = Session(
             user_id=user.id,
             status=SESSION_STATUS_ACTIVE,
+            dialog_state=DEFAULT_DIALOG_STATE,   # ← КЛЮЧЕВО
+            negative_handled=False,
             last_activity_at=now,
         )
+
         db.add(new_session)
         await db.commit()
         await db.refresh(new_session)
 
         logger.info(
             "Session reset | channel={} | external_user_id={} | new_session_id={}",
-            channel, external_user_id, new_session.id
+            channel,
+            external_user_id,
+            new_session.id,
         )
+
         return new_session
 
 
@@ -58,16 +71,6 @@ async def get_or_create_session(channel: str, external_user_id: str) -> Session:
     async with async_session() as db:
         stmt = (
             select(Session)
-            .options(
-                load_only(
-                    Session.id,
-                    Session.status,
-                    Session.last_activity_at,
-                    Session.user_id,
-                    Session.dialog_state,
-                    Session.negative_handled,
-                )
-            )
             .where(
                 Session.user_id == user.id,
                 Session.status == SESSION_STATUS_ACTIVE,

@@ -35,6 +35,7 @@ async def create_new_session(user_id: int) -> Session:
             user_id=user_id,
             status="active",
             last_activity_at=datetime.utcnow(),
+            collected_data={},
         )
         session.add(new_session)
         await session.commit()
@@ -70,16 +71,6 @@ async def touch_session_activity(session_id: int) -> None:
         await session.commit()
 
 
-async def update_session_status(session_id: int, dialog_state: str) -> None:
-    async with async_session() as db:
-        await db.execute(
-            update(Session)
-            .where(Session.id == session_id)
-            .values(dialog_state=dialog_state)
-        )
-        await db.commit()
-
-
 async def set_dialog_state(session_id: int, dialog_state: str) -> None:
     async with async_session() as db:
         await db.execute(
@@ -96,7 +87,7 @@ async def set_negative_handled(session_id: int, value: bool = True) -> None:
         )
         await db.commit()
 
-async def mark_escalated(session_id: int):
+async def mark_escalated(session_id: int) -> None:
     async with async_session() as db:
         await db.execute(
             update(Session)
@@ -106,11 +97,59 @@ async def mark_escalated(session_id: int):
                 status="escalated",
             )
         )
+        await db.commit()
 
-async def set_client_need(session_id: int, need: str):
+async def set_client_need(session_id: int, need: str) -> None:
     async with async_session() as db:
         await db.execute(
             update(Session)
-            .where(Session.id == session_id, Session.client_need.is_(None))
+            .where(
+                Session.id == session_id,
+                Session.client_need.is_(None),
+            )
             .values(client_need=need)
         )
+        await db.commit()
+
+
+async def get_client_need(session_id: int) -> str | None:
+    async with async_session() as db:
+        res = await db.execute(
+            select(Session.client_need).where(Session.id == session_id)
+        )
+        return res.scalar_one_or_none()
+
+
+async def is_escalated(session_id: int) -> bool:
+    async with async_session() as db:
+        res = await db.execute(
+            select(Session.escalated_at)
+            .where(Session.id == session_id)
+        )
+        return res.scalar_one_or_none() is not None
+
+
+async def get_session_by_id(session_id: int) -> Session | None:
+    async with async_session() as db:
+        res = await db.execute(
+            select(Session).where(Session.id == session_id)
+        )
+        return res.scalar_one_or_none()
+
+async def get_slots(session_id: int) -> dict:
+    session = await get_session_by_id(session_id)
+    if not session or not session.collected_data:
+        return {}
+    return dict(session.collected_data)
+
+
+async def set_slots(session_id: int, slots: dict) -> None:
+    async with async_session() as db:
+        await db.execute(
+            update(Session)
+            .where(Session.id == session_id)
+            .values(collected_data=slots)
+        )
+        await db.commit()
+
+
