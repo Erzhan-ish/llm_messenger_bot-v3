@@ -6,6 +6,13 @@ from app.storage.db import async_session
 from app.storage.models import Session, User
 
 
+async def get_client_need(session_id: int) -> str | None:
+    async with async_session() as db:
+        res = await db.execute(
+            select(Session.client_need).where(Session.id == session_id)
+        )
+        return res.scalar_one_or_none()
+
 
 async def close_active_session(user_id: int) -> None:
     """
