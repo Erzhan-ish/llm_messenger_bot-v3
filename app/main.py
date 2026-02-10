@@ -33,6 +33,6 @@ app.include_router(debug_router_out)
 app.include_router(debug_router_sess)
 
 
-app.include_router(telegram_router, prefix="/webhook/telegram")
-app.include_router(whatsapp_router, prefix="/webhook/whatsapp")
+app.include_router(telegram_router, prefix="/telegram/webhook")
+app.include_router(whatsapp_router, prefix="/whatsapp/webhook")
 app.include_router(health_router)

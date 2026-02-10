@@ -1,3 +1,4 @@
+# app/channels/telegram_adapter.py
 from datetime import datetime
 from app.channels.base import UnifiedMessage
 from app.logging import logger
@@ -5,12 +6,40 @@ from app.logging import logger
 
 class TelegramAdapter:
     @staticmethod
+    async def from_payload(payload: dict) -> UnifiedMessage:
+        """
+        Используется webhook'ом Telegram (raw JSON)
+        """
+        message = payload.get("message")
+
+        if not message:
+            raise ValueError("Telegram payload without message")
+
+        # имитируем объект с .message
+        class Update:
+            pass
+
+        class Msg:
+            pass
+
+        update = Update()
+        msg = Msg()
+
+        msg.message_id = message["message_id"]
+        msg.text = message.get("text")
+        msg.chat = type("Chat", (), {"id": message["chat"]["id"]})
+
+        update.message = msg
+
+        return await TelegramAdapter.to_unified(update)
+
+    @staticmethod
     async def to_unified(update) -> UnifiedMessage:
         msg = update.message
 
         return UnifiedMessage(
             channel="telegram",
-            external_user_id=str(msg.chat.id),      # ВАЖНО: chat.id
+            external_user_id=str(msg.chat.id),
             message_id=str(msg.message_id),
             message_type="text",
             text=msg.text,

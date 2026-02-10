@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     WHATSAPP_TOKEN: str = ""
     WHATSAPP_PHONE_NUMBER_ID: str = ""
     WHATSAPP_API_VERSION: str = "v19.0"
+    WHATSAPP_TEMPLATE_LANG: str = "ru_RU"
 
     OUTBOUND_PROVIDER: str = "stub"  # real | stub
 

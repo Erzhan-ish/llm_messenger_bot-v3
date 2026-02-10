@@ -50,7 +50,9 @@ class Session(Base):
 
     negative_handled: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    dialog_state: Mapped[str] = mapped_column(String(32), nullable=False)
+    dialog_state: Mapped[str] = mapped_column(String(32), nullable=False, default="new")
+
+    collected_data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default={})
 
     last_activity_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
