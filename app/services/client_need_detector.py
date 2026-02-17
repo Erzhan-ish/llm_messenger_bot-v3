@@ -17,6 +17,16 @@ ALLOWED_NEEDS = {
     "UNKNOWN",
 }
 
+NEED_LABELS = {
+    "OPEN_ACCOUNT": "Открытие счёта",
+    "OPEN_SPECIAL_ACCOUNT": "Открытие спецсчёта",
+    "CONDITIONS": "Условия",
+    "DOCUMENTS": "Документы",
+    "CONSULTATION": "Консультация",
+    "SUPPORT": "Поддержка",
+    "UNKNOWN": "Консультация",
+}
+
 SYSTEM_PROMPT = """
 Ты классификатор клиентской потребности.
 Определи основную потребность клиента по диалогу.
@@ -91,9 +101,23 @@ async def detect_client_need(dialog_text: str) -> str:
     try:
         raw = await ask_llm(messages)
         data = _extract_json(raw)
-        if not isinstance(data, dict):
-            return "UNKNOWN"
-
-        return _normalize_need(data.get("client_need"))
+        if isinstance(data, dict):
+            norm = _normalize_need(data.get("client_need"))
+            return NEED_LABELS.get(norm, "Консультация")
+        # fall through to heuristic
     except Exception:
-        return "UNKNOWN"
+        return "Консультация"
+
+    # Fallback heuristic if model didn't return JSON
+    t = (dialog_text or "").lower()
+    if "спец" in t or "задат" in t or "залог" in t:
+        return NEED_LABELS["OPEN_SPECIAL_ACCOUNT"]
+    if "открыть" in t or "открытие" in t or "нужно открыть" in t:
+        return NEED_LABELS["OPEN_ACCOUNT"]
+    if "документ" in t:
+        return NEED_LABELS["DOCUMENTS"]
+    if "услов" in t or "комис" in t or "срок" in t:
+        return NEED_LABELS["CONDITIONS"]
+    if "поддерж" in t or "помог" in t:
+        return NEED_LABELS["SUPPORT"]
+    return NEED_LABELS["CONSULTATION"]

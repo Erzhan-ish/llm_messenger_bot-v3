@@ -197,7 +197,11 @@ class KnowledgeBase:
             return cls(chunks, default_top_k=default_top_k)
 
         logger.info("KB cache not found, building | source={}", str(source_path))
-        chunks = _build_from_source(source_path, chunk_chars=chunk_chars)
+        chunks = _build_from_source(
+            source_path,
+            chunk_chars=chunk_chars,
+            overlap_chars=overlap_chars,
+        )
 
         _save_cache(cache_path, chunks)
         logger.info("KB built and cached | chunks={} | path={}", len(chunks), str(cache_path))
@@ -225,17 +229,15 @@ class KnowledgeBase:
     @staticmethod
     def format_snippets(chunks: List[KBChunk], *, max_chars_per_chunk: int = 700) -> str:
         lines: List[str] = []
-        for i, ch in enumerate(chunks, start=1):
+        for ch in chunks:
             text = _compact_spaces(ch.text)
             if len(text) > max_chars_per_chunk:
                 text = text[: max_chars_per_chunk - 1].rstrip() + "…"
-
-            meta = f"(стр. {ch.page_start}-{ch.page_end})" if (ch.page_start and ch.page_end) else "(KB)"
-            lines.append(f"[{i}] {meta} {text}")
-        return "\n".join(lines)
+            lines.append(text)
+        return "\n\n".join(lines)
 
 
-def _build_from_source(source_path: Path, *, chunk_chars: int) -> List[KBChunk]:
+def _build_from_source(source_path: Path, *, chunk_chars: int, overlap_chars: int) -> List[KBChunk]:
     ext = source_path.suffix.lower().strip(".")
     source = source_path.name
 
@@ -252,6 +254,7 @@ def _build_from_source(source_path: Path, *, chunk_chars: int) -> List[KBChunk]:
         full_text,
         source=source,
         chunk_chars=chunk_chars,
+        overlap_chars=overlap_chars,
     )
 
 
@@ -285,7 +288,7 @@ def _read_docx(docx_path: Path) -> str:
     return "\n\n".join(parts)
 
 
-def _chunk_whole_text(text: str, *, source: str, chunk_chars: int) -> List[KBChunk]:
+def _chunk_whole_text(text: str, *, source: str, chunk_chars: int, overlap_chars: int) -> List[KBChunk]:
     text = _normalize_keep_newlines(text)
     if not text:
         logger.warning("KB source is empty after normalization | source={}", source)
@@ -294,7 +297,7 @@ def _chunk_whole_text(text: str, *, source: str, chunk_chars: int) -> List[KBChu
     # IMPORTANT: fix artifacts BEFORE chunking
     text = _fix_artifacts(text)
 
-    pieces = _chunk_text(text, chunk_chars=chunk_chars)
+    pieces = _chunk_text(text, chunk_chars=chunk_chars, overlap_chars=overlap_chars)
 
     chunks: List[KBChunk] = []
     for i, piece in enumerate(pieces, start=1):
@@ -419,10 +422,20 @@ def _chunk_text(text: str, *, chunk_chars: int, overlap_chars: int) -> List[str]
 
     flush()
 
-    chunks = _add_sentence_overlap(chunks, overlap_sents=2, max_len=chunk_chars)
+    # overlap_chars -> overlap_sents (реально используем параметр)
+    # 0 => без overlap
+    # <120 => 1 предложение
+    # >=120 => 2 предложения (дефолт 160)
+    if overlap_chars <= 0:
+        overlap_sents = 0
+    elif overlap_chars < 120:
+        overlap_sents = 1
+    else:
+        overlap_sents = 2
+
+    chunks = _add_sentence_overlap(chunks, overlap_sents=overlap_sents, max_len=chunk_chars)
 
     return chunks
-
 
 
 def _save_cache(cache_path: Path, chunks: List[KBChunk]) -> None:
@@ -459,6 +472,32 @@ def _load_cache(cache_path: Path) -> List[KBChunk]:
     return chunks
 
 
+_RU_ENDINGS = [
+    "иями", "ями", "ами",
+    "иям", "ием", "иях", "ьях",
+    "ыми", "ими",
+    "ого", "его", "ому", "ему",
+    "ая", "яя", "ое", "ее", "ую", "юю",
+    "ий", "ый", "ой", "ие", "ые",
+    "ях", "ах", "ам", "ям",
+    "ом", "ем", "им", "ым",
+    "ов", "ев", "ей", "ью", "ья",
+    "а", "я", "у", "ю", "е", "и", "ы", "о",
+]
+
+
+def _normalize_term(t: str) -> str:
+    t = (t or "").lower()
+    if len(t) < 4:
+        return t
+    if not re.search(r"[а-яё]", t):
+        return t
+    for end in _RU_ENDINGS:
+        if t.endswith(end) and len(t) - len(end) >= 3:
+            return t[: -len(end)]
+    return t
+
+
 def _term_counts(text: str) -> Dict[str, int]:
     text = (text or "").lower()
     terms = _WORD_RE.findall(text)
@@ -467,6 +506,9 @@ def _term_counts(text: str) -> Dict[str, int]:
         if len(t) <= 1:
             continue
         counts[t] = counts.get(t, 0) + 1
+        nt = _normalize_term(t)
+        if nt and nt != t:
+            counts[nt] = counts.get(nt, 0) + 1
     return counts
 
 

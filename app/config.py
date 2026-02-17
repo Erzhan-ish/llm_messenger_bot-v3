@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     # bitrix
     BITRIX_WEBHOOK_URL: str = ""
+    DUTY_MANAGER_ID: int | None = None
+    BITRIX_DISK_FOLDER_ID: int | None = None
 
     # WhatsApp inbound
     WHATSAPP_VERIFY_TOKEN: str = ""
@@ -54,6 +56,13 @@ class Settings(BaseSettings):
         case_sensitive=True,
         extra="ignore",  # чтобы лишние env не валили запуск
     )
+
+    @field_validator("DUTY_MANAGER_ID", "BITRIX_DISK_FOLDER_ID", mode="before")
+    @classmethod
+    def _empty_str_to_none(cls, v):
+        if v == "" or v is None:
+            return None
+        return v
 
 
 settings = Settings()

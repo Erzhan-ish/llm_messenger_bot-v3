@@ -8,6 +8,7 @@ DEFAULT_SLOTS: Dict[str, Optional[object]] = {
     "debtor_type": None,        # "ФЛ" / "ЮЛ"
     "account_type": None,       # "ОСНОВНОЙ" / "ЗАДАТКОВЫЙ" / "ЗАЛОГОВЫЙ" / "СПЕЦ"
     "procedure_type": None,     # "НАБЛЮДЕНИЕ" / "КОНКУРСНОЕ" / "РЕАЛИЗАЦИЯ" / ...
+    "inn": None,                # ИНН (10 или 12 цифр)
     "email": None,              # опционально
     "documents_ready": None,    # True/False (важно: False валидно)
     "_asked": [],
@@ -28,6 +29,8 @@ CRITICAL_SLOTS_ORDER: List[str] = ESCALATION_SLOTS_ORDER
 CRITICAL_SLOTS: Set[str] = set(CRITICAL_SLOTS_ORDER)  # <-- ВОТ ЭТО нужно app/escalation/service.py
 
 _EMAIL_RE = re.compile(r"(?i)\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b")
+_INN_RE = re.compile(r"\b(\d{10}|\d{12})\b")
+_INN_LABELED_RE = re.compile(r"(?i)\bинн[:\s]*([0-9]{10}|[0-9]{12})\b")
 
 
 def normalize_email(text: str) -> Optional[str]:
@@ -75,6 +78,16 @@ def extract_slots(text: str, slots: Dict) -> Dict:
     email = normalize_email(text or "")
     if email:
         slots["email"] = email
+
+    # inn (10/12 digits, prefer labeled)
+    if slots.get("inn") is None:
+        labeled = _INN_LABELED_RE.search(text or "")
+        if labeled:
+            slots["inn"] = labeled.group(1)
+        else:
+            m = _INN_RE.search(text or "")
+            if m:
+                slots["inn"] = m.group(1)
 
     return slots
 
