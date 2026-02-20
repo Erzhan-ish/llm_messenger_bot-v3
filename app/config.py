@@ -25,6 +25,10 @@ class Settings(BaseSettings):
 
     OUTBOUND_PROVIDER: str = "stub"  # real | stub
 
+    # Wazzup
+    WAZZUP_API_URL: str = "https://api.wazzup24.com/v3"
+    WAZZUP_API_KEY: str = ""
+
     # Telegram
     TELEGRAM_TOKEN: str = ""
 

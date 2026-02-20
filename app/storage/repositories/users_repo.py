@@ -38,3 +38,15 @@ async def get_or_create_user(channel: str, external_user_id: str) -> User:
         await session.commit()     # ВАЖНО: сохранить в БД
         await session.refresh(user)
         return user
+
+
+async def update_wazzup_meta(user_id: int, channel_id: str | None, chat_type: str | None) -> None:
+    async with async_session() as session:
+        user = await session.get(User, user_id)
+        if not user:
+            return
+        if channel_id:
+            user.wazzup_channel_id = channel_id
+        if chat_type:
+            user.wazzup_chat_type = chat_type
+        await session.flush()

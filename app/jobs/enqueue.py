@@ -18,6 +18,8 @@ def _to_payload(msg: UnifiedMessage) -> dict[str, Any]:
         "mime_type": getattr(msg, "mime_type", None),
         "text": msg.text,
         "audio_path": getattr(msg, "audio_path", None),
+        "chat_type": getattr(msg, "chat_type", None),
+        "wazzup_channel_id": getattr(msg, "wazzup_channel_id", None),
         "created_at": msg.created_at.isoformat() if getattr(msg, "created_at", None) else None,
     }
 

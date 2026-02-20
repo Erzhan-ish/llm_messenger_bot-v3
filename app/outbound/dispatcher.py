@@ -1,5 +1,6 @@
 from app.outbound.whatsapp import send_whatsapp
 from app.outbound.telegram import send_telegram
+from app.outbound.wazzup import send_wazzup
 from app.logging import logger
 from app.config import settings
 
@@ -27,6 +28,13 @@ class OutboundDispatcher:
 
         if channel == "whatsapp":
             await send_whatsapp(
+                external_user_id=external_user_id,
+                text=text,
+            )
+            return
+
+        if channel == "wazzup":
+            await send_wazzup(
                 external_user_id=external_user_id,
                 text=text,
             )

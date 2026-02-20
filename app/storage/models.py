@@ -27,6 +27,8 @@ class User(Base):
     channel: Mapped[str] = mapped_column(String(20), nullable=False)
 
     external_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    wazzup_channel_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    wazzup_chat_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 

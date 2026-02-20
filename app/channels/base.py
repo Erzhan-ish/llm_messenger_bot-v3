@@ -5,7 +5,7 @@ from typing import Literal, Optional
 
 @dataclass
 class UnifiedMessage:
-    channel: Literal["telegram", "whatsapp"]
+    channel: Literal["telegram", "whatsapp", "wazzup"]
 
     external_user_id: str
     message_id: str
@@ -17,6 +17,10 @@ class UnifiedMessage:
     # WhatsApp media
     media_id: Optional[str] = None
     mime_type: Optional[str] = None
+
+    # Wazzup transport metadata
+    chat_type: Optional[str] = None
+    wazzup_channel_id: Optional[str] = None
 
     # payload
     text: Optional[str] = None

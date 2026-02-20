@@ -39,16 +39,19 @@ from app.llm.prompts.manager.loader import build_manager_system_prompt
 from app.knowledge_base.service import get_kb_snippets
 from app.llm.providers import ask_llm
 
-# --- Escalation ---
+from app.services.escalation_detector import detect_escalation_signal
+
+
+# --- Escalation (NEW ONLY) ---
 ENABLE_ESCALATION_CALL = True
 try:
     from app.escalation.service import escalate_to_manager  # type: ignore
 except Exception:
     escalate_to_manager = None  # type: ignore
 
-
 manager_nickname = "Алексей"
 scenario = "INBOUND_QUESTION"
+
 
 # ----------------------------
 # Intent / mode
@@ -87,11 +90,6 @@ def next_missing_slot_for_onboarding(slots: dict) -> Optional[str]:
     return None
 
 
-def is_ready_for_escalation(slots: dict) -> bool:
-    required = ["account_type", "debtor_type", "procedure_type", "inn", "documents_ready"]
-    return all(slots.get(k) is not None for k in required)
-
-
 # ----------------------------
 # Clean / safety
 # ----------------------------
@@ -99,6 +97,7 @@ BAD_PREFIX_RE = re.compile(r"(?is)^\s*(ответ\s*:|цитата\s*:)\s*")
 THIRD_PERSON_RE = re.compile(
     r"(?is)\b(я\s+буду\s+отвечать|клиент\s+спросил|не\s+вижу\s+информации|уточню\s+у\s+менеджера)\b"
 )
+
 
 def cleanup_text(text: str) -> str:
     if not text:
@@ -116,11 +115,9 @@ def split_user_questions(text: str) -> list[str]:
     t = (text or "").strip()
     if not t:
         return []
-    # по пустым строкам
     parts = [p.strip() for p in re.split(r"\n{2,}", t) if p.strip()]
     out: list[str] = []
     for p in parts:
-        # если несколько вопросов в одном куске — режем по '?'
         if p.count("?") >= 2:
             buf = []
             for chunk in re.split(r"(\?)", p):
@@ -138,43 +135,42 @@ def split_user_questions(text: str) -> list[str]:
     return out or [t]
 
 
-# --- Relevance gate to kill “не по теме” answers ---
+# --- Relevance gate ---
 _STOP = {
-    "и","а","но","что","это","как","ли","в","на","по","про","для","у","я","мы",
-    "вы","он","она","они","с","со","к","из","же","то","так","тоже","уже","ещё",
-    "еще","при","без","или","либо","когда","сколько","какой","какая","какие"
+    "и", "а", "но", "что", "это", "как", "ли", "в", "на", "по", "про", "для", "у", "я", "мы",
+    "вы", "он", "она", "они", "с", "со", "к", "из", "же", "то", "так", "тоже", "уже", "ещё",
+    "еще", "при", "без", "или", "либо", "когда", "сколько", "какой", "какая", "какие"
 }
+
 
 def _keywords(s: str) -> set[str]:
     s = (s or "").lower()
     toks = re.findall(r"[a-zа-яё0-9%]+", s, flags=re.IGNORECASE)
     toks = [t for t in toks if t not in _STOP and len(t) >= 3]
-    # нормализуем проценты
     norm = set()
     for t in toks:
         norm.add(t.replace(",", "."))
     return norm
+
 
 def is_relevant_answer(question: str, answer: str) -> bool:
     qk = _keywords(question)
     ak = _keywords(answer)
     if not qk:
         return True
-    # если вообще нет пересечения — это почти всегда “уехал в другую тему”
-    inter = len(qk & ak)
-    return inter >= 1
+    return len(qk & ak) >= 1
 
 
 # ----------------------------
-# Hard safety rules (only if KB clearly supports)
+# Hard safety rules (KB-driven only)
 # ----------------------------
 RE_DEAD = re.compile(r"(?is)\b(умерш(ему|им|ие)|умер(ш|ла|ли)|уш(е|ё)л\s+из\s+жизни)\b")
 RE_NONRES = re.compile(r"(?is)\b(нерезидент|иностран(ец|ный)|не\s*резидент)\b")
 RE_SPEC_WO_MAIN = re.compile(r"(?is)\b(спец\s*счет|спецсч(е|ё)т).*\bбез\b.*\bосновн", re.IGNORECASE)
 RE_PERCENT_02 = re.compile(r"(?is)\b0[,.]2\s*%|\b0[,.]2\b.*процент")
 
+
 def kb_says_no(snips: str) -> bool:
-    # грубо, но эффективно: если в snippet явно есть "нельзя/не открываем/нет"
     s = (snips or "").lower()
     return any(x in s for x in ["нельзя", "не откры", "не можем", "нет,"])
 
@@ -185,24 +181,15 @@ def kb_says_yes(snips: str) -> bool:
 
 
 def apply_hard_rule(question: str, kb_snips: str) -> str | None:
-    """
-    Возвращает готовый ответ, если вопрос из критических
-    и KB дает явный да/нет.
-    Иначе None.
-    """
     q = question or ""
     s = kb_snips or ""
 
     if RE_DEAD.search(q):
-        # если KB явно говорит "не открывают/нельзя" — отвечаем только так
         if kb_says_no(s):
             return "Нет. Банки не открывают счета умершим физлицам."
-        # если KB говорит обратное — пусть ответит LLM по snippet (но это должен быть редкий кейс)
         return None
 
     if RE_NONRES.search(q):
-        # если KB явно содержит "можно" + банк/условие — пусть LLM аккуратно ответит по snippet
-        # если KB явно "нельзя" — скажем нельзя
         if kb_says_no(s) and not kb_says_yes(s):
             return "Нет. По нерезидентам сейчас нет возможности открыть счёт в рамках наших условий."
         return None
@@ -212,10 +199,7 @@ def apply_hard_rule(question: str, kb_snips: str) -> str | None:
             return "Нет, спецсчёт без основного открыть нельзя."
         return None
 
-    # 0,2% (важно различать рефералку и комиссию) — решаем через релевантность + snippet
     if RE_PERCENT_02.search(q):
-        # если snippet про “приведи друга” — ответ должен быть про рефералку,
-        # если snippet про комиссию/переводы — про комиссию.
         return None
 
     return None
@@ -237,18 +221,20 @@ async def send_bot(session, channel: str, external_user_id: str, text: str, slot
 
 
 # ----------------------------
-# Escalation (safe)
+# Escalation (NEW ONLY)
 # ----------------------------
 async def maybe_escalate(session_id: int, slots: dict, reason: str) -> None:
+    """
+    Единственная функция, которая вызывает реальную эскалацию.
+    Вызывается ТОЛЬКО из maybe_escalate_by_llm_signal.
+    """
     if slots.get("_escalation_sent"):
         return
     slots["_escalation_sent"] = True
     slots["_escalation_reason"] = reason
     await set_slots(session_id, slots)
 
-    if not ENABLE_ESCALATION_CALL:
-        return
-    if escalate_to_manager is None:
+    if not ENABLE_ESCALATION_CALL or escalate_to_manager is None:
         return
 
     try:
@@ -257,15 +243,130 @@ async def maybe_escalate(session_id: int, slots: dict, reason: str) -> None:
         logger.exception("escalate_to_manager failed (ignored)")
 
 
+def _two_of_last_three(scores: list[int], threshold: int) -> bool:
+    last = scores[-3:]
+    return sum(1 for x in last if x >= threshold) >= 2
+
+
+async def maybe_escalate_by_llm_signal(
+    session_id: int,
+    slots: dict,
+    *,
+    had_unknown_kb: bool = False,
+    reason_hint: str = "llm_signal",
+) -> None:
+    """
+    НОВАЯ логика: LLM->JSON сигнал, решение принимается в коде.
+    Это ЕДИНСТВЕННЫЙ путь запуска эскалации (без legacy).
+    """
+    if slots.get("_escalation_sent"):
+        return
+
+    msgs = await get_messages_by_session(session_id)
+    tail = [m for m in msgs if (m.get("text") or "").strip()][-12:]
+    dialog_text = "\n".join(f"{m['role']}: {m['text']}" for m in tail)
+
+    signal = await detect_escalation_signal(dialog_text, had_unknown_kb=had_unknown_kb)
+
+    # client_need из сигнала
+    try:
+        existing_need = await get_client_need(session_id)
+        if (not existing_need) and signal.get("client_need") and signal["client_need"] != "UNKNOWN":
+            await set_client_need(session_id, signal["client_need"])
+    except Exception:
+        logger.exception("set_client_need from escalation signal failed (ignored)")
+
+    # накопление score
+    scores = slots.get("_interest_scores")
+    if not isinstance(scores, list):
+        scores = []
+    try:
+        score = int(signal.get("interest_score", 0))
+    except Exception:
+        score = 0
+
+    if had_unknown_kb:
+        score = min(100, score + 10)
+
+    scores.append(score)
+    scores = scores[-5:]
+    slots["_interest_scores"] = scores
+    slots["_interest_score_last"] = score
+    slots["_escalation_signal_last"] = {
+        "escalate": bool(signal.get("escalate")),
+        "reason": signal.get("reason"),
+        "interest_score": score,
+        "confidence": float(signal.get("confidence", 0.0) or 0.0),
+        "next_step": signal.get("next_step"),
+    }
+    await set_slots(session_id, slots)
+
+    confidence = float(signal.get("confidence", 0.0) or 0.0)
+    wants_handoff = bool(signal.get("escalate"))
+    reason = str(signal.get("reason") or "other")
+
+    # правила решения
+    if wants_handoff and confidence >= 0.65 and score >= 85:
+        await maybe_escalate(session_id, slots, reason=f"{reason_hint}:{reason}")
+        return
+
+    if confidence >= 0.65 and _two_of_last_three(scores, 70):
+        await maybe_escalate(session_id, slots, reason=f"{reason_hint}:{reason}")
+        return
+
+    # unknown KB counter
+    unknown_cnt = int(slots.get("_unknown_kb_count") or 0)
+    if had_unknown_kb:
+        unknown_cnt += 1
+    else:
+        unknown_cnt = 0
+    slots["_unknown_kb_count"] = unknown_cnt
+    await set_slots(session_id, slots)
+
+    if had_unknown_kb and confidence >= 0.55 and score >= 70:
+        await maybe_escalate(session_id, slots, reason=f"{reason_hint}:unknown_kb_ready")
+        return
+
+    if unknown_cnt >= 2:
+        await maybe_escalate(session_id, slots, reason=f"{reason_hint}:unknown_kb_2x")
+        return
+
+
 # ----------------------------
 # Strict KB answer (NO HISTORY)
 # ----------------------------
 async def answer_by_kb_strict(question: str) -> str:
     kb_snips = get_kb_snippets(question, top_k=6) or ""
     if not kb_snips.strip():
-        return "По этому вопросу сейчас нет информации в базе знаний. Я не буду придумывать."
+        system_prompt = build_manager_system_prompt().replace("{MANAGER_NICKNAME}", manager_nickname)
+        user_payload = [
+            f"SCENARIO={scenario}",
+            f"MANAGER_NICKNAME={manager_nickname}",
+            "",
+            "ВНИМАНИЕ: В базе знаний нет ответа. Нельзя приводить цифры, конкретные банки, тарифы, сроки, юридические утверждения.",
+            "Можно: вежливо объяснить, чем можем помочь, попросить уточнения, предложить собрать данные.",
+            "Нельзя: выдумывать факты, ссылки на документы/банки/тарифы.",
+            "",
+            "Вопрос клиента:",
+            question,
+            "",
+            "Требования к стилю:",
+            "- Пиши от первого лица, как менеджер.",
+            "- Коротко и по делу.",
+            "- Без 'Ответ:' и без цитирования.",
+        ]
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": "\n".join(user_payload)},
+        ]
+        try:
+            llm_reply = await ask_llm(messages)
+        except Exception:
+            logger.exception("ask_llm failed (general reply)")
+            llm_reply = ""
+        reply = cleanup_text(llm_reply)
+        return reply or "Я уточню детали и вернусь. Подскажите, пожалуйста, ваш запрос чуть конкретнее."
 
-    # критические предохранители
     forced = apply_hard_rule(question, kb_snips)
     if forced:
         return forced
@@ -289,7 +390,7 @@ async def answer_by_kb_strict(question: str) -> str:
         "Требования к стилю:",
         "- Пиши от первого лица, как менеджер (без 'клиент спросил', без 'уточню у менеджера').",
         "- Не используй 'Ответ:' и не цитируй.",
-        "- Если в базе есть определение (например, 'конкурсная масса') — формулируй максимально близко к тексту базы, не меняя юридический смысл.",
+        "- Если в базе есть определение — формулируй максимально близко к тексту базы, не меняя юридический смысл.",
         "- Отвечай строго на текущий вопрос, не возвращайся к предыдущим темам.",
     ]
 
@@ -306,7 +407,6 @@ async def answer_by_kb_strict(question: str) -> str:
 
     reply = cleanup_text(llm_reply)
 
-    # релевантность-гейт: если ответ “уехал” — режем до безопасного
     if reply and not is_relevant_answer(question, reply):
         return "По этому вопросу сейчас нет информации в базе знаний. Я не буду придумывать."
 
@@ -388,8 +488,8 @@ async def process_message(message):
     user_text = (message.text or "").strip()
     text_norm = user_text.lower()
 
-    # 6 End dialog (only explicit)
-    if text_norm in END_DIALOG_PHRASES:
+    # 6 End dialog (no legacy escalation here)
+    if text_norm in END_DIALOG_PHRASES or any(p in text_norm for p in ("до свид", "на этом все", "на этом всё")):
         slots = await get_slots(session.id) or DEFAULT_SLOTS.copy()
         await send_bot(
             session,
@@ -398,10 +498,14 @@ async def process_message(message):
             "Хорошо, понял. Если появятся вопросы — напишите.",
             slots,
         )
-        await maybe_escalate(session.id, slots, reason="dialog_end")
+        # ✅ только LLM-сигнал
+        try:
+            await maybe_escalate_by_llm_signal(session.id, slots, had_unknown_kb=False, reason_hint="dialog_end")
+        except Exception:
+            logger.exception("maybe_escalate_by_llm_signal failed (ignored)")
         return
 
-    # 7 Negative/aggressive
+    # 7 Negative/aggressive (no legacy escalation here)
     if text_norm in SHORT_NEUTRAL:
         state = DialogState.IN_PROGRESS
     else:
@@ -413,7 +517,12 @@ async def process_message(message):
             reply = random.choice(NEGATIVE_REPLIES if state == DialogState.NEGATIVE else AGGRESSIVE_REPLIES)
             await send_bot(session, message.channel, message.external_user_id, reply, slots)
             await set_negative_handled(session.id, True)
-            await maybe_escalate(session.id, slots, reason="negative_or_aggressive")
+
+            # ✅ только LLM-сигнал
+            try:
+                await maybe_escalate_by_llm_signal(session.id, slots, had_unknown_kb=False, reason_hint="negative")
+            except Exception:
+                logger.exception("maybe_escalate_by_llm_signal failed (ignored)")
         return
 
     # 8 Slots + mode
@@ -430,35 +539,27 @@ async def process_message(message):
 
     await set_slots(session.id, slots)
 
-    # 9 ONBOARDING flow (no LLM)
+    # 9 ONBOARDING flow (no legacy escalation)
     if mode == "ONBOARDING":
-        if is_ready_for_escalation(slots):
-            if not await get_client_need(session.id):
-                try:
-                    msgs = await get_messages_by_session(session.id)
-                    dialog_text = "\n".join(f"{m['role']}: {m['text']}" for m in msgs if m.get("text"))
-                    need = await detect_client_need(dialog_text)
-                except Exception:
-                    logger.exception("client_need detection failed (onboarding)")
-                    need = "Открытие счёта"
-                await set_client_need(session.id, need)
-            await send_bot(
-                session,
-                message.channel,
-                message.external_user_id,
-                "Зафиксировал данные. Передаю менеджеру для открытия счёта.",
-                slots,
-            )
-            await maybe_escalate(session.id, slots, reason="onboarding_ready")
-            return
-
         missing = next_missing_slot_for_onboarding(slots)
         if missing:
             q = QUESTIONS.get(missing, "Уточните, пожалуйста, деталь по вашему запросу.")
             await send_bot(session, message.channel, message.external_user_id, q, slots)
+
+            # ✅ только LLM-сигнал (может решить, что нужен человек)
+            try:
+                await maybe_escalate_by_llm_signal(session.id, slots, had_unknown_kb=False, reason_hint="onboarding")
+            except Exception:
+                logger.exception("maybe_escalate_by_llm_signal failed (ignored)")
             return
 
         await send_bot(session, message.channel, message.external_user_id, "Принял. Продолжаю оформление.", slots)
+
+        # ✅ только LLM-сигнал
+        try:
+            await maybe_escalate_by_llm_signal(session.id, slots, had_unknown_kb=False, reason_hint="onboarding")
+        except Exception:
+            logger.exception("maybe_escalate_by_llm_signal failed (ignored)")
         return
 
     # 10 INFO: strict KB, per-question
@@ -479,10 +580,18 @@ async def process_message(message):
 
     await send_bot(session, message.channel, message.external_user_id, final_reply, slots)
 
-    # по твоему требованию: эскалируем и после консультации тоже
-    await maybe_escalate(session.id, slots, reason="info_unknown" if had_unknown else "info_answer")
+    # ✅ 10.1 ONLY NEW escalation logic (LLM->JSON)
+    try:
+        await maybe_escalate_by_llm_signal(
+            session.id,
+            slots,
+            had_unknown_kb=had_unknown,
+            reason_hint="info",
+        )
+    except Exception:
+        logger.exception("maybe_escalate_by_llm_signal failed (ignored)")
 
-    # 11 Client need (background)
+    # 11 Client need (best-effort)
     try:
         if not await get_client_need(session.id):
             msgs = await get_messages_by_session(session.id)

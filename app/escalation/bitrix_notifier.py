@@ -1,26 +1,86 @@
 import base64
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from app.integrations.bitrix.client import bitrix
 from app.integrations.bitrix.files import upload_file
 from app.logging import logger
-from datetime import datetime, timezone, timedelta
+
+PREP_STAGE_ID = "PREPARATION"
+INN_FIELD = "UF_CRM_1771216617075"  # поле ИНН в сделке
+
+
+# ---------- Deal resolvers ----------
+
+async def find_deal_by_external_user_id(external_user_id: str) -> dict | None:
+    """
+    Ищем сделку, созданную интеграцией (Wazzup/Telegram), по TITLE:
+    "Deal from Telegram (5747517813)" или похожее.
+    Берём самую свежую.
+    """
+    try:
+        res = await bitrix.call(
+            "crm.deal.list",
+            params={
+                "filter": {"%TITLE": f"({external_user_id})"},
+                "select": ["ID", "TITLE", "ASSIGNED_BY_ID", "CONTACT_ID", "COMPANY_ID"],
+                "order": {"ID": "DESC"},
+            },
+        )
+    except Exception:
+        logger.exception("Bitrix deal.list failed (by external_user_id) | external_user_id='{}'", external_user_id)
+        return None
+
+    if isinstance(res, dict) and "result" in res:
+        res = res["result"]
+
+    if not res:
+        return None
+    return res[0]
+
+
+async def resolve_deal_and_manager_by_external_user_id(
+    external_user_id: str,
+) -> tuple[int | None, int | None, int | None, int | None]:
+    """
+    Возвращает: (deal_id, assigned_by_id, contact_id, company_id)
+    """
+    deal = await find_deal_by_external_user_id(external_user_id)
+    if not deal:
+        return None, None, None, None
+
+    deal_id = int(deal["ID"])
+    assigned = int(deal["ASSIGNED_BY_ID"]) if deal.get("ASSIGNED_BY_ID") else None
+
+    contact_id = None
+    if str(deal.get("CONTACT_ID") or "0") not in ("0", ""):
+        contact_id = int(deal["CONTACT_ID"])
+
+    company_id = int(deal["COMPANY_ID"]) if deal.get("COMPANY_ID") else None
+    return deal_id, assigned, contact_id, company_id
 
 
 async def find_manager_by_inn(inn: str) -> tuple[int, int, str] | None:
+    """
+    Ищем сделку по ИНН, берём ответственного и ID сделки.
+    """
     logger.info("Bitrix search started | inn='{}'", inn)
 
     try:
         res = await bitrix.call(
             "crm.deal.list",
             params={
-                "filter": {"UF_CRM_1771216617075": inn},
+                "filter": {INN_FIELD: inn},
                 "select": ["ID", "ASSIGNED_BY_ID", "TITLE"],
+                "order": {"ID": "DESC"},
             },
         )
     except Exception:
         logger.exception("Bitrix deal.list failed | inn='{}'", inn)
         return None
+
+    if isinstance(res, dict) and "result" in res:
+        res = res["result"]
 
     if not res:
         logger.warning("No deal found in Bitrix | inn='{}'", inn)
@@ -40,6 +100,33 @@ async def find_manager_by_inn(inn: str) -> tuple[int, int, str] | None:
     return manager_id, deal_id, fio
 
 
+async def resolve_manager_and_deal(
+    *,
+    inn: str | None,
+    external_user_id: str | None,
+) -> tuple[int | None, int | None, str | None]:
+    """
+    Универсальный резолвер менеджера и сделки:
+    1) если есть ИНН — пробуем найти по ИНН
+    2) если не получилось — пробуем найти по external_user_id (TITLE содержит (id))
+    """
+    if inn:
+        found = await find_manager_by_inn(inn)
+        if found:
+            manager_id, deal_id, fio = found
+            return manager_id, deal_id, fio
+
+    if external_user_id:
+        deal_id, assigned, _, _ = await resolve_deal_and_manager_by_external_user_id(external_user_id)
+        if deal_id and assigned:
+            fio = f"Сделка {deal_id}"
+            return assigned, deal_id, fio
+
+    return None, None, None
+
+
+# ---------- Notifier ----------
+
 async def notify_manager(
     manager_id: int,
     client_fio: str,
@@ -50,11 +137,12 @@ async def notify_manager(
 ):
     need_text = need or "не указан"
     logger.info(
-        "Notify manager started | manager_id={} | client='{}' | inn='{}' | need='{}'",
+        "Notify manager started | manager_id={} | client='{}' | inn='{}' | need='{}' | deal_id={}",
         manager_id,
         client_fio,
         inn,
         need_text,
+        deal_id,
     )
 
     # 1️⃣ Чат
@@ -65,41 +153,55 @@ async def notify_manager(
         f"Запрос: {need_text}"
     )
 
+    # Дежурный менеджер / нет сделки: отправляем файл ссылкой в чат и выходим
+    if not deal_id:
+        if dialog_file:
+            try:
+                file_id = await upload_file(Path(dialog_file))
+                file_info = await bitrix.call("disk.file.get", params={"id": int(file_id)})
+                if isinstance(file_info, dict) and "result" in file_info and isinstance(file_info["result"], dict):
+                    file_info = file_info["result"]
+
+                file_url = (
+                    (file_info or {}).get("DOWNLOAD_URL")
+                    or (file_info or {}).get("DETAIL_URL")
+                    or (file_info or {}).get("VIEW_URL")
+                    or (file_info or {}).get("URL")
+                )
+                if file_url:
+                    chat_text += f"\n[URL={file_url}]Файл диалога[/URL]"
+                else:
+                    chat_text += f"\nФайл диалога (ID): {file_id}"
+            except Exception:
+                logger.exception(
+                    "Failed to upload dialog file for duty manager | manager_id={} | client='{}'",
+                    manager_id,
+                    client_fio,
+                )
+
+        try:
+            await bitrix.call(
+                "im.message.add",
+                params={"DIALOG_ID": manager_id, "MESSAGE": chat_text},
+            )
+            logger.info("Chat message sent | manager_id={} | client='{}'", manager_id, client_fio)
+        except Exception:
+            logger.exception("Failed to send chat message | manager_id={} | client='{}'", manager_id, client_fio)
+        return
+
+    # Есть сделка: тоже пишем в чат
     try:
         await bitrix.call(
             "im.message.add",
-            params={
-                "DIALOG_ID": manager_id,
-                "MESSAGE": chat_text,
-            },
+            params={"DIALOG_ID": manager_id, "MESSAGE": chat_text},
         )
-        logger.info(
-            "Chat message sent | manager_id={} | client='{}'",
-            manager_id,
-            client_fio,
-        )
+        logger.info("Chat message sent | manager_id={} | client='{}'", manager_id, client_fio)
     except Exception:
-        logger.exception(
-            "Failed to send chat message | manager_id={} | client='{}'",
-            manager_id,
-            client_fio,
-        )
+        logger.exception("Failed to send chat message | manager_id={} | client='{}'", manager_id, client_fio)
 
+    # 2️⃣ Дело в сделке + файл
     if not dialog_file:
-        logger.warning(
-            "Dialog file missing | manager_id={} | client='{}'",
-            manager_id,
-            client_fio,
-        )
-        return
-
-    # 2️⃣ Дело в сделке
-    if not deal_id:
-        logger.warning(
-            "Deal not found, activity not created | manager_id={} | client='{}'",
-            manager_id,
-            client_fio,
-        )
+        logger.warning("Dialog file missing | manager_id={} | client='{}'", manager_id, client_fio)
         return
 
     deal_line = f"Сделка ID: {deal_id}"
@@ -109,6 +211,7 @@ async def notify_manager(
         now = datetime.now(tz=local_tz)
         deadline = now + timedelta(hours=24)
         deadline_str = deadline.strftime("%Y-%m-%d %H:%M:%S")
+
         description = (
             f"Новый клиент от бота: {client_fio}\n"
             f"ИНН: {inn or 'не указан'}\n"
@@ -134,7 +237,7 @@ async def notify_manager(
 
         todo_id = None
         if isinstance(todo_res, dict):
-            todo_id = todo_res.get("id") or todo_res.get("ID")
+            todo_id = todo_res.get("id") or todo_res.get("ID") or (todo_res.get("result") if isinstance(todo_res.get("result"), (int, str)) else None)
         elif isinstance(todo_res, (int, str)):
             todo_id = todo_res
 
@@ -160,9 +263,15 @@ async def notify_manager(
             True,
         )
 
+        # двигаем стадию
+        try:
+            await bitrix.call(
+                "crm.deal.update",
+                params={"id": int(deal_id), "fields": {"STAGE_ID": PREP_STAGE_ID}},
+            )
+            logger.info("Deal stage updated | deal_id={} | stage_id={}", deal_id, PREP_STAGE_ID)
+        except Exception:
+            logger.exception("Failed to update deal stage | deal_id={} | stage_id={}", deal_id, PREP_STAGE_ID)
+
     except Exception:
-        logger.exception(
-            "Failed to create activity | deal_id={} | manager_id={}",
-            deal_id,
-            manager_id,
-        )
+        logger.exception("Failed to create activity | deal_id={} | manager_id={}", deal_id, manager_id)
