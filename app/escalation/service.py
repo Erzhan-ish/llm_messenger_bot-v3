@@ -11,7 +11,6 @@ from app.storage.repositories.sessions_repo import (
 )
 from app.logging import logger
 
-from app.processing.slots import CRITICAL_SLOTS
 from app.integrations.bitrix.deal_resolver import resolve_deal_id_via_owner_method, get_deal_fields
 from app.integrations.bitrix.client import bitrix
 
@@ -77,25 +76,6 @@ def _format_request_text(need: str | None, slots: dict) -> str:
         text = base
 
     return text[:512]
-
-
-async def is_ready_for_escalation(session_id: int) -> bool:
-    if await is_escalated(session_id):
-        return False
-
-    need = await get_client_need(session_id)
-    if not need:
-        return False
-
-    slots = await get_slots(session_id)
-    if not slots:
-        return False
-
-    for key in CRITICAL_SLOTS:
-        if not slots.get(key):
-            return False
-
-    return True
 
 
 async def _get_external_user_id_by_user_id(user_id: int) -> str | None:

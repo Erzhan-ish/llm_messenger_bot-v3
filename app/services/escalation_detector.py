@@ -36,43 +36,6 @@ ALLOWED_REASONS: set[str] = {
 
 ALLOWED_NEXT: set[str] = {"none", "ask_clarify", "handoff_manager"}
 
-SYSTEM_PROMPT = """
-Ты — классификатор эскалации для чат-бота банка. Ты НЕ отвечаешь клиенту.
-Твоя задача — по диалогу определить, нужно ли подключать реального менеджера.
-
-Эскалация нужна, если:
-- Клиент явно хочет купить/подключить/оформить/открыть счёт ("готов", "оформляем", "подключайте").
-- Клиент просит контакт/созвон/номер/связаться.
-- Клиент спрашивает цену/тариф/стоимость/комиссии и видно намерение продолжить.
-- Случай сложный/нестандартный (не удаётся корректно ответить по базе, много уточнений).
-- Клиент злится/жалуется/конфликтует.
-- Клиент прямо просит "позовите человека/менеджера".
-
-Если клиент просто задаёт общий вопрос и можно ответить без вмешательства — эскалация НЕ нужна.
-
-Верни строго JSON (без лишнего текста) по схеме:
-
-{
-  "escalate": true|false,
-  "reason": "<one of: pricing|callback|ready_to_open|documents|complex_case|unknown_kb|angry|human_request|other>",
-  "interest_score": 0..100,
-  "confidence": 0..1,
-  "next_step": "none|ask_clarify|handoff_manager",
-  "client_need": "<OPEN_ACCOUNT|OPEN_SPECIAL_ACCOUNT|CONDITIONS|DOCUMENTS|CONSULTATION|SUPPORT|UNKNOWN>",
-  "reasons": ["короткие причины (опционально)"]
-}
-
-Правила:
-- interest_score — насколько клиент близок к действию (созвон/оформление/оплата).
-- confidence — твоя уверенность.
-- next_step:
-    - "handoff_manager" если точно нужно подключать менеджера,
-    - "ask_clarify" если близко к этому, но нужно подтверждение ("удобно передать менеджеру?"),
-    - "none" если эскалация не нужна.
-""".strip()
-
-_JSON_OBJ_RE = re.compile(r"\{.*\}", re.DOTALL)
-
 ALLOWED_NEEDS = {
     "OPEN_ACCOUNT",
     "OPEN_SPECIAL_ACCOUNT",
@@ -82,6 +45,48 @@ ALLOWED_NEEDS = {
     "SUPPORT",
     "UNKNOWN",
 }
+
+SYSTEM_PROMPT = """
+Ты — классификатор эскалации. Ты НЕ пишешь клиенту.
+Твоя задача: по диалогу решить, нужно ли подключить менеджера прямо сейчас.
+
+ВАЖНО:
+- Вопросы про тарифы/комиссии/проценты/условия САМИ ПО СЕБЕ НЕ являются причиной эскалации.
+  Если клиент просто уточняет тарифы/условия без явной готовности к действию — ставь:
+  - escalate=false
+  - reason="pricing"
+  - interest_score <= 45
+  - next_step="ask_clarify" или "none"
+
+Эскалация НУЖНА (escalate=true, next_step="handoff_manager", interest_score>=85, confidence>=0.85), если:
+1) Клиент явно готов к следующему шагу:
+   "оформляем", "давайте начнем", "что дальше?", "куда оплатить?", "готов", "открывайте", "заведите заявку", "приступаем".
+   -> reason="ready_to_open", client_need="OPEN_ACCOUNT" или "CONDITIONS" (по смыслу)
+2) Клиент просит человека/менеджера/звонок/контакт:
+   "позвоните", "перезвоните", "дайте номер", "подключите менеджера", "оператор".
+   -> reason="human_request" (или "callback" если прямо про звонок), client_need="CONSULTATION"
+3) Конфликт/жалоба/агрессия:
+   -> reason="angry", client_need="SUPPORT"
+4) Сложный/нестандартный случай или тупик:
+   много уточнений, нет данных в KB, had_unknown_kb=true несколько раз
+   -> reason="complex_case" или "unknown_kb", client_need="CONSULTATION"
+
+ЖЁСТКОЕ ПРАВИЛО:
+Если next_step не "handoff_manager", то escalate должен быть false.
+
+Верни строго JSON:
+{
+  "escalate": true|false,
+  "reason": "<pricing|callback|ready_to_open|documents|complex_case|unknown_kb|angry|human_request|other>",
+  "interest_score": 0..100,
+  "confidence": 0..1,
+  "next_step": "none|ask_clarify|handoff_manager",
+  "client_need": "<OPEN_ACCOUNT|OPEN_SPECIAL_ACCOUNT|CONDITIONS|DOCUMENTS|CONSULTATION|SUPPORT|UNKNOWN>",
+  "reasons": ["короткие причины (опционально)"]
+}
+""".strip()
+
+_JSON_OBJ_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
 class EscalationSignal(TypedDict):
@@ -98,7 +103,6 @@ def _extract_json(raw: str) -> Optional[dict]:
     if not raw:
         return None
     raw = raw.strip()
-
     try:
         return json.loads(raw)
     except Exception:
@@ -107,7 +111,6 @@ def _extract_json(raw: str) -> Optional[dict]:
     m = _JSON_OBJ_RE.search(raw)
     if not m:
         return None
-
     try:
         return json.loads(m.group(0))
     except Exception:
@@ -164,13 +167,9 @@ async def detect_escalation_signal(
     *,
     had_unknown_kb: bool = False,
 ) -> EscalationSignal:
-    """
-    Возвращает сигнал для эскалации (строго машинный JSON).
-    had_unknown_kb=True — если в текущем ответе были "нет инфы в базе" (это повышает шанс complex/unknown_kb).
-    """
     user_payload = dialog_text or ""
     if had_unknown_kb:
-        user_payload += "\n\n[CONTEXT] В ответе были вопросы без информации в базе знаний (had_unknown_kb=true)."
+        user_payload += "\n\n[CONTEXT] had_unknown_kb=true (в диалоге были вопросы без ответа из базы знаний)."
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -183,11 +182,16 @@ async def detect_escalation_signal(
         if not isinstance(data, dict):
             raise ValueError("bad json")
 
+        next_step = _norm_next(data.get("next_step"))
         escalate = bool(data.get("escalate", False))
+
+        # жёсткое правило: если не handoff_manager — не эскалируем
+        if next_step != "handoff_manager":
+            escalate = False
+
         reason = _norm_reason(data.get("reason"))
         interest_score = _clamp_int(data.get("interest_score"), 0, 100, 0)
         confidence = _clamp_float(data.get("confidence"), 0.0, 1.0, 0.0)
-        next_step = _norm_next(data.get("next_step"))
         client_need = _norm_need(data.get("client_need"))
 
         rs = data.get("reasons")
@@ -195,9 +199,7 @@ async def detect_escalation_signal(
         if isinstance(rs, list):
             reasons = [str(x)[:80] for x in rs if x is not None][:8]
 
-        # если KB unknown и модель не указала — подстрахуемся
         if had_unknown_kb and reason == "other" and not escalate:
-            # не заставляем эскалировать, но помечаем как unknown_kb, чтобы код мог поднять score
             reason = "unknown_kb"
 
         return {
@@ -210,7 +212,6 @@ async def detect_escalation_signal(
             "reasons": reasons,
         }
     except Exception:
-        # безопасный дефолт: не эскалируем, не ломаем обработку
         return {
             "escalate": False,
             "reason": "other",
