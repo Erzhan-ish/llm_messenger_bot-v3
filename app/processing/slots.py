@@ -2,31 +2,25 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, Optional, List, Set
+from typing import Dict, Optional
+
+"""Session slots.
+
+IMPORTANT: Legacy slot-filling/onboarding fields were removed from the runtime flow.
+
+We keep a minimal "slots" dict only for technical flags (introduction/escalation markers).
+"""
+
 
 DEFAULT_SLOTS: Dict[str, Optional[object]] = {
-    "debtor_type": None,        # "ФЛ" / "ЮЛ"
-    "account_type": None,       # "ОСНОВНОЙ" / "ЗАДАТКОВЫЙ" / "ЗАЛОГОВЫЙ" / "СПЕЦ"
-    "procedure_type": None,     # "НАБЛЮДЕНИЕ" / "КОНКУРСНОЕ" / "РЕАЛИЗАЦИЯ" / ...
-    "inn": None,                # ИНН (10 или 12 цифр)
-    "email": None,              # опционально
-    "documents_ready": None,    # True/False (важно: False валидно)
-    "_asked": [],
-    "_mode": "INFO",            # "INFO" | "ONBOARDING"
+    "_introduced": False,
+    "_escalation_sent": False,
+    "_escalation_reason": None,
+    "_interest_scores": [],
+    "_interest_score_last": None,
+    "_escalation_signal_last": None,
 }
 
-# “потребность + пару подробностей” (для эскалации в твоей логике)
-ESCALATION_SLOTS_ORDER: List[str] = [
-    "account_type",
-    "debtor_type",
-    "procedure_type",
-]
-
-OPTIONAL_SLOTS_ORDER: List[str] = ["email"]
-
-# --- Совместимость со старым кодом/эскалацией ---
-CRITICAL_SLOTS_ORDER: List[str] = ESCALATION_SLOTS_ORDER
-CRITICAL_SLOTS: Set[str] = set(CRITICAL_SLOTS_ORDER)  # <-- ВОТ ЭТО нужно app/escalation/service.py
 
 _EMAIL_RE = re.compile(r"(?i)\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b")
 _INN_RE = re.compile(r"\b(\d{10}|\d{12})\b")
@@ -91,24 +85,3 @@ def extract_slots(text: str, slots: Dict) -> Dict:
 
     return slots
 
-
-def is_ready_for_escalation(slots: Dict) -> bool:
-    """
-    Проверка на заполненность ключевых слотов.
-    Важно: проверяем is not None, чтобы False (documents_ready=False) считалось валидным.
-    """
-    for k in ESCALATION_SLOTS_ORDER:
-        if slots.get(k) is None:
-            return False
-    return True
-
-
-def next_missing_slot(slots: Dict) -> Optional[str]:
-    """
-    Следующий отсутствующий слот из ESCALATION_SLOTS_ORDER.
-    Важно: is None, а не truthy/falsy.
-    """
-    for k in ESCALATION_SLOTS_ORDER:
-        if slots.get(k) is None:
-            return k
-    return None
