@@ -26,7 +26,7 @@ async def reset_session(channel: str, external_user_id: str) -> Session:
     now = datetime.utcnow()
 
     async with async_session() as db:
-        # Закрываем все активные
+        # Закрываем все активные сессии
         await db.execute(
             update(Session)
             .where(
@@ -36,6 +36,18 @@ async def reset_session(channel: str, external_user_id: str) -> Session:
             .values(
                 status=SESSION_STATUS_CLOSED,
                 last_activity_at=now,
+            )
+        )
+
+        # Сбрасываем глобальную блокировку эскалации для этого пользователя
+        await db.execute(
+            update(Session)
+            .where(
+                Session.user_id == user.id,
+                Session.escalated_at.is_not(None),
+            )
+            .values(
+                escalated_at=None,
             )
         )
 

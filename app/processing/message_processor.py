@@ -6,16 +6,21 @@ import json
 import asyncio
 import contextlib
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional, Tuple
 
 from app.context.session_manager import get_or_create_session, reset_session
 from app.storage.repositories.messages_repo import save_message, get_messages_by_session
 from app.storage.repositories.sessions_repo import (
-    get_slots,
-    set_slots,
+    get_session_by_id,
+    is_escalated,
+    get_user_last_escalation,
     touch_session_activity,
     get_client_need,
     set_client_need,
+    mark_escalated,
+    get_slots,
+    set_slots,
 )
 from app.processing.dedup import is_duplicate_message
 from app.processing.rate_limit import check_rate_limit, RateLimitExceeded
@@ -32,6 +37,7 @@ from app.llm.providers import ask_llm
 
 from app.services.escalation_detector import detect_escalation_signal
 from app.services.intent_detector import detect_intent
+from app.services.dialog_analyzer import analyze_dialog
 
 # Escalation integration (optional)
 ENABLE_ESCALATION_CALL = True
@@ -44,15 +50,16 @@ except Exception:
 scenario = "INBOUND_QUESTION"
 
 # --- cleanup filters ---
-BAD_PREFIX_RE = re.compile(r"(?is)^\s*(ответ\s*:|цитата\s*:)\s*")
-META_LINE_RE = re.compile(r"(?is)^\s*(внимание|фрагменты\s+базы|вопрос\s+клиента|требования\s+к\s+стилю)\b")
-THIRD_PERSON_RE = re.compile(r"(?is)\b(я\s+буду\s+отвечать|клиент\s+спросил|уточню\s+у\s+менеджера)\b")
-SYSTEM_NOTICE_RE = re.compile(r"(?is)пользователь\s+выбрал\s+«?закрыть\s+чат»?\s+и\s+закончил\s+общение\.?" )
+BAD_PREFIX_RE = re.compile(r"(?im)^\s*(хорошая\s+практика\s*[!\.]*|хороший\s+вопрос\s*[!\.]*|ответ\s*:|цитата\s*:|ответ\s+на\s+(текущий\s+|новый\s+)?вопрос\s+(клиента|пользователя)\s*:?|вот\s+ответ\s*(на\s+новый\s+вопрос\s+клиента)?\s*:?|уточняющий\s+(ваш\s+)?вопрос\s*:?)\s*")
+META_LINE_RE = re.compile(r"(?im)^\s*(внимание|фрагменты\s+базы|вопрос\s+клиента|требования\s+к\s+стилю)\b")
+THIRD_PERSON_RE = re.compile(r"(?im)\b(я\s+буду\s+отвечать|клиент\s+спросил|уточню\s+у\s+менеджера)\b")
+SYSTEM_NOTICE_RE = re.compile(r"(?im)пользователь\s+выбрал\s+«?закрыть\s+чат»?\s+и\s+закончил\s+общение\.?")
 
 _STOP = {
     "и", "а", "но", "что", "это", "как", "ли", "в", "на", "по", "про", "для", "у", "я", "мы",
     "вы", "он", "она", "они", "с", "со", "к", "из", "же", "то", "так", "тоже", "уже", "ещё",
-    "еще", "при", "без", "или", "либо", "когда", "сколько", "какой", "какая", "какие"
+    "еще", "при", "без", "или", "либо", "когда", "сколько", "какой", "какая", "какие",
+    "здравствуйте", "привет", "добрый", "утро", "день", "вечер"
 }
 
 
@@ -70,12 +77,20 @@ def cleanup_text(text: str) -> str:
         lines.append(line)
     t = "\n".join(lines).strip()
 
-    t = BAD_PREFIX_RE.sub("", t).strip()
-    t = THIRD_PERSON_RE.sub("", t).strip()
+    prev = None
+    while t != prev:
+        prev = t
+        t = BAD_PREFIX_RE.sub("", t).strip()
+        t = THIRD_PERSON_RE.sub("", t).strip()
 
     t = t.strip(" \n\r\t\"'“”«»")
     t = re.sub(r"[ \t]{2,}", " ", t)
     t = re.sub(r"\n{3,}", "\n\n", t)
+    
+    # Жесткое удаление плейсхолдеров, если LLM их галлюцинирует
+    t = t.replace("[Название]", "вашей компании").replace("[название]", "вашей компании")
+    t = t.replace("[Имя]", "вас").replace("[имя]", "вас")
+    
     return t.strip()
 
 
@@ -85,10 +100,10 @@ def _limit_sentences_and_len(text: str) -> str:
         return t
     parts = re.split(r"(?<=[.!?])\s+", t)
     parts = [p.strip() for p in parts if p.strip()]
-    if len(parts) > 4:
-        t = " ".join(parts[:4]).strip()
-    if len(t) > 600:
-        t = t[:600].rstrip()
+    if len(parts) > 6:
+        t = " ".join(parts[:6]).strip()
+    if len(t) > 800:
+        t = t[:800].rstrip()
     return t
 
 
@@ -246,9 +261,8 @@ async def send_bot(session, channel: str, external_user_id: str, text: str, slot
 
     import random
 
-    parts = [p.strip() for p in text.split("\n\n") if p.strip()]
-    if not parts:
-        parts = [text]
+    # Do not split by newlines, send as one single Telegram message bubble.
+    parts = [text]
 
     is_first = not bool(slots.get("_last_bot_text"))
 
@@ -260,7 +274,7 @@ async def send_bot(session, channel: str, external_user_id: str, text: str, slot
             base_delay = max(15.0, min(60.0, base_delay))
             delay = base_delay + random.uniform(-2.0, 5.0)
             delay = max(15.0, min(60.0, delay))
-        
+
         await asyncio.sleep(delay)
 
         await save_message(session.id, "bot", part, channel)
@@ -268,7 +282,7 @@ async def send_bot(session, channel: str, external_user_id: str, text: str, slot
 
     slots["_last_bot_text"] = text
 
-    if not slots.get("_introduced") and re.search(r"\bэто\s+алексей\b", text, re.IGNORECASE):
+    if not slots.get("_introduced") and re.search(r"\b(меня\s+зовут|это)\s+алексей\b", text, re.IGNORECASE):
         slots["_introduced"] = True
 
     await set_slots(session.id, slots)
@@ -301,11 +315,11 @@ def _two_of_last_three(scores: list[int], threshold: int) -> bool:
 
 
 async def maybe_escalate_from_signal(
-    session_id: int,
-    slots: dict,
-    signal: dict | None,
-    *,
-    reason_hint: str = "signal",
+        session_id: int,
+        slots: dict,
+        signal: dict | None,
+        *,
+        reason_hint: str = "signal",
 ) -> None:
     """Use already computed signal to avoid second model call."""
     if slots.get("_escalation_sent"):
@@ -338,11 +352,11 @@ async def maybe_escalate_from_signal(
 
 
 async def maybe_escalate_by_llm_signal(
-    session_id: int,
-    slots: dict,
-    *,
-    had_unknown_kb: bool,
-    reason_hint: str = "llm_signal",
+        session_id: int,
+        slots: dict,
+        *,
+        had_unknown_kb: bool,
+        reason_hint: str = "llm_signal",
 ) -> None:
     if slots.get("_escalation_sent"):
         return
@@ -402,37 +416,40 @@ async def maybe_escalate_by_llm_signal(
 # Self-check
 # ----------------------------
 _SELF_CHECK_PROMPT = """
-Ты проверяешь ответ менеджера перед отправкой клиенту. Твоя задача скорректировать текст.
+Ты — главный редактор ответов менеджера Алексея. Твоя задача: сделать ответ максимально коротким, точным и живым.
 
 Вход:
 - dialog_ctx: контекст диалога
 - kb_snips: справочная информация
 - question: текущее сообщение клиента
 - draft: черновик ответа
-- last_bot: последнее твое сообщение
-- introduced: представлялся ли ты (Алексей) ранее
+- last_bot: последнее сообщение бота
+- introduced: true (Алексей уже представлялся), false (еще нет)
 
-Правила корректировки:
-1) Проверь на смысл: ответ должен быть четким, понятным (1-3 предложения). Конкретика без "воды".
-2) Строгий запрет на ответы из одного слова (например, просто «Да» или «Нет»). Всегда давай минимальный контекст.
-3) Проактивность: если контекст позволяет, в конце задай 1 полезный уточняющий вопрос к клиенту (но только если клиент на него еще НЕ отвечал ранее!).
-4) Представление: если клиент здоровается, а ты еще не представлялся (introduced=false), обязательно включи в ответ: "Здравствуйте! Меня зовут Алексей, я менеджер-консультант..."
-5) Никакого канцелярита, шаблонов начала («Понял», «Хорошо», «Да», «Конечно») и извинений («Ой», «Простите»).
-6) Имя — только Алексей. Никаких "помощников", никаких подстановочных скобок _(Имя)_.
-7) Не дублируй вопросы, вырезай повторы.
+ПРАВИЛА КОРРЕКТИРОВКИ (СТРОГО):
+1. КРАТКОСТЬ: Весь ответ должен быть 1-2 предложения (максимум 3, если вопрос сложный). УДАЛЯЙ всю "воду", лишние пояснения и вводные фразы.
+2. ПРИВЕТСТВИЕ: Если introduced=false (это первое сообщение), ты ОБЯЗАН сохранить фразу "Здравствуйте! Меня зовут Алексей..." из черновика. Если introduced=true, УБЕРИ все приветствия и знакомства из черновика.
+3. РЕЛЕВАНТНОСТЬ И ФАКТЫ: 
+   - Если в черновике есть галлюцинация про "обратитесь напрямую в банк" — ЗАМЕНИ на предложение нашей помощи в открытии.
+   - УДАЛЯЙ любую информацию из KB, которая напрямую НЕ отвечает на вопрос.
+4. НЕТ КЛИШЕ И РОБО-ЯЗЫКУ: Вырезай "Хорошо", "Понял вас", "Чего вы желаете", "В ваших нуждах". Запрещено комментировать сообщения пользователя.
+5. ВОПРОС: В конце может быть ОДИН короткий уточняющий вопрос.
+6. ЖИВОЙ ЯЗЫК: Если черновик звучит как робот, перепиши его более человечно.
+7. ЗАПРЕТ ПОВТОРОВ ИНФОРМАЦИИ. Если ты уже называл цену, банк или условия в ПРЕДЫДУЩЕМ сообщении (см. Контекст диалога), ЗАПРЕЩЕНО дублировать эту информацию в новом ответе. Сразу отвечай на новый вопрос клиента.
+8. ЗАПРЕТ «ЭХА». Никогда не копируй текст своего прошлого сообщения в новый ответ. Если ты уже поздоровался или ответил на часть вопроса ранее, не пиши это снова.
 
-Верни ТОЛЬКО готовый текст ответа без JSON, без пояснений и без мета-тегов вроде "Алексей:".
+Верни ТОЛЬКО текст ответа. Без JSON, без кавычек, без "Алексей:".
 """
 
 
 async def _self_check_and_fix(
-    *,
-    dialog_ctx: str,
-    kb_snips: str,
-    question: str,
-    draft: str,
-    last_bot: str,
-    introduced: bool,
+        *,
+        dialog_ctx: str,
+        kb_snips: str,
+        question: str,
+        draft: str,
+        last_bot: str,
+        introduced: bool,
 ) -> str:
     """LLM self-check returning final text (no JSON)."""
     draft = cleanup_text(_limit_sentences_and_len(draft))
@@ -483,23 +500,76 @@ async def _rewrite_to_avoid_repeat(text_to_rewrite: str, last_bot: str) -> str:
 # Answer (context + KB)
 # ----------------------------
 async def answer_with_context_and_kb(
-    session_id: int,
-    question: str,
-    *,
-    active_intent: str | None,
-    slots: dict,
+        session_id: int,
+        question: str,
+        *,
+        active_intent: str | None,
+        slots: dict,
 ) -> Tuple[str, bool]:
     msgs = await get_messages_by_session(session_id)
     dialog_ctx = _build_dialog_context(msgs, max_items=80, max_chars=14000)
 
-    kb_snips = (get_kb_snippets(question, top_k=8) or "").strip()
+    # TRUE intro detection: Only check what the BOT has said, not the user!
+    bot_msgs = [m for m in msgs if m.get("role") == "bot"]
+    bot_history_text = " ".join([str(m.get("text") or "") for m in bot_msgs]).lower()
+    already_said_hello = "здравствуйте" in bot_history_text or "алексей" in bot_history_text
+    
+    introduced = bool(slots.get("_introduced")) or already_said_hello
+    is_first_turn = (len(msgs) <= 1) or (not bot_msgs)
+
+    if introduced and not slots.get("_introduced"):
+        slots["_introduced"] = True # sync back
+    
+    logger.info(f"Session {session_id} | intro={introduced}, first={is_first_turn}, bot_msgs={len(bot_msgs)}")
+
+    # --- CONTEXTUAL QUERY EXPANSION ---
+    known_banks = ["уралсиб", "ткб", "росбанк", "альфа", "альфа-банк", "т-банк", "мкб"]
+    found_cur_banks = {b for b in known_banks if b in question.lower()}
+    
+    search_query = question
+    if not found_cur_banks:
+        # Ищем последний упомянутый банк во всей истории диалога (исключая текущий вопрос)
+        last_mentioned_bank = None
+        for m in reversed(msgs[:-1]):
+            text = (m.get("text") or "").lower()
+            found = [b for b in known_banks if b in text]
+            if found:
+                last_mentioned_bank = found[0]
+                break
+                
+        if last_mentioned_bank:
+            search_query = f"{question} {last_mentioned_bank}"
+            logger.info(f"Session {session_id} | Expanded KB query with history: {search_query}")
+
+    kb_snips = (get_kb_snippets(search_query, top_k=8) or "").strip()
     had_unknown = not bool(kb_snips)
 
-    system_prompt = build_manager_system_prompt()
+    system_prompt = build_manager_system_prompt(is_first_turn=(not introduced))
+
+    if not introduced:
+        rules = [
+            "- ОБЯЗАТЕЛЬНО начни ТОЧНО так: 'Здравствуйте! Меня зовут Алексей, я менеджер-консультант.' и СРАЗУ переходи к сути без вводных слов.",
+            "- Категорически ЗАПРЕЩЕНЫ фразы-клише: 'Рад вас видеть в нашем чате', 'Чтобы помочь вам как можно эффективнее', 'С радостью отвечу'.",
+            "- Твой ответ должен быть ПРЕДЕЛЬНО кратким и сплошным текстом (БЕЗ переносов строк).",
+            "- В конце задай 1 короткий вопрос по теме. СТРОГО ЗАПРЕЩЕНО писать 'Уточняющий вопрос:' перед вопросом.",
+            "- ЗАПРЕЩЕНО использовать мета-текст (никаких 'Ответ на вопрос клиента:').",
+        ]
+    else:
+        rules = [
+            "- Твой ответ должен быть 1-2 предложения (сплошным текстом, БЕЗ переносов строк).",
+            "- ЗАПРЕЩЕНО симулировать вопросы и использовать мета-текст (никаких 'Ответ на вопрос клиента:', 'Вот ответ:' или 'Уточняющий вопрос:'). Сразу давай информацию.",
+            "- ЗАПРЕЩЕНО здороваться или представляться (без 'Здравствуйте' или 'я Алексей').",
+            "- ЗАПРЕЩЕНО копировать или повторять свои прошлые ответы из Контекста диалога (эффект эха). Отвечай ТОЛЬКО на новый вопрос клиента.",
+            "- ЗАПРЕЩЕНО задавать один и тот же шаблонный вопрос (например, 'Интересуетесь ли вы...') дважды за диалог.",
+        ]
+        rules += [
+            "- Отвечай кратко, без воды. Сплошным текстом, без абзацев.",
+            "- В конце задай 1 ВАЖНЫЙ И УНИКАЛЬНЫЙ уточняющий вопрос по теме. СТРОГО ЗАПРЕЩЕНО писать 'Уточняющий вопрос:' перед вопросом.",
+            "- ВАЖНО: Вопрос должен двигать сделку вперед. ЗАПРЕЩЕНО переспрашивать информацию, которую клиент УЖЕ назвал (если он просит задатковый счет, не спрашивай 'Нужен ли вам задатковый?'). СТРОГО ЗАПРЕЩЕНО задавать общие/проверочные вопросы (например, 'Какие комиссии будут взиматься?', 'Что еще хотите узнать?').",
+        ]
 
     user_payload = [
         f"SCENARIO={scenario}",
-        f"ACTIVE_INTENT={active_intent or 'UNKNOWN'}",
         "",
         "Контекст диалога:",
         dialog_ctx or "(контекст пуст)",
@@ -510,14 +580,8 @@ async def answer_with_context_and_kb(
         "Текущий вопрос клиента:",
         question,
         "",
-        "Правила ответа:",
-        "- Пиши как проактивный живой менеджер.",
-        "- Ответ должен быть ёмким, понятным (1-3 предложения). Исключи ответы из одного слова.",
-        "- Представься (ты Алексей), если клиент здоровается впервые и диалог только начался.",
-        "- Никакой воды, извинений и заезженных клише («Понял вас», «Хорошо»).",
-        "- Инициатива за тобой: 1 уместный уточняющий вопрос в конце текста, если нужно разговорить клиента (не спрашивай то, что уже обсуждали).",
-        "- Запрещено вставлять переменные со скобками или теги (вроде 'Алексей: ').",
-    ]
+        "Правила ответа (ЖЕСТКО):"
+    ] + rules
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -536,15 +600,32 @@ async def answer_with_context_and_kb(
     if draft and not is_relevant_answer(question, draft):
         had_unknown = True
 
+
     last_bot = str(slots.get("_last_bot_text") or "")
-    fixed = await _self_check_and_fix(
-        dialog_ctx=dialog_ctx,
-        kb_snips=kb_snips,
-        question=question,
-        draft=draft or "",
-        last_bot=last_bot,
-        introduced=bool(slots.get("_introduced")),
+    
+    # Conditional Self-Check: trigger if too long, has bad phrases, or hallucinates greetings mid-dialogue
+    bad_patterns = r"(понял|хорошо|конечно|нужды|желаете|текущая цель|цель|к чему вы)"
+    if introduced:
+        bad_patterns = r"(понял|хорошо|конечно|нужды|желаете|текущая цель|цель|к чему вы|здравствуйте|приветствую|меня зовут|добрый день)"
+        
+    should_check = (
+        len(draft) > 600 or 
+        re.search(bad_patterns, draft.lower()) or
+        (introduced and "здравствуйте" in draft.lower())
     )
+
+    if should_check:
+        fixed = await _self_check_and_fix(
+            dialog_ctx=dialog_ctx,
+            kb_snips=kb_snips,
+            question=question,
+            draft=draft or "",
+            last_bot=last_bot,
+            introduced=introduced, # We can pass it, but it's ignored by self-check rules now
+        )
+    else:
+        fixed = draft
+
     fixed = cleanup_text(fixed)
     fixed = _limit_sentences_and_len(fixed)
 
@@ -570,9 +651,9 @@ async def process_message(message):
         message = UnifiedMessage(**message)
 
     if await is_duplicate_message(
-        channel=message.channel,
-        external_user_id=message.external_user_id,
-        external_message_id=message.message_id,
+            channel=message.channel,
+            external_user_id=message.external_user_id,
+            external_message_id=message.message_id,
     ):
         return
 
@@ -599,6 +680,14 @@ async def process_message(message):
         channel=message.channel,
         external_user_id=message.external_user_id,
     )
+
+    # BLOCK AFTER ESCALATION (24 hours) - Global user check
+    last_esc = await get_user_last_escalation(session.user_id)
+    if last_esc:
+        delta = datetime.utcnow() - last_esc
+        if delta.total_seconds() < 24 * 3600:
+            logger.info(f"User {session.user_id} | Suppressing bot response (escalated {delta.total_seconds()/3600:.1f}h ago)")
+            return
 
     try:
         await touch_session_activity(session.id)
@@ -649,19 +738,23 @@ async def process_message(message):
     await set_slots(session.id, slots)
 
     async with _TypingScope(message.channel, message.external_user_id):
-        # intent
+        # unified analysis
         msgs = await get_messages_by_session(session.id)
-        dialog_text_full = _build_dialog_context(msgs, max_items=80, max_chars=14000)
-        intent_sig = await detect_intent(dialog_text_full)
-        slots["_active_intent"] = intent_sig.get("intent")
-        slots["_active_intent_confidence"] = float(intent_sig.get("confidence", 0.0) or 0.0)
+        # Pass shorter context to analyzer for speed
+        dialog_text_short = _build_dialog_context(msgs, max_items=12, max_chars=3000)
+        
+        signal = await analyze_dialog(dialog_text_short)
+        
+        active_intent = signal["intent"]
+        intent_conf = signal["intent_confidence"]
+        
+        slots["_active_intent"] = active_intent
+        slots["_active_intent_confidence"] = intent_conf
         await set_slots(session.id, slots)
-
-        active_intent = str(slots.get("_active_intent") or "OTHER")
-        intent_conf = float(slots.get("_active_intent_confidence", 0.0) or 0.0)
 
         # polite end dialog (avoid "Хорошо" etc.)
         if active_intent == "END_DIALOG" and intent_conf >= 0.70:
+            await maybe_escalate(session.id, slots, reason="dialog_ended_by_user")
             await send_bot(
                 session,
                 message.channel,
@@ -671,27 +764,9 @@ async def process_message(message):
             )
             return
 
-        # early escalation signal (cached)
-        try:
-            esc_sig = await detect_escalation_signal(dialog_text_full, had_unknown_kb=False)
-        except Exception:
-            esc_sig = {
-                "escalate": False,
-                "reason": "other",
-                "confidence": 0.0,
-                "interest_score": 0,
-                "next_step": "none",
-                "client_need": "UNKNOWN",
-                "reasons": [],
-            }
-
-        if (
-            bool(esc_sig.get("escalate"))
-            and str(esc_sig.get("next_step")) == "handoff_manager"
-            and float(esc_sig.get("confidence", 0.0) or 0.0) >= 0.80
-            and int(esc_sig.get("interest_score", 0) or 0) >= 85
-        ):
-            await maybe_escalate(session.id, slots, reason=f"esc_fast:{esc_sig.get('reason') or 'other'}")
+        # escalation signal
+        if signal["escalate"] and signal["next_step"] == "handoff_manager":
+            await maybe_escalate(session.id, slots, reason=f"analyzer:{signal['escalate_reason']}")
             await send_bot(
                 session,
                 message.channel,
@@ -715,27 +790,34 @@ async def process_message(message):
             had_unknown_any = had_unknown_any or had_unknown
             await send_bot(session, message.channel, message.external_user_id, a, slots)
 
-        # post-signal escalation
+        # post-signal escalation & client need
         try:
             if not had_unknown_any:
-                await maybe_escalate_from_signal(session.id, slots, esc_sig, reason_hint="llm_signal_cached")
+                # Use analysis signal for interest scoring
+                await maybe_escalate_from_signal(
+                    session.id, 
+                    slots, 
+                    {
+                        "escalate": signal["escalate"],
+                        "reason": signal["escalate_reason"],
+                        "interest_score": signal["interest_score"],
+                        "confidence": signal["escalate_confidence"],
+                        "next_step": signal["next_step"]
+                    }, 
+                    reason_hint="analyzer_cached"
+                )
             else:
                 await maybe_escalate_by_llm_signal(
                     session.id,
                     slots,
                     had_unknown_kb=had_unknown_any,
-                    reason_hint="llm_signal",
+                    reason_hint="llm_signal_kb_fail",
                 )
+            
+            # update client need from signal if not set
+            if not await get_client_need(session.id) and signal["client_need"] != "UNKNOWN":
+                from app.services.client_need_detector import NEED_LABELS
+                label = NEED_LABELS.get(signal["client_need"], "Консультация")
+                await set_client_need(session.id, label)
         except Exception:
-            logger.exception("post escalation failed (ignored)")
-
-        # client need best-effort
-        try:
-            if not await get_client_need(session.id):
-                msgs2 = await get_messages_by_session(session.id)
-                dialog_text2 = _build_dialog_context(msgs2, max_items=80, max_chars=14000)
-                need = await detect_client_need(dialog_text2)
-                if need and need != "UNKNOWN":
-                    await set_client_need(session.id, need)
-        except Exception:
-            logger.exception("client_need detection failed (ignored)")
+            logger.exception("post processing failed (ignored)")

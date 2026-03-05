@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import re
 from dataclasses import dataclass
@@ -191,10 +192,16 @@ class KnowledgeBase:
         cache_path = Path(cache_path)
         cache_path.parent.mkdir(parents=True, exist_ok=True)
 
-        if cache_path.exists():
+        if cache_path.exists() and _cache_is_valid(cache_path, source_path):
             chunks = _load_cache(cache_path)
             logger.info("KB cache loaded | chunks={} | path={}", len(chunks), str(cache_path))
             return cls(chunks, default_top_k=default_top_k)
+        elif cache_path.exists():
+            logger.info(
+                "KB cache invalidated, rebuilding | source={} | cache={}",
+                str(source_path),
+                str(cache_path),
+            )
 
         logger.info("KB cache not found, building | source={}", str(source_path))
         chunks = _build_from_source(
@@ -203,7 +210,7 @@ class KnowledgeBase:
             overlap_chars=overlap_chars,
         )
 
-        _save_cache(cache_path, chunks)
+        _save_cache(cache_path, chunks, source_path)
         logger.info("KB built and cached | chunks={} | path={}", len(chunks), str(cache_path))
         return cls(chunks, default_top_k=default_top_k)
 
@@ -225,6 +232,26 @@ class KnowledgeBase:
         scored.sort(key=lambda x: x[0], reverse=True)
         k = top_k or self._default_top_k
         return [self._chunks[i] for _, i in scored[:k]]
+
+    def search_with_scores(self, query: str, *, top_k: Optional[int] = None) -> List[Tuple[KBChunk, float]]:
+        """Same as search(), but keeps relevance scores for aggregation across query variants."""
+        query = (query or "").strip()
+        if not query:
+            return []
+
+        q_counts = _term_counts(query)
+        if not q_counts:
+            return []
+
+        scored: List[Tuple[float, int]] = []
+        for idx, ch_counts in enumerate(self._chunk_term_counts):
+            score = _tfidf_score(q_counts, ch_counts, self._df, self._n_docs)
+            if score >= self._min_score:
+                scored.append((score, idx))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        k = top_k or self._default_top_k
+        return [(self._chunks[i], s) for s, i in scored[:k]]
 
     @staticmethod
     def format_snippets(chunks: List[KBChunk], *, max_chars_per_chunk: int = 700) -> str:
@@ -288,6 +315,35 @@ def _read_docx(docx_path: Path) -> str:
     return "\n\n".join(parts)
 
 
+
+def _chunk_by_markers(text: str, *, source: str, chunk_chars: int, overlap_chars: int) -> List[KBChunk]:
+    """Сплиттер для формата, где каждый факт начинается с маркера `---CHUNK---`."""
+    text = re.sub(r"(?<!\n)---CHUNK---", "\n---CHUNK---", text)
+    text = _normalize_keep_newlines(text)
+    if not text:
+        return []
+
+    parts = re.split(r"(?m)^\s*---CHUNK---\s*", text)
+    parts = [p.strip() for p in parts if p and p.strip()]
+
+    chunks: List[KBChunk] = []
+    chunk_id = 1
+    for p in parts:
+        piece = "---CHUNK--- " + p.strip()
+        if chunk_chars and len(piece) > chunk_chars:
+            sub_pieces = _chunk_text(piece, chunk_chars=chunk_chars, overlap_chars=overlap_chars)
+        else:
+            sub_pieces = [piece]
+
+        for sp in sub_pieces:
+            sp = sp.strip()
+            if not sp:
+                continue
+            chunks.append(KBChunk(chunk_id=chunk_id, text=sp, page_start=0, page_end=0, source=source))
+            chunk_id += 1
+
+    return chunks
+
 def _chunk_whole_text(text: str, *, source: str, chunk_chars: int, overlap_chars: int) -> List[KBChunk]:
     text = _normalize_keep_newlines(text)
     if not text:
@@ -296,6 +352,13 @@ def _chunk_whole_text(text: str, *, source: str, chunk_chars: int, overlap_chars
 
     # IMPORTANT: fix artifacts BEFORE chunking
     text = _fix_artifacts(text)
+
+
+    # If the KB uses explicit `---CHUNK---` markers, treat each marker as its own chunk.
+    # This prevents the standard sliding-window chunker from merging multiple facts and
+    # from cutting marker tokens (e.g. '---CH').
+    if "---CHUNK---" in text:
+        return _chunk_by_markers(text, source=source, chunk_chars=chunk_chars, overlap_chars=overlap_chars)
 
     pieces = _chunk_text(text, chunk_chars=chunk_chars, overlap_chars=overlap_chars)
 
@@ -438,9 +501,48 @@ def _chunk_text(text: str, *, chunk_chars: int, overlap_chars: int) -> List[str]
     return chunks
 
 
-def _save_cache(cache_path: Path, chunks: List[KBChunk]) -> None:
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _cache_is_valid(cache_path: Path, source_path: Path) -> bool:
+    """Validate cache against the current source file.
+
+    Cache is considered valid only if it has matching source_mtime AND source_sha256.
+    If metadata is missing (older caches), we rebuild.
+    """
+    try:
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+        meta = payload.get("meta") or {}
+        cached_mtime = meta.get("source_mtime")
+        cached_sha = meta.get("source_sha256")
+        if cached_mtime is None or cached_sha is None:
+            return False
+
+        cur_mtime = source_path.stat().st_mtime
+        # If mtime differs, no need to hash the file
+        if float(cached_mtime) != float(cur_mtime):
+            return False
+
+        cur_sha = _sha256_file(source_path)
+        return str(cached_sha) == str(cur_sha)
+    except Exception:
+        logger.exception("KB cache validation failed | cache={} | source={}", str(cache_path), str(source_path))
+        return False
+
+
+def _save_cache(cache_path: Path, chunks: List[KBChunk], source_path: Path) -> None:
     payload = {
-        "version": 2,
+        "version": 3,
+        "meta": {
+            "source_path": str(source_path),
+            "source_mtime": float(source_path.stat().st_mtime),
+            "source_sha256": _sha256_file(source_path),
+        },
         "chunks": [
             {
                 "chunk_id": c.chunk_id,

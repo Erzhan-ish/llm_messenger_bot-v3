@@ -16,6 +16,11 @@ def _env(name: str, default: str = "") -> str:
     v = os.getenv(name)
     return v.strip() if v else default
 
+def reset_kb():
+    global _KB_SINGLETON
+    _KB_SINGLETON = None
+    logger.info("KB singleton reset")
+
 
 def _to_int(v: str, default: int) -> int:
     try:
@@ -64,9 +69,8 @@ def get_kb() -> Optional[KnowledgeBase]:
             default_top_k=top_k,
         )
         logger.info(
-            "KB enabled | source={} | cache={} | chunk_chars={} | overlap_chars={} | top_k={}",
+            "KB enabled | source={} | cache=DISABLED | chunk_chars={} | overlap_chars={} | top_k={}",
             str(source_path),
-            str(cache_path),
             chunk_chars,
             overlap_chars,
             top_k,
