@@ -16,6 +16,12 @@ class OllamaProvider:
             "model": self.model,
             "messages": messages,
             "stream": False,
+            "options": {
+                "temperature": 0.1,   # Низкая температура для уменьшения галлюцинаций
+                "top_p": 0.9,
+                "num_ctx": 2048,      # Ограничение контекста для ускорения обработки (снижает нагрузку на CPU/GPU)
+                "num_predict": 250,   # Ограничение максимальной длины ответа (ускоряет генерацию, предотвращая зацикливание)
+            }
         }
 
         logger.info("Sending request to Ollama | model={}", self.model)

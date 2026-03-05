@@ -158,5 +158,18 @@ async def set_slots(session_id: int, slots: dict) -> None:
             .values(collected_data=slots)
         )
         await db.commit()
+        await db.commit()
 
 
+async def get_user_last_escalation(user_id: int) -> datetime | None:
+    async with async_session() as db:
+        res = await db.execute(
+            select(Session.escalated_at)
+            .where(
+                Session.user_id == user_id,
+                Session.escalated_at.is_not(None)
+            )
+            .order_by(Session.escalated_at.desc())
+            .limit(1)
+        )
+        return res.scalar_one_or_none()

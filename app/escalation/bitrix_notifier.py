@@ -214,7 +214,6 @@ async def notify_manager(
 
         description = (
             f"Новый клиент от бота: {client_fio}\n"
-            f"ИНН: {inn or 'не указан'}\n"
             f"Запрос: {need_text}\n"
             f"{deal_line}"
         )
