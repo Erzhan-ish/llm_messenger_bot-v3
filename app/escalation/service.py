@@ -20,18 +20,27 @@ from app.storage.models import User
 
 
 def _format_request_text(need: str | None, slots: dict) -> str:
-    account = (slots or {}).get("account_type")
-    procedure = (slots or {}).get("procedure_type")
-    inn = (slots or {}).get("inn")
-
+    reason = (slots or {}).get("_escalation_reason", "")
     base = (need or "").strip()
-    if account or procedure or inn:
-        if account in {"ЗАДАТКОВЫЙ", "ЗАЛОГОВЫЙ", "СПЕЦ"}:
-            base = "Открытие спецсчёта"
-        else:
-            base = "Открытие счёта"
-    if not base:
-        base = "Консультация"
+    
+    if "aggression" in reason or "angry" in reason:
+        base = "Агрессия / Жалоба"
+    elif "complex_case" in reason:
+        base = "Сложный случай"
+    elif "dialog_ended_by_user" in reason:
+        base = "Диалог завершен"
+    else:
+        account = (slots or {}).get("account_type")
+        procedure = (slots or {}).get("procedure_type")
+        inn = (slots or {}).get("inn")
+
+        if account or procedure or inn:
+            if account in {"ЗАДАТКОВЫЙ", "ЗАЛОГОВЫЙ", "СПЕЦ"}:
+                base = "Открытие спецсчёта"
+            else:
+                base = "Открытие счёта"
+        if not base:
+            base = "Консультация"
 
     debtor = (slots or {}).get("debtor_type")
     account = (slots or {}).get("account_type")

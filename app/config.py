@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = Field(default="stub")  # stub | ollama
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "qwen2.5:7b-instruct"
+    OLLAMA_ANALYZER_MODEL: str = "qwen2.5:7b-instruct"
 
     # Application
     LOG_LEVEL: str = "INFO"

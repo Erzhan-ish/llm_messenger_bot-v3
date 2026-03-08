@@ -50,10 +50,17 @@ except Exception:
 scenario = "INBOUND_QUESTION"
 
 # --- cleanup filters ---
-BAD_PREFIX_RE = re.compile(r"(?im)^\s*(хорошая\s+практика\s*[!\.]*|хороший\s+вопрос\s*[!\.]*|ответ\s*:|цитата\s*:|ответ\s+на\s+(текущий\s+|новый\s+)?вопрос\s+(клиента|пользователя)\s*:?|вот\s+ответ\s*(на\s+новый\s+вопрос\s+клиента)?\s*:?|уточняющий\s+(ваш\s+)?вопрос\s*:?)\s*")
+BAD_PREFIX_RE = re.compile(r"(?im)^\s*(хорошая\s+практика\s*[!\.]*|хороший\s+вопрос\s*[!\.]*|ответ\s*:|отвечу\s*:|цитата\s*:|отве[тч][у\s]?\s*на\s+(текущий|новый)?\s*вопрос\s*(клиента|пользователя)?\s*:?(\s*[\"\'].*?[\"\'][\.\,]?\s*(Ответ:)?\s*)?|вот\s+ответ\s*(на\s+новый\s+вопрос\s+клиента)?\s*:?|уточняющий\s+(ваш\s+)?вопрос\s*:?|отвечать\s+на\s+этот\s+вопрос\s+можно(?:\s+следующим\s+образом)?(?:[^:\r\n]*:)?\s*)\s*")
 META_LINE_RE = re.compile(r"(?im)^\s*(внимание|фрагменты\s+базы|вопрос\s+клиента|требования\s+к\s+стилю)\b")
 THIRD_PERSON_RE = re.compile(r"(?im)\b(я\s+буду\s+отвечать|клиент\s+спросил|уточню\s+у\s+менеджера)\b")
 SYSTEM_NOTICE_RE = re.compile(r"(?im)пользователь\s+выбрал\s+«?закрыть\s+чат»?\s+и\s+закончил\s+общение\.?")
+
+PROFANITY_RE = re.compile(
+    r"(?i)(ху[йяеи]|наху|поху|охуе|залуп|пизд|пезд|ебат|ебл|ебан|ебуч|выеб|уеб|ублюд|блят|бляд|шлюх|гондон|гандон|мудак|пидар|пидор|заткнись|завали|пошел\s+ты|пошла\s+ты|иди\s+в\s+жопу|иди\s+на)"
+)
+
+def _is_aggressive(text: str) -> bool:
+    return bool(PROFANITY_RE.search(text))
 
 _STOP = {
     "и", "а", "но", "что", "это", "как", "ли", "в", "на", "по", "про", "для", "у", "я", "мы",
@@ -98,7 +105,7 @@ def _limit_sentences_and_len(text: str) -> str:
     t = (text or "").strip()
     if not t:
         return t
-    parts = re.split(r"(?<=[.!?])\s+", t)
+    parts = re.split(r"(?<!руб\.)(?<!коп\.)(?<!шт\.)(?<!г\.)(?<=[.!?])\s+", t)
     parts = [p.strip() for p in parts if p.strip()]
     if len(parts) > 6:
         t = " ".join(parts[:6]).strip()
@@ -266,6 +273,13 @@ async def send_bot(session, channel: str, external_user_id: str, text: str, slot
 
     is_first = not bool(slots.get("_last_bot_text"))
 
+    slots["_last_bot_text"] = text
+
+    if not slots.get("_introduced") and re.search(r"\b(меня\s+зовут|это)\s+алексей\b", text, re.IGNORECASE):
+        slots["_introduced"] = True
+
+    await set_slots(session.id, slots)
+
     for i, part in enumerate(parts):
         if is_first and i == 0:
             delay = random.uniform(2.0, 4.0)
@@ -280,12 +294,6 @@ async def send_bot(session, channel: str, external_user_id: str, text: str, slot
         await save_message(session.id, "bot", part, channel)
         await OutboundDispatcher.send(channel=channel, external_user_id=external_user_id, text=part)
 
-    slots["_last_bot_text"] = text
-
-    if not slots.get("_introduced") and re.search(r"\b(меня\s+зовут|это)\s+алексей\b", text, re.IGNORECASE):
-        slots["_introduced"] = True
-
-    await set_slots(session.id, slots)
     return slots
 
 
@@ -403,9 +411,15 @@ async def maybe_escalate_by_llm_signal(
     reason = str(signal.get("reason") or "other")
     next_step = str(signal.get("next_step") or "none")
 
-    if wants_handoff and next_step == "handoff_manager" and confidence >= 0.65 and score >= 85:
-        await maybe_escalate(session_id, slots, reason=f"{reason_hint}:{reason}")
-        return
+    if wants_handoff and next_step == "handoff_manager":
+        # Ускоренная эскалация для "ready_to_open" (когда клиент сам говорит "мне нужен счет")
+        if reason == "ready_to_open" and confidence >= 0.5 and score >= 60:
+            await maybe_escalate(session_id, slots, reason=f"{reason_hint}:{reason}")
+            return
+            
+        if confidence >= 0.65 and score >= 85:
+            await maybe_escalate(session_id, slots, reason=f"{reason_hint}:{reason}")
+            return
 
     if confidence >= 0.65 and _two_of_last_three(scores, 70):
         await maybe_escalate(session_id, slots, reason=f"{reason_hint}:{reason}")
@@ -427,16 +441,16 @@ _SELF_CHECK_PROMPT = """
 - introduced: true (Алексей уже представлялся), false (еще нет)
 
 ПРАВИЛА КОРРЕКТИРОВКИ (СТРОГО):
-1. КРАТКОСТЬ: Весь ответ должен быть 1-2 предложения (максимум 3, если вопрос сложный). УДАЛЯЙ всю "воду", лишние пояснения и вводные фразы.
+1. КРАТКОСТЬ: Весь ответ должен быть 1-2 предложения (максимум 3, если вопрос сложный). УДАЛЯЙ всю "воду", лишние пояснения, оправдания (про ограничения базы знаний) и вводные фразы вроде "Отвечу кратко:", "Коротко:", "Сразу к делу:". СТРОГО ЗАПРЕЩЕНО упоминать "базу знаний".
 2. ПРИВЕТСТВИЕ: Если introduced=false (это первое сообщение), ты ОБЯЗАН сохранить фразу "Здравствуйте! Меня зовут Алексей..." из черновика. Если introduced=true, УБЕРИ все приветствия и знакомства из черновика.
 3. РЕЛЕВАНТНОСТЬ И ФАКТЫ: 
    - Если в черновике есть галлюцинация про "обратитесь напрямую в банк" — ЗАМЕНИ на предложение нашей помощи в открытии.
    - УДАЛЯЙ любую информацию из KB, которая напрямую НЕ отвечает на вопрос.
 4. НЕТ КЛИШЕ И РОБО-ЯЗЫКУ: Вырезай "Хорошо", "Понял вас", "Чего вы желаете", "В ваших нуждах". Запрещено комментировать сообщения пользователя.
-5. ВОПРОС: В конце может быть ОДИН короткий уточняющий вопрос.
+5. ВОПРОС ПО НЕОБХОДИМОСТИ: Если в черновике есть искусственно придуманный глупый вопрос "на пустом месте" — УДАЛИ ЕГО. Оставляй вопрос только если он действительно нужен для уточнения деталей.
 6. ЖИВОЙ ЯЗЫК: Если черновик звучит как робот, перепиши его более человечно.
 7. ЗАПРЕТ ПОВТОРОВ ИНФОРМАЦИИ. Если ты уже называл цену, банк или условия в ПРЕДЫДУЩЕМ сообщении (см. Контекст диалога), ЗАПРЕЩЕНО дублировать эту информацию в новом ответе. Сразу отвечай на новый вопрос клиента.
-8. ЗАПРЕТ «ЭХА». Никогда не копируй текст своего прошлого сообщения в новый ответ. Если ты уже поздоровался или ответил на часть вопроса ранее, не пиши это снова.
+8. ЗАПРЕТ «ЭХА». Никогда не копируй текст своего прошлого сообщения в новый ответ. Если ты уже поздоровался или ответил на часть вопроса ранее, не пиши это снова. Обрати внимание на 'Контекст диалога' - любые твои ответы оттуда не должны повторяться.
 
 Верни ТОЛЬКО текст ответа. Без JSON, без кавычек, без "Алексей:".
 """
@@ -480,9 +494,9 @@ async def _self_check_and_fix(
 async def _rewrite_to_avoid_repeat(text_to_rewrite: str, last_bot: str) -> str:
     """Rewrite message to avoid repeating last_bot."""
     prompt = (
-        "Перефразируй сообщение менеджера иначе, без повторов."
-        "Правила: 2–4 коротких предложения, максимум 600 символов; без приветствия и без представления; "
-        "не начинай с 'Понял/Хорошо/Да/Принял'. Верни только текст."
+        "Менеджер пытается второй раз подряд отправить одно и то же сообщение. ЭТО ЗАПРЕЩЕНО.\n"
+        "Перефразируй сообщение или, если клиент уже готов, ПРОСТО предложи следующий шаг (например, попроси ИНН для открытия счета).\n"
+        "Правила: 1–3 коротких предложения; без приветствия; не начинай с 'Понял/Хорошо'. Верни только текст ответа клиенту."
     )
     messages = [
         {"role": "system", "content": prompt},
@@ -551,7 +565,6 @@ async def answer_with_context_and_kb(
             "- ОБЯЗАТЕЛЬНО начни ТОЧНО так: 'Здравствуйте! Меня зовут Алексей, я менеджер-консультант.' и СРАЗУ переходи к сути без вводных слов.",
             "- Категорически ЗАПРЕЩЕНЫ фразы-клише: 'Рад вас видеть в нашем чате', 'Чтобы помочь вам как можно эффективнее', 'С радостью отвечу'.",
             "- Твой ответ должен быть ПРЕДЕЛЬНО кратким и сплошным текстом (БЕЗ переносов строк).",
-            "- В конце задай 1 короткий вопрос по теме. СТРОГО ЗАПРЕЩЕНО писать 'Уточняющий вопрос:' перед вопросом.",
             "- ЗАПРЕЩЕНО использовать мета-текст (никаких 'Ответ на вопрос клиента:').",
         ]
     else:
@@ -564,8 +577,7 @@ async def answer_with_context_and_kb(
         ]
         rules += [
             "- Отвечай кратко, без воды. Сплошным текстом, без абзацев.",
-            "- В конце задай 1 ВАЖНЫЙ И УНИКАЛЬНЫЙ уточняющий вопрос по теме. СТРОГО ЗАПРЕЩЕНО писать 'Уточняющий вопрос:' перед вопросом.",
-            "- ВАЖНО: Вопрос должен двигать сделку вперед. ЗАПРЕЩЕНО переспрашивать информацию, которую клиент УЖЕ назвал (если он просит задатковый счет, не спрашивай 'Нужен ли вам задатковый?'). СТРОГО ЗАПРЕЩЕНО задавать общие/проверочные вопросы (например, 'Какие комиссии будут взиматься?', 'Что еще хотите узнать?').",
+            "- ЕСЛИ задаешь вопрос, он должен быть по делу (например, ИП или ООО). НЕ придумывай вопросы, если клиент уже всё сказал или ждет выполнения задачи. СТРОГО ЗАПРЕЩЕНО писать 'Уточняющий вопрос:' перед вопросом.",
         ]
 
     user_payload = [
@@ -603,10 +615,37 @@ async def answer_with_context_and_kb(
 
     last_bot = str(slots.get("_last_bot_text") or "")
     
+    # --- ANTI-ECHO FILTER ---
+    # Поиск копирования любых существенных кусков вообще из ВСЕГО прошлого диалога бота
+    if draft and dialog_ctx:
+        clean_ctx_lower = re.sub(r'[^а-яёa-z0-9\s]', '', dialog_ctx.lower())
+        
+        # Разбиваем на предложения умнее, не разрывая "руб."
+        parts = re.split(r'(?<!руб\.)(?<!коп\.)(?<!шт\.)(?<!г\.)(?<=[.!?])\s+', draft)
+        filtered_parts = []
+        echo_detected = False
+        
+        for p in parts:
+            clean_p = re.sub(r'[^а-яёa-z0-9\s]', '', p.lower()).strip()
+            # Условие: если кусок длиннее 30 символов и он целиком содержится где-либо в контексте (в старых сообщениях)
+            if len(clean_p) > 30 and clean_p in clean_ctx_lower:
+                logger.info(f"Anti-echo: removed duplicated part from deep history: '{p}'")
+                echo_detected = True
+                continue
+            filtered_parts.append(p)
+            
+        if echo_detected:
+            new_draft = " ".join(filtered_parts).strip()
+            if new_draft:
+                draft = new_draft
+            else:
+                draft = await _rewrite_to_avoid_repeat(draft, last_bot)
+    # --- END ANTI-ECHO FILTER ---
+    
     # Conditional Self-Check: trigger if too long, has bad phrases, or hallucinates greetings mid-dialogue
-    bad_patterns = r"(понял|хорошо|конечно|нужды|желаете|текущая цель|цель|к чему вы)"
+    bad_patterns = r"(понял|хорошо|конечно|нужды|желаете|текущая цель|цель|к чему вы|отвечу кратко|коротко|ограничени|баз. знани)"
     if introduced:
-        bad_patterns = r"(понял|хорошо|конечно|нужды|желаете|текущая цель|цель|к чему вы|здравствуйте|приветствую|меня зовут|добрый день)"
+        bad_patterns = r"(понял|хорошо|конечно|нужды|желаете|текущая цель|цель|к чему вы|отвечу кратко|коротко|ограничени|баз. знани|здравствуйте|приветствую|меня зовут|добрый день)"
         
     should_check = (
         len(draft) > 600 or 
@@ -630,14 +669,82 @@ async def answer_with_context_and_kb(
     fixed = _limit_sentences_and_len(fixed)
 
     if last_bot and fixed and _is_near_duplicate(last_bot, fixed):
+        logger.warning("Duplicate detected, rewriting...")
         fixed = await _rewrite_to_avoid_repeat(fixed, last_bot)
         fixed = cleanup_text(fixed)
         fixed = _limit_sentences_and_len(fixed)
+        
+        # Если даже после рерайта ответ почти такой же, ломаем цикл переходом к делу
+        if _is_near_duplicate(last_bot, fixed):
+            logger.warning("Rewrite failed to break loop, falling back to INN request.")
+            fixed = "Понял вас. Подскажите, пожалуйста, ИНН вашей компании, чтобы мы могли проверить возможность и начать процесс открытия счета."
 
     if not fixed:
         fixed = _contextual_fallback(question, kb_empty=had_unknown)
 
     return fixed, had_unknown
+
+
+# ----------------------------
+# Background Analysis
+# ----------------------------
+async def run_business_analysis(session_id: int, user_text: str, had_unknown_any: bool, message: object):
+    try:
+        msgs = await get_messages_by_session(session_id)
+        dialog_text_short = _build_dialog_context(msgs, max_items=12, max_chars=3000)
+        
+        signal = await analyze_dialog(dialog_text_short)
+        
+        active_intent = signal["intent"]
+        intent_conf = signal["intent_confidence"]
+        
+        slots = await get_slots(session_id) or {}
+        slots["_active_intent"] = active_intent
+        slots["_active_intent_confidence"] = intent_conf
+        await set_slots(session_id, slots)
+
+        if active_intent == "END_DIALOG" and intent_conf >= 0.70:
+            await maybe_escalate(session_id, slots, reason="dialog_ended_by_user")
+            return
+
+        escalate = signal.get("escalate", False)
+        confidence = signal.get("escalate_confidence", 0.0)
+        
+        if escalate and signal.get("next_step") == "handoff_manager":
+            if active_intent in {"OPEN_ACCOUNT", "OPEN_SPECIAL_ACCOUNT"} or confidence > 0.8:
+                await maybe_escalate(session_id, slots, reason=f"analyzer:{signal.get('escalate_reason')}")
+                return
+
+        if not had_unknown_any:
+            await maybe_escalate_from_signal(
+                session_id, 
+                slots, 
+                {
+                    "escalate": signal.get("escalate", False),
+                    "reason": signal.get("escalate_reason", "other"),
+                    "interest_score": signal.get("interest_score", 0),
+                    "confidence": signal.get("escalate_confidence", 0.0),
+                    "next_step": signal.get("next_step", "none")
+                }, 
+                reason_hint="analyzer_cached"
+            )
+        else:
+            await maybe_escalate_by_llm_signal(
+                session_id,
+                slots,
+                had_unknown_kb=had_unknown_any,
+                reason_hint="llm_signal_kb_fail",
+            )
+            
+        existing_need = await get_client_need(session_id)
+        client_need_signal = signal.get("client_need")
+        if not existing_need and client_need_signal and client_need_signal != "UNKNOWN":
+            from app.services.client_need_detector import NEED_LABELS
+            label = NEED_LABELS.get(client_need_signal, "Консультация")
+            await set_client_need(session_id, label)
+            
+    except Exception:
+        logger.exception("Background business analysis failed")
 
 
 # ----------------------------
@@ -711,8 +818,6 @@ async def process_message(message):
     # normalize text for storage
     message.text = (message.text or "").strip()
 
-    message.text = (message.text or "").strip()
-
     await save_message(
         session_id=session.id,
         role="user",
@@ -720,6 +825,11 @@ async def process_message(message):
         channel=message.channel,
         external_message_id=message.message_id,
     )
+
+    slots = await get_slots(session.id) or DEFAULT_SLOTS.copy()
+    if slots.get("_escalation_sent"):
+        logger.info(f"User {session.user_id} | Suppressing bot response (session already escalated in slots)")
+        return
 
     user_text = (message.text or "").strip()
     if not user_text:
@@ -737,46 +847,13 @@ async def process_message(message):
     slots.pop("_mode", None)
     await set_slots(session.id, slots)
 
+    if _is_aggressive(user_text):
+        logger.warning(f"Session {session.id} | Aggression detected, escalating silently.")
+        await maybe_escalate(session.id, slots, reason="aggression_profanity")
+        return
+
     async with _TypingScope(message.channel, message.external_user_id):
-        # unified analysis
-        msgs = await get_messages_by_session(session.id)
-        # Pass shorter context to analyzer for speed
-        dialog_text_short = _build_dialog_context(msgs, max_items=12, max_chars=3000)
-        
-        signal = await analyze_dialog(dialog_text_short)
-        
-        active_intent = signal["intent"]
-        intent_conf = signal["intent_confidence"]
-        
-        slots["_active_intent"] = active_intent
-        slots["_active_intent_confidence"] = intent_conf
-        await set_slots(session.id, slots)
-
-        # polite end dialog (avoid "Хорошо" etc.)
-        if active_intent == "END_DIALOG" and intent_conf >= 0.70:
-            await maybe_escalate(session.id, slots, reason="dialog_ended_by_user")
-            await send_bot(
-                session,
-                message.channel,
-                message.external_user_id,
-                "Спасибо за обращение. Если появятся вопросы — напишите.",
-                slots,
-            )
-            return
-
-        # escalation signal
-        if signal["escalate"] and signal["next_step"] == "handoff_manager":
-            await maybe_escalate(session.id, slots, reason=f"analyzer:{signal['escalate_reason']}")
-            await send_bot(
-                session,
-                message.channel,
-                message.external_user_id,
-                "Секунду, подключу менеджера, чтобы помочь точнее.",
-                slots,
-            )
-            return
-
-        # answer (support multi-question; send separately to avoid truncation)
+        # FAST TRACK: directly search KB and answer with LLM
         questions = split_user_questions(user_text)
         had_unknown_any = False
 
@@ -784,40 +861,16 @@ async def process_message(message):
             a, had_unknown = await answer_with_context_and_kb(
                 session.id,
                 q,
-                active_intent=active_intent,
+                active_intent=None,
                 slots=slots,
             )
             had_unknown_any = had_unknown_any or had_unknown
             await send_bot(session, message.channel, message.external_user_id, a, slots)
 
-        # post-signal escalation & client need
-        try:
-            if not had_unknown_any:
-                # Use analysis signal for interest scoring
-                await maybe_escalate_from_signal(
-                    session.id, 
-                    slots, 
-                    {
-                        "escalate": signal["escalate"],
-                        "reason": signal["escalate_reason"],
-                        "interest_score": signal["interest_score"],
-                        "confidence": signal["escalate_confidence"],
-                        "next_step": signal["next_step"]
-                    }, 
-                    reason_hint="analyzer_cached"
-                )
-            else:
-                await maybe_escalate_by_llm_signal(
-                    session.id,
-                    slots,
-                    had_unknown_kb=had_unknown_any,
-                    reason_hint="llm_signal_kb_fail",
-                )
-            
-            # update client need from signal if not set
-            if not await get_client_need(session.id) and signal["client_need"] != "UNKNOWN":
-                from app.services.client_need_detector import NEED_LABELS
-                label = NEED_LABELS.get(signal["client_need"], "Консультация")
-                await set_client_need(session.id, label)
-        except Exception:
-            logger.exception("post processing failed (ignored)")
+        # BACKGROUND: Analyze dialog state and CRM logic
+        asyncio.create_task(run_business_analysis(
+            session_id=session.id,
+            user_text=user_text,
+            had_unknown_any=had_unknown_any,
+            message=message,
+        ))

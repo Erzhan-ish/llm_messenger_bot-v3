@@ -6,6 +6,7 @@ import re
 from typing import Optional, TypedDict, Literal
 
 from app.llm.providers import ask_llm
+from app.config import settings
 
 
 EscReason = Literal[
@@ -59,16 +60,17 @@ SYSTEM_PROMPT = """
   - next_step="ask_clarify" или "none"
 
 Эскалация НУЖНА (escalate=true, next_step="handoff_manager", interest_score>=85, confidence>=0.85), если:
-1) Клиент явно готов к следующему шагу:
-   "оформляем", "давайте начнем", "что дальше?", "куда оплатить?", "готов", "открывайте", "заведите заявку", "приступаем".
+1) Клиент явно готов к следующему шагу, выражает прямое намерение открыть счет, выбрал банк или просит помочь:
+   "оформляем", "давайте начнем", "что дальше?", "куда оплатить?", "готов", "открывайте", "мне нужен счет", "хочу открыть счет", "поможете?", "сможете помочь?", "давайте [название банка]", "давайте росбанк".
    -> reason="ready_to_open", client_need="OPEN_ACCOUNT" или "CONDITIONS" (по смыслу)
 2) Клиент просит человека/менеджера/звонок/контакт:
    "позвоните", "перезвоните", "дайте номер", "подключите менеджера", "оператор".
    -> reason="human_request" (или "callback" если прямо про звонок), client_need="CONSULTATION"
-3) Конфликт/жалоба/агрессия:
-   -> reason="angry", client_need="SUPPORT"
+3) Конфликт/жалоба/агрессия/исправление:
+   Клиент недоволен, ругается ИЛИ прямо исправляет бота (например, "я же сказал", "нет, не умерший", "я не ИП", "Вы не поняли").
+   -> reason="complex_case" или "unknown_kb", client_need="SUPPORT"
 4) Сложный/нестандартный случай или тупик:
-   много уточнений, нет данных в KB, had_unknown_kb=true несколько раз
+   много уточнений, нет данных в KB, had_unknown_kb=true несколько раз, либо бот ходит по кругу.
    -> reason="complex_case" или "unknown_kb", client_need="CONSULTATION"
 
 ЖЁСТКОЕ ПРАВИЛО:
@@ -177,7 +179,7 @@ async def detect_escalation_signal(
     ]
 
     try:
-        raw = await ask_llm(messages)
+        raw = await ask_llm(messages, model=settings.OLLAMA_ANALYZER_MODEL)
         data = _extract_json(raw)
         if not isinstance(data, dict):
             raise ValueError("bad json")

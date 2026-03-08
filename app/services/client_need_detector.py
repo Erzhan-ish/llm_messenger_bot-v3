@@ -6,6 +6,7 @@ import re
 from typing import Optional
 
 from app.llm.providers import ask_llm
+from app.config import settings
 
 ALLOWED_NEEDS = {
     "OPEN_ACCOUNT",
@@ -99,7 +100,7 @@ async def detect_client_need(dialog_text: str) -> str:
     ]
 
     try:
-        raw = await ask_llm(messages)
+        raw = await ask_llm(messages, model=settings.OLLAMA_ANALYZER_MODEL)
         data = _extract_json(raw)
         if isinstance(data, dict):
             norm = _normalize_need(data.get("client_need"))

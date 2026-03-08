@@ -6,6 +6,7 @@ from typing import Optional, TypedDict, Literal, List
 
 from app.llm.providers import ask_llm
 from app.logging import logger
+from app.config import settings
 
 IntentType = Literal[
     "PRICING",
@@ -111,7 +112,7 @@ async def analyze_dialog(dialog_text: str, had_unknown_kb: bool = False) -> Anal
     }
 
     try:
-        raw = await ask_llm(messages)
+        raw = await ask_llm(messages, model=settings.OLLAMA_ANALYZER_MODEL)
         # Try to find the JSON block. We look for { ... } using non-greedy approach first, 
         # but take the longest possible valid-looking block.
         m = re.search(r"\{.*\}", raw, re.DOTALL)

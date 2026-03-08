@@ -5,9 +5,9 @@ from app.logging import logger
 
 
 class OllamaProvider:
-    def __init__(self):
+    def __init__(self, model: str | None = None):
         self.base_url = settings.OLLAMA_BASE_URL
-        self.model = settings.OLLAMA_MODEL
+        self.model = model or settings.OLLAMA_MODEL
 
     async def generate(self, messages: list[dict]) -> str:
         url = f"{self.base_url}/api/chat"
@@ -21,6 +21,7 @@ class OllamaProvider:
                 "top_p": 0.9,
                 "num_ctx": 2048,      # Ограничение контекста для ускорения обработки (снижает нагрузку на CPU/GPU)
                 "num_predict": 250,   # Ограничение максимальной длины ответа (ускоряет генерацию, предотвращая зацикливание)
+                "repeat_penalty": 1.12, # Чтобы не зацикливалось
             }
         }
 
@@ -39,7 +40,7 @@ class OllamaProvider:
 
 
 # === единая точка вызова ===
-async def ask_ollama(messages: list[dict]) -> str:
-    provider = OllamaProvider()
+async def ask_ollama(messages: list[dict], model: str | None = None) -> str:
+    provider = OllamaProvider(model=model)
     return await provider.generate(messages)
 

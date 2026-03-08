@@ -6,6 +6,7 @@ import re
 from typing import Literal, TypedDict, Optional
 
 from app.llm.providers import ask_llm
+from app.config import settings
 
 
 IntentType = Literal[
@@ -85,7 +86,7 @@ async def detect_intent(dialog_text: str) -> IntentSignal:
         {"role": "user", "content": dialog_text or ""},
     ]
     try:
-        raw = await ask_llm(messages)
+        raw = await ask_llm(messages, model=settings.OLLAMA_ANALYZER_MODEL)
         data = _extract_json(raw)
         if not isinstance(data, dict):
             raise ValueError("bad json")
