@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import re
-import json
 import asyncio
 import contextlib
 from dataclasses import dataclass
@@ -114,35 +113,6 @@ def _limit_sentences_and_len(text: str) -> str:
     return t
 
 
-def split_user_questions(text: str) -> list[str]:
-    """Split multi-question user message.
-
-    We keep your original split-by-empty-lines behavior, but also split long single
-    paragraphs by '?' when it looks like multiple questions.
-    """
-    t = (text or "").strip()
-    if not t:
-        return []
-
-    # First split by blank lines (strong boundary)
-    blocks = [p.strip() for p in re.split(r"\n{2,}", t) if p.strip()]
-    if len(blocks) > 1:
-        return blocks
-
-    # Heuristic: split by multiple question marks in one paragraph
-    if t.count("?") >= 2:
-        parts = [p.strip() for p in re.split(r"\?\s+", t) if p.strip()]
-        # put '?' back where it belongs
-        out: list[str] = []
-        for p in parts:
-            if not p.endswith("?"):
-                p = p + "?"
-            out.append(p)
-        return out
-
-    return [t]
-
-
 def _keywords(s: str) -> set[str]:
     s = (s or "").lower()
     toks = re.findall(r"[a-zа-яё0-9%]+", s)
@@ -193,7 +163,7 @@ def _contextual_fallback(question: str, *, kb_empty: bool) -> str:
     return "Уточните, пожалуйста, ваш вопрос чуть конкретнее."
 
 
-def _build_dialog_context(msgs: list[dict], *, max_items: int = 80, max_chars: int = 14000) -> str:
+def _build_dialog_context(msgs: list[dict], *, max_items: int = 6, max_chars: int = 2000) -> str:
     tail = [m for m in msgs if (m.get("text") or "").strip()][-max_items:]
     lines: list[str] = []
     total = 0
@@ -426,88 +396,9 @@ async def maybe_escalate_by_llm_signal(
         return
 
 
-# ----------------------------
-# Self-check
-# ----------------------------
-_SELF_CHECK_PROMPT = """
-Ты — главный редактор ответов менеджера Алексея. Твоя задача: сделать ответ максимально коротким, точным и живым.
-
-Вход:
-- dialog_ctx: контекст диалога
-- kb_snips: справочная информация
-- question: текущее сообщение клиента
-- draft: черновик ответа
-- last_bot: последнее сообщение бота
-- introduced: true (Алексей уже представлялся), false (еще нет)
-
-ПРАВИЛА КОРРЕКТИРОВКИ (СТРОГО):
-1. КРАТКОСТЬ: Весь ответ должен быть 1-2 предложения (максимум 3, если вопрос сложный). УДАЛЯЙ всю "воду", лишние пояснения, оправдания (про ограничения базы знаний) и вводные фразы вроде "Отвечу кратко:", "Коротко:", "Сразу к делу:". СТРОГО ЗАПРЕЩЕНО упоминать "базу знаний".
-2. ПРИВЕТСТВИЕ: Если introduced=false (это первое сообщение), ты ОБЯЗАН сохранить фразу "Здравствуйте! Меня зовут Алексей..." из черновика. Если introduced=true, УБЕРИ все приветствия и знакомства из черновика.
-3. РЕЛЕВАНТНОСТЬ И ФАКТЫ: 
-   - Если в черновике есть галлюцинация про "обратитесь напрямую в банк" — ЗАМЕНИ на предложение нашей помощи в открытии.
-   - УДАЛЯЙ любую информацию из KB, которая напрямую НЕ отвечает на вопрос.
-4. НЕТ КЛИШЕ И РОБО-ЯЗЫКУ: Вырезай "Хорошо", "Понял вас", "Чего вы желаете", "В ваших нуждах". Запрещено комментировать сообщения пользователя.
-5. ВОПРОС ПО НЕОБХОДИМОСТИ: Если в черновике есть искусственно придуманный глупый вопрос "на пустом месте" — УДАЛИ ЕГО. Оставляй вопрос только если он действительно нужен для уточнения деталей.
-6. ЖИВОЙ ЯЗЫК: Если черновик звучит как робот, перепиши его более человечно.
-7. ЗАПРЕТ ПОВТОРОВ ИНФОРМАЦИИ. Если ты уже называл цену, банк или условия в ПРЕДЫДУЩЕМ сообщении (см. Контекст диалога), ЗАПРЕЩЕНО дублировать эту информацию в новом ответе. Сразу отвечай на новый вопрос клиента.
-8. ЗАПРЕТ «ЭХА». Никогда не копируй текст своего прошлого сообщения в новый ответ. Если ты уже поздоровался или ответил на часть вопроса ранее, не пиши это снова. Обрати внимание на 'Контекст диалога' - любые твои ответы оттуда не должны повторяться.
-
-Верни ТОЛЬКО текст ответа. Без JSON, без кавычек, без "Алексей:".
-"""
-
-
-async def _self_check_and_fix(
-        *,
-        dialog_ctx: str,
-        kb_snips: str,
-        question: str,
-        draft: str,
-        last_bot: str,
-        introduced: bool,
-) -> str:
-    """LLM self-check returning final text (no JSON)."""
-    draft = cleanup_text(_limit_sentences_and_len(draft))
-
-    payload = {
-        "dialog_ctx": dialog_ctx or "",
-        "kb_snips": kb_snips or "",
-        "question": question or "",
-        "draft": draft or "",
-        "last_bot": last_bot or "",
-        "introduced": bool(introduced),
-    }
-
-    messages = [
-        {"role": "system", "content": _SELF_CHECK_PROMPT.strip()},
-        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-    ]
-
-    try:
-        fixed = await ask_llm(messages)
-        fixed = cleanup_text(_limit_sentences_and_len(fixed))
-        return fixed or draft
-    except Exception:
-        logger.exception("self_check ask_llm failed")
-        return draft
-
-
-async def _rewrite_to_avoid_repeat(text_to_rewrite: str, last_bot: str) -> str:
-    """Rewrite message to avoid repeating last_bot."""
-    prompt = (
-        "Менеджер пытается второй раз подряд отправить одно и то же сообщение. ЭТО ЗАПРЕЩЕНО.\n"
-        "Перефразируй сообщение или, если клиент уже готов, ПРОСТО предложи следующий шаг (например, попроси ИНН для открытия счета).\n"
-        "Правила: 1–3 коротких предложения; без приветствия; не начинай с 'Понял/Хорошо'. Верни только текст ответа клиенту."
-    )
-    messages = [
-        {"role": "system", "content": prompt},
-        {"role": "user", "content": json.dumps({"text": text_to_rewrite, "last_bot": last_bot}, ensure_ascii=False)},
-    ]
-    try:
-        out = await ask_llm(messages)
-        out = cleanup_text(_limit_sentences_and_len(out))
-        return out or text_to_rewrite
-    except Exception:
-        return text_to_rewrite
+_DUPLICATE_FALLBACK = (
+    "Подскажите, пожалуйста, ИНН вашей компании, чтобы мы могли продолжить."
+)
 
 
 # ----------------------------
@@ -519,9 +410,10 @@ async def answer_with_context_and_kb(
         *,
         active_intent: str | None,
         slots: dict,
+        use_kb: bool = True,
 ) -> Tuple[str, bool]:
     msgs = await get_messages_by_session(session_id)
-    dialog_ctx = _build_dialog_context(msgs, max_items=80, max_chars=14000)
+    dialog_ctx = _build_dialog_context(msgs, max_items=6, max_chars=2000)
 
     # TRUE intro detection: Only check what the BOT has said, not the user!
     bot_msgs = [m for m in msgs if m.get("role") == "bot"]
@@ -536,49 +428,32 @@ async def answer_with_context_and_kb(
     
     logger.info(f"Session {session_id} | intro={introduced}, first={is_first_turn}, bot_msgs={len(bot_msgs)}")
 
-    # --- CONTEXTUAL QUERY EXPANSION ---
-    known_banks = ["уралсиб", "ткб", "росбанк", "альфа", "альфа-банк", "т-банк", "мкб"]
-    found_cur_banks = {b for b in known_banks if b in question.lower()}
-    
-    search_query = question
-    if not found_cur_banks:
-        # Ищем последний упомянутый банк во всей истории диалога (исключая текущий вопрос)
-        last_mentioned_bank = None
-        for m in reversed(msgs[:-1]):
-            text = (m.get("text") or "").lower()
-            found = [b for b in known_banks if b in text]
-            if found:
-                last_mentioned_bank = found[0]
-                break
-                
-        if last_mentioned_bank:
-            search_query = f"{question} {last_mentioned_bank}"
-            logger.info(f"Session {session_id} | Expanded KB query with history: {search_query}")
+    kb_snips = ""
+    had_unknown = False
+    if use_kb:
+        # --- CONTEXTUAL QUERY EXPANSION ---
+        known_banks = ["уралсиб", "ткб", "росбанк", "альфа", "альфа-банк", "т-банк", "мкб"]
+        found_cur_banks = {b for b in known_banks if b in question.lower()}
 
-    kb_snips = (get_kb_snippets(search_query, top_k=8) or "").strip()
-    had_unknown = not bool(kb_snips)
+        search_query = question
+        if not found_cur_banks:
+            # Ищем последний упомянутый банк во всей истории диалога (исключая текущий вопрос)
+            last_mentioned_bank = None
+            for m in reversed(msgs[:-1]):
+                text = (m.get("text") or "").lower()
+                found = [b for b in known_banks if b in text]
+                if found:
+                    last_mentioned_bank = found[0]
+                    break
+
+            if last_mentioned_bank:
+                search_query = f"{question} {last_mentioned_bank}"
+                logger.info(f"Session {session_id} | Expanded KB query with history: {search_query}")
+
+        kb_snips = (get_kb_snippets(search_query, top_k=3) or "").strip()
+        had_unknown = not bool(kb_snips)
 
     system_prompt = build_manager_system_prompt(is_first_turn=(not introduced))
-
-    if not introduced:
-        rules = [
-            "- ОБЯЗАТЕЛЬНО начни ТОЧНО так: 'Здравствуйте! Меня зовут Алексей, я менеджер-консультант.' и СРАЗУ переходи к сути без вводных слов.",
-            "- Категорически ЗАПРЕЩЕНЫ фразы-клише: 'Рад вас видеть в нашем чате', 'Чтобы помочь вам как можно эффективнее', 'С радостью отвечу'.",
-            "- Твой ответ должен быть ПРЕДЕЛЬНО кратким и сплошным текстом (БЕЗ переносов строк).",
-            "- ЗАПРЕЩЕНО использовать мета-текст (никаких 'Ответ на вопрос клиента:').",
-        ]
-    else:
-        rules = [
-            "- Твой ответ должен быть 1-2 предложения (сплошным текстом, БЕЗ переносов строк).",
-            "- ЗАПРЕЩЕНО симулировать вопросы и использовать мета-текст (никаких 'Ответ на вопрос клиента:', 'Вот ответ:' или 'Уточняющий вопрос:'). Сразу давай информацию.",
-            "- ЗАПРЕЩЕНО здороваться или представляться (без 'Здравствуйте' или 'я Алексей').",
-            "- ЗАПРЕЩЕНО копировать или повторять свои прошлые ответы из Контекста диалога (эффект эха). Отвечай ТОЛЬКО на новый вопрос клиента.",
-            "- ЗАПРЕЩЕНО задавать один и тот же шаблонный вопрос (например, 'Интересуетесь ли вы...') дважды за диалог.",
-        ]
-        rules += [
-            "- Отвечай кратко, без воды. Сплошным текстом, без абзацев.",
-            "- ЕСЛИ задаешь вопрос, он должен быть по делу (например, ИП или ООО). НЕ придумывай вопросы, если клиент уже всё сказал или ждет выполнения задачи. СТРОГО ЗАПРЕЩЕНО писать 'Уточняющий вопрос:' перед вопросом.",
-        ]
 
     user_payload = [
         f"SCENARIO={scenario}",
@@ -587,13 +462,11 @@ async def answer_with_context_and_kb(
         dialog_ctx or "(контекст пуст)",
         "",
         "Фрагменты базы знаний (KB):",
-        kb_snips if kb_snips else "(по этому вопросу нет подходящих фрагментов)",
+        kb_snips if kb_snips else ("(поиск по базе отключен)" if not use_kb else "(по этому вопросу нет подходящих фрагментов)"),
         "",
         "Текущий вопрос клиента:",
         question,
-        "",
-        "Правила ответа (ЖЕСТКО):"
-    ] + rules
+    ]
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -639,45 +512,17 @@ async def answer_with_context_and_kb(
             if new_draft:
                 draft = new_draft
             else:
-                draft = await _rewrite_to_avoid_repeat(draft, last_bot)
+                draft = _DUPLICATE_FALLBACK
     # --- END ANTI-ECHO FILTER ---
     
-    # Conditional Self-Check: trigger if too long, has bad phrases, or hallucinates greetings mid-dialogue
-    bad_patterns = r"(понял|хорошо|конечно|нужды|желаете|текущая цель|цель|к чему вы|отвечу кратко|коротко|ограничени|баз. знани)"
-    if introduced:
-        bad_patterns = r"(понял|хорошо|конечно|нужды|желаете|текущая цель|цель|к чему вы|отвечу кратко|коротко|ограничени|баз. знани|здравствуйте|приветствую|меня зовут|добрый день)"
-        
-    should_check = (
-        len(draft) > 600 or 
-        re.search(bad_patterns, draft.lower()) or
-        (introduced and "здравствуйте" in draft.lower())
-    )
-
-    if should_check:
-        fixed = await _self_check_and_fix(
-            dialog_ctx=dialog_ctx,
-            kb_snips=kb_snips,
-            question=question,
-            draft=draft or "",
-            last_bot=last_bot,
-            introduced=introduced, # We can pass it, but it's ignored by self-check rules now
-        )
-    else:
-        fixed = draft
+    fixed = draft
 
     fixed = cleanup_text(fixed)
     fixed = _limit_sentences_and_len(fixed)
 
     if last_bot and fixed and _is_near_duplicate(last_bot, fixed):
-        logger.warning("Duplicate detected, rewriting...")
-        fixed = await _rewrite_to_avoid_repeat(fixed, last_bot)
-        fixed = cleanup_text(fixed)
-        fixed = _limit_sentences_and_len(fixed)
-        
-        # Если даже после рерайта ответ почти такой же, ломаем цикл переходом к делу
-        if _is_near_duplicate(last_bot, fixed):
-            logger.warning("Rewrite failed to break loop, falling back to INN request.")
-            fixed = "Понял вас. Подскажите, пожалуйста, ИНН вашей компании, чтобы мы могли проверить возможность и начать процесс открытия счета."
+        logger.warning("Duplicate detected, falling back to short next step.")
+        fixed = _DUPLICATE_FALLBACK
 
     if not fixed:
         fixed = _contextual_fallback(question, kb_empty=had_unknown)
@@ -853,24 +698,84 @@ async def process_message(message):
         return
 
     async with _TypingScope(message.channel, message.external_user_id):
-        # FAST TRACK: directly search KB and answer with LLM
-        questions = split_user_questions(user_text)
-        had_unknown_any = False
+        from app.processing.state_detector import detect_state, DialogState
+        from app.processing.triggers import (
+            AGGRESSIVE_REPLIES,
+            END_DIALOG_PHRASES,
+            NEGATIVE_REPLIES,
+            SHORT_NEUTRAL,
+        )
 
-        for q in questions:
-            a, had_unknown = await answer_with_context_and_kb(
+        user_text_lower = re.sub(r"[^а-яёa-z\s]", "", user_text.lower()).strip()
+        dialog_state = detect_state(user_text)
+
+        if dialog_state == DialogState.AGGRESSIVE:
+            await send_bot(
+                session,
+                message.channel,
+                message.external_user_id,
+                AGGRESSIVE_REPLIES[0],
+                slots,
+            )
+            await maybe_escalate(session.id, slots, reason="aggressive_state")
+            return
+
+        if dialog_state in {DialogState.NEGATIVE, DialogState.NOT_INTERESTED}:
+            await send_bot(
+                session,
+                message.channel,
+                message.external_user_id,
+                NEGATIVE_REPLIES[0],
+                slots,
+            )
+            return
+
+        if dialog_state == DialogState.LATER:
+            await send_bot(
+                session,
+                message.channel,
+                message.external_user_id,
+                "Хорошо, напишем позже. Если появятся вопросы — я на связи.",
+                slots,
+            )
+            return
+
+        # --- ROUTER: FAST PATH 1 (Farewell) ---
+        if user_text_lower in END_DIALOG_PHRASES:
+            await send_bot(
+                session,
+                message.channel,
+                message.external_user_id,
+                "Рад был помочь! Обращайтесь, если появятся вопросы.",
+                slots,
+            )
+            await maybe_escalate(session.id, slots, reason="dialog_ended_by_user")
+            return
+
+        # --- ROUTER: FAST PATH 2 (Short neutral replies) ---
+        if user_text_lower in SHORT_NEUTRAL:
+            a, had_unknown_any = await answer_with_context_and_kb(
                 session.id,
-                q,
+                user_text,
+                active_intent=None,
+                slots=slots,
+                use_kb=False,
+            )
+        else:
+            a, had_unknown_any = await answer_with_context_and_kb(
+                session.id,
+                user_text,
                 active_intent=None,
                 slots=slots,
             )
-            had_unknown_any = had_unknown_any or had_unknown
-            await send_bot(session, message.channel, message.external_user_id, a, slots)
 
-        # BACKGROUND: Analyze dialog state and CRM logic
-        asyncio.create_task(run_business_analysis(
-            session_id=session.id,
-            user_text=user_text,
-            had_unknown_any=had_unknown_any,
-            message=message,
-        ))
+        await send_bot(session, message.channel, message.external_user_id, a, slots)
+
+        # BACKGROUND: Analyze dialog state and CRM logic (skip for trivial messages)
+        if user_text_lower not in SHORT_NEUTRAL and user_text_lower not in END_DIALOG_PHRASES:
+            asyncio.create_task(run_business_analysis(
+                session_id=session.id,
+                user_text=user_text,
+                had_unknown_any=had_unknown_any,
+                message=message,
+            ))
