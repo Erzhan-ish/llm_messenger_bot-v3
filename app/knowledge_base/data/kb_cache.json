@@ -1,1333 +1,2905 @@
 {
-  "version": 3,
+  "version": 4,
   "meta": {
     "source_path": "knowledge_base.txt",
-    "source_mtime": 1772864296.4153342,
-    "source_sha256": "57ebfe4f56f0e97f6df663328fd272ff3aef8150c9d51246f8f5aa45b21140bf"
+    "source_mtime": 1773825803.6642053,
+    "source_sha256": "19654c2d6400ebb680759d52210bf5a8f34b976afa4e4005de70a1e097bc66c5"
   },
   "chunks": [
     {
       "chunk_id": 1,
-      "text": "---CHUNK--- МЕТА | KB_NAME: Единая база знаний по открытию счетов для арбитражных управляющих (RAG/локальная LLM).",
+      "text": "ООО «В плюсе» — партнер банков Альфа-Банк, ТКБ, Уралсиб, МКБ, Т-Банк и Росбанк. Компания помогает арбитражным управляющим открывать и сопровождать счета должников в процедурах банкротства.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "company_info",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "about",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "company_info",
+        "about",
+        "partners"
+      ],
+      "fact": "ООО «В плюсе» — партнер банков Альфа-Банк, ТКБ, Уралсиб, МКБ, Т-Банк и Росбанк. Компания помогает арбитражным управляющим открывать и сопровождать счета должников в процедурах банкротства.",
+      "positioning": null,
+      "search_text": "company_info about ооо «в плюсе» — партнер банков альфа-банк, ткб, уралсиб, мкб, т-банк и росбанк. компания помогает арбитражным управляющим открывать и сопровождать счета должников в процедурах банкротства. company_info about partners",
+      "is_internal": false
     },
     {
       "chunk_id": 2,
-      "text": "---CHUNK--- МЕТА | FORMAT: короткие атомарные блоки с тегами, без смешивания сущностей.",
+      "text": "Компания предоставляет льготные тарифы по сравнению с прямым обращением в банк и помогает с бюрократией, документами, коммуникацией с банками и финмониторингом.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "feature",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "benefits",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "feature",
+        "benefits",
+        "tariffs",
+        "service"
+      ],
+      "fact": "Компания предоставляет льготные тарифы по сравнению с прямым обращением в банк и помогает с бюрократией, документами, коммуникацией с банками и финмониторингом.",
+      "positioning": null,
+      "search_text": "feature benefits компания предоставляет льготные тарифы по сравнению с прямым обращением в банк и помогает с бюрократией, документами, коммуникацией с банками и финмониторингом. feature benefits tariffs service",
+      "is_internal": false
     },
     {
       "chunk_id": 3,
-      "text": "---CHUNK--- СТАТУС | БАНК: Уралсиб (Малый бизнес) | ACTIVE.",
+      "text": "Альфа-Банк открывает счета только юридическим лицам.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "availability",
+      "bank": "Альфа-Банк",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [
+        "альфа",
+        "alfabank",
+        "alpha"
+      ],
+      "tags": [
+        "availability",
+        "bank",
+        "yul",
+        "active"
+      ],
+      "fact": "Альфа-Банк открывает счета только юридическим лицам.",
+      "positioning": null,
+      "search_text": "availability альфа-банк альфа-банк открывает счета только юридическим лицам. юл альфа alfabank alpha availability bank yul active",
+      "is_internal": false
     },
     {
       "chunk_id": 4,
-      "text": "---CHUNK--- СТАТУС | БАНК: ТКБ | ACTIVE.",
+      "text": "ТКБ открывает счета юридическим лицам.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "availability",
+      "bank": "ТКБ",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [
+        "ткб",
+        "транскапиталбанк",
+        "transcapitalbank"
+      ],
+      "tags": [
+        "availability",
+        "bank",
+        "yul",
+        "active"
+      ],
+      "fact": "ТКБ открывает счета юридическим лицам.",
+      "positioning": null,
+      "search_text": "availability ткб ткб открывает счета юридическим лицам. юл ткб транскапиталбанк transcapitalbank availability bank yul active",
+      "is_internal": false
     },
     {
       "chunk_id": 5,
-      "text": "---CHUNK--- СТАТУС | БАНК: Альфа-Банк | ACTIVE.",
+      "text": "ТКБ открывает счета физическим лицам.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "availability",
+      "bank": "ТКБ",
+      "client_type": [
+        "ФЛ"
+      ],
+      "status": "ACTIVE",
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [
+        "ткб",
+        "транскапиталбанк",
+        "transcapitalbank"
+      ],
+      "tags": [
+        "availability",
+        "bank",
+        "fl",
+        "active"
+      ],
+      "fact": "ТКБ открывает счета физическим лицам.",
+      "positioning": null,
+      "search_text": "availability ткб ткб открывает счета физическим лицам. фл ткб транскапиталбанк transcapitalbank availability bank fl active",
+      "is_internal": false
     },
     {
       "chunk_id": 6,
-      "text": "---CHUNK--- СТАТУС | БАНК: Т-Банк | PAUSE.",
+      "text": "Уралсиб открывает счета юридическим лицам в сегменте «Малый бизнес».",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "availability",
+      "bank": "Уралсиб",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [
+        "уралсиб",
+        "uralsib"
+      ],
+      "tags": [
+        "availability",
+        "bank",
+        "yul",
+        "active",
+        "small_business"
+      ],
+      "fact": "Уралсиб открывает счета юридическим лицам в сегменте «Малый бизнес».",
+      "positioning": null,
+      "search_text": "availability уралсиб уралсиб открывает счета юридическим лицам в сегменте «малый бизнес». юл уралсиб uralsib availability bank yul active small_business",
+      "is_internal": false
     },
     {
       "chunk_id": 7,
-      "text": "---CHUNK--- СТАТУС | БАНК: Уралсиб (Средний бизнес) | PAUSE.",
+      "text": "Уралсиб в сегменте «Средний бизнес» временно не открывает счета.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "availability",
+      "bank": "Уралсиб",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "PAUSE",
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [
+        "уралсиб",
+        "uralsib"
+      ],
+      "tags": [
+        "availability",
+        "bank",
+        "yul",
+        "pause",
+        "medium_business"
+      ],
+      "fact": "Уралсиб в сегменте «Средний бизнес» временно не открывает счета.",
+      "positioning": null,
+      "search_text": "availability уралсиб уралсиб в сегменте «средний бизнес» временно не открывает счета. юл уралсиб uralsib availability bank yul pause medium_business",
+      "is_internal": false
     },
     {
       "chunk_id": 8,
-      "text": "---CHUNK--- СТАТУС | БАНК: МКБ | PAUSE.",
+      "text": "Т-Банк открывает счета только юридическим лицам, но сейчас открытие временно приостановлено.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "availability",
+      "bank": "Т-Банк",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "PAUSE",
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [
+        "т-банк",
+        "тинькофф",
+        "tbank",
+        "tinkoff"
+      ],
+      "tags": [
+        "availability",
+        "bank",
+        "yul",
+        "pause"
+      ],
+      "fact": "Т-Банк открывает счета только юридическим лицам, но сейчас открытие временно приостановлено.",
+      "positioning": null,
+      "search_text": "availability т-банк т-банк открывает счета только юридическим лицам, но сейчас открытие временно приостановлено. юл т-банк тинькофф tbank tinkoff availability bank yul pause",
+      "is_internal": false
     },
     {
       "chunk_id": 9,
-      "text": "---CHUNK--- СТАТУС | БАНК: Росбанк | PAUSE.",
+      "text": "МКБ открывает счета только юридическим лицам, но сейчас открытие временно приостановлено.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "availability",
+      "bank": "МКБ",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "PAUSE",
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [
+        "мкб",
+        "mkb"
+      ],
+      "tags": [
+        "availability",
+        "bank",
+        "yul",
+        "pause"
+      ],
+      "fact": "МКБ открывает счета только юридическим лицам, но сейчас открытие временно приостановлено.",
+      "positioning": null,
+      "search_text": "availability мкб мкб открывает счета только юридическим лицам, но сейчас открытие временно приостановлено. юл мкб mkb availability bank yul pause",
+      "is_internal": false
     },
     {
       "chunk_id": 10,
-      "text": "---CHUNK--- ТЕРМИН | Банкротство: Процедура оценки финансового состояния должника и справедливого удовлетворения интересов кредиторов, регулируемая 127-ФЗ.",
+      "text": "Росбанк открывает счета юридическим лицам, но сейчас открытие временно приостановлено.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "availability",
+      "bank": "Росбанк",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "PAUSE",
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [
+        "росбанк",
+        "rosbank"
+      ],
+      "tags": [
+        "availability",
+        "bank",
+        "yul",
+        "pause"
+      ],
+      "fact": "Росбанк открывает счета юридическим лицам, но сейчас открытие временно приостановлено.",
+      "positioning": null,
+      "search_text": "availability росбанк росбанк открывает счета юридическим лицам, но сейчас открытие временно приостановлено. юл росбанк rosbank availability bank yul pause",
+      "is_internal": false
     },
     {
       "chunk_id": 11,
-      "text": "---CHUNK--- ТЕРМИН | Арбитражный управляющий (АУ): Профессиональный участник антикризисного управления под контролем арбитражного суда.",
+      "text": "Открытие счета для юридического лица в Альфа-Банке стоит 800 руб.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "Альфа-Банк",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "opening_fee",
+      "topic": null,
+      "value_num": 800.0,
+      "value_text": "800 руб.",
+      "aliases": [
+        "альфа",
+        "alfabank",
+        "alpha"
+      ],
+      "tags": [
+        "pricing",
+        "opening_fee",
+        "yul",
+        "active"
+      ],
+      "fact": "Открытие счета для юридического лица в Альфа-Банке стоит 800 руб.",
+      "positioning": null,
+      "search_text": "pricing альфа-банк opening_fee 800 руб. открытие счета для юридического лица в альфа-банке стоит 800 руб. юл альфа alfabank alpha pricing opening_fee yul active",
+      "is_internal": false
     },
     {
       "chunk_id": 12,
-      "text": "---CHUNK--- ТЕРМИН | Конкурсная масса: Все имущество должника на момент открытия конкурсного производства.",
+      "text": "Ведение счета для юридического лица в Альфа-Банке стоит 800 руб.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "Альфа-Банк",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "monthly_fee",
+      "topic": null,
+      "value_num": 800.0,
+      "value_text": "800 руб.",
+      "aliases": [
+        "альфа",
+        "alfabank",
+        "alpha"
+      ],
+      "tags": [
+        "pricing",
+        "monthly_fee",
+        "yul",
+        "active"
+      ],
+      "fact": "Ведение счета для юридического лица в Альфа-Банке стоит 800 руб.",
+      "positioning": null,
+      "search_text": "pricing альфа-банк monthly_fee 800 руб. ведение счета для юридического лица в альфа-банке стоит 800 руб. юл альфа alfabank alpha pricing monthly_fee yul active",
+      "is_internal": false
     },
     {
       "chunk_id": 13,
-      "text": "---CHUNK--- ТЕРМИН | Капитализация: Банковский продукт по начислению процентов на основной счет должника.",
+      "text": "Контроль банкротных операций в Альфа-Банке бесплатен.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "Альфа-Банк",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "bankruptcy_control_fee",
+      "topic": null,
+      "value_num": 0.0,
+      "value_text": "0 руб.",
+      "aliases": [
+        "альфа",
+        "alfabank",
+        "alpha"
+      ],
+      "tags": [
+        "pricing",
+        "control_fee",
+        "yul",
+        "active"
+      ],
+      "fact": "Контроль банкротных операций в Альфа-Банке бесплатен.",
+      "positioning": null,
+      "search_text": "pricing альфа-банк bankruptcy_control_fee 0 руб. контроль банкротных операций в альфа-банке бесплатен. юл альфа alfabank alpha pricing control_fee yul active",
+      "is_internal": false
     },
     {
       "chunk_id": 14,
-      "text": "---CHUNK--- ПРАВИЛО | Капитализация: Капитализации нет ни в одном из банков-партнеров.",
+      "text": "Перевод на юридическое лицо в Альфа-Банке стоит 35 руб.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "Альфа-Банк",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "transfer_to_yul_fee",
+      "topic": null,
+      "value_num": 35.0,
+      "value_text": "35 руб.",
+      "aliases": [
+        "альфа",
+        "alfabank",
+        "alpha"
+      ],
+      "tags": [
+        "pricing",
+        "transfer_fee",
+        "yul",
+        "active"
+      ],
+      "fact": "Перевод на юридическое лицо в Альфа-Банке стоит 35 руб.",
+      "positioning": null,
+      "search_text": "pricing альфа-банк transfer_to_yul_fee 35 руб. перевод на юридическое лицо в альфа-банке стоит 35 руб. юл альфа alfabank alpha pricing transfer_fee yul active",
+      "is_internal": false
     },
     {
       "chunk_id": 15,
-      "text": "---CHUNK--- ПРАВИЛО | Открытие спецсчета: Открыть только специальный счет без открытия основного счета нельзя.",
+      "text": "Переводы на физических лиц, возврат задатков и вознаграждение АУ на ФЛ в Альфа-Банке стоят 0% до 150 000 руб. и 0.5% свыше 150 000 руб.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "Альфа-Банк",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "transfer_to_fl_fee",
+      "topic": null,
+      "value_num": null,
+      "value_text": "до 150 000 руб. — 0%; свыше 150 000 руб. — 0.5%",
+      "aliases": [
+        "альфа",
+        "alfabank",
+        "alpha"
+      ],
+      "tags": [
+        "pricing",
+        "transfer_fee",
+        "fl",
+        "yul",
+        "active"
+      ],
+      "fact": "Переводы на физических лиц, возврат задатков и вознаграждение АУ на ФЛ в Альфа-Банке стоят 0% до 150 000 руб. и 0.5% свыше 150 000 руб.",
+      "positioning": null,
+      "search_text": "pricing альфа-банк transfer_to_fl_fee до 150 000 руб. — 0%; свыше 150 000 руб. — 0.5% переводы на физических лиц, возврат задатков и вознаграждение ау на фл в альфа-банке стоят 0% до 150 000 руб. и 0.5% свыше 150 000 руб. юл альфа alfabank alpha pricing transfer_fee fl yul active",
+      "is_internal": false
     },
     {
       "chunk_id": 16,
-      "text": "---CHUNK--- ПРАВИЛО | Подписание онлайн: Подписание документов на открытие счета онлайн невозможно.",
+      "text": "Вознаграждение АУ на юридическое лицо в Альфа-Банке стоит 35 руб.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "Альфа-Банк",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "au_reward_to_yul_fee",
+      "topic": null,
+      "value_num": 35.0,
+      "value_text": "35 руб.",
+      "aliases": [
+        "альфа",
+        "alfabank",
+        "alpha"
+      ],
+      "tags": [
+        "pricing",
+        "au_reward",
+        "yul",
+        "active"
+      ],
+      "fact": "Вознаграждение АУ на юридическое лицо в Альфа-Банке стоит 35 руб.",
+      "positioning": null,
+      "search_text": "pricing альфа-банк au_reward_to_yul_fee 35 руб. вознаграждение ау на юридическое лицо в альфа-банке стоит 35 руб. юл альфа alfabank alpha pricing au_reward yul active",
+      "is_internal": false
     },
     {
       "chunk_id": 17,
-      "text": "---CHUNK--- ПРАВИЛО | Подписание документов АУ: Происходит лично в любом регионе РФ, где есть ближайшее отделение банка-партнера.",
+      "text": "Открытие счета для юридического лица в ТКБ снижено с базовых 25 000 руб. до 2 800 руб.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "ТКБ",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "opening_fee",
+      "topic": null,
+      "value_num": 2800.0,
+      "value_text": "2 800 руб.",
+      "aliases": [
+        "ткб",
+        "транскапиталбанк",
+        "transcapitalbank"
+      ],
+      "tags": [
+        "pricing",
+        "opening_fee",
+        "yul",
+        "active"
+      ],
+      "fact": "Открытие счета для юридического лица в ТКБ снижено с базовых 25 000 руб. до 2 800 руб.",
+      "positioning": null,
+      "search_text": "pricing ткб opening_fee 2 800 руб. открытие счета для юридического лица в ткб снижено с базовых 25 000 руб. до 2 800 руб. юл ткб транскапиталбанк transcapitalbank pricing opening_fee yul active",
+      "is_internal": false
     },
     {
       "chunk_id": 18,
-      "text": "---CHUNK--- СТАДИЯ | КЛИЕНТ: ЮЛ | Наблюдение: Длится 7 месяцев, руководитель должника не отстраняется от должности.",
+      "text": "Ведение счета для юридического лица в ТКБ стоит 2 090 руб.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "ТКБ",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "monthly_fee",
+      "topic": null,
+      "value_num": 2090.0,
+      "value_text": "2 090 руб.",
+      "aliases": [
+        "ткб",
+        "транскапиталбанк",
+        "transcapitalbank"
+      ],
+      "tags": [
+        "pricing",
+        "monthly_fee",
+        "yul",
+        "active"
+      ],
+      "fact": "Ведение счета для юридического лица в ТКБ стоит 2 090 руб.",
+      "positioning": null,
+      "search_text": "pricing ткб monthly_fee 2 090 руб. ведение счета для юридического лица в ткб стоит 2 090 руб. юл ткб транскапиталбанк transcapitalbank pricing monthly_fee yul active",
+      "is_internal": false
     },
     {
       "chunk_id": 19,
-      "text": "---CHUNK--- СТАДИЯ | КЛИЕНТ: ЮЛ | Финансовое оздоровление: Длится не более 2-х лет, цель — восстановление платежеспособности.",
+      "text": "Переводы на юридических лиц в ТКБ стоят 33 руб. электронно и 400 руб. на бумажном носителе.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "ТКБ",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "transfer_to_yul_fee",
+      "topic": null,
+      "value_num": null,
+      "value_text": "33 руб. электронно; 400 руб. на бумажном носителе",
+      "aliases": [
+        "ткб",
+        "транскапиталбанк",
+        "transcapitalbank"
+      ],
+      "tags": [
+        "pricing",
+        "transfer_fee",
+        "yul",
+        "active"
+      ],
+      "fact": "Переводы на юридических лиц в ТКБ стоят 33 руб. электронно и 400 руб. на бумажном носителе.",
+      "positioning": null,
+      "search_text": "pricing ткб transfer_to_yul_fee 33 руб. электронно; 400 руб. на бумажном носителе переводы на юридических лиц в ткб стоят 33 руб. электронно и 400 руб. на бумажном носителе. юл ткб транскапиталбанк transcapitalbank pricing transfer_fee yul active",
+      "is_internal": false
     },
     {
       "chunk_id": 20,
-      "text": "---CHUNK--- СТАДИЯ | КЛИЕНТ: ЮЛ | Внешнее управление: Длится 18 месяцев, полномочия переходят к внешнему управляющему, действующие банковские карты блокируются.",
+      "text": "Переводы на физических лиц в ТКБ тарифицируются по сумме и дополнительно включают 33 руб. за платежку.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "ТКБ",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "transfer_to_fl_fee",
+      "topic": null,
+      "value_num": null,
+      "value_text": "до 150 000 руб. — 0.5% + 33 руб.; 150 001–500 000 руб. — 1% + 33 руб.; 500 001–1 500 000 руб. — 1.7% + 33 руб.; 1 500 001–5 000 000 руб. — 3.5% + 33 руб.; свыше 5 000 000 руб. — 4% + 33 руб.",
+      "aliases": [
+        "ткб",
+        "транскапиталбанк",
+        "transcapitalbank"
+      ],
+      "tags": [
+        "pricing",
+        "transfer_fee",
+        "fl",
+        "yul",
+        "active"
+      ],
+      "fact": "Переводы на физических лиц в ТКБ тарифицируются по сумме и дополнительно включают 33 руб. за платежку.",
+      "positioning": null,
+      "search_text": "pricing ткб transfer_to_fl_fee до 150 000 руб. — 0.5% + 33 руб.; 150 001–500 000 руб. — 1% + 33 руб.; 500 001–1 500 000 руб. — 1.7% + 33 руб.; 1 500 001–5 000 000 руб. — 3.5% + 33 руб.; свыше 5 000 000 руб. — 4% + 33 руб. переводы на физических лиц в ткб тарифицируются по сумме и дополнительно включают 33 руб. за платежку. юл ткб транскапиталбанк transcapitalbank pricing transfer_fee fl yul active",
+      "is_internal": false
     },
     {
       "chunk_id": 21,
-      "text": "---CHUNK--- СТАДИЯ | КЛИЕНТ: ЮЛ | Конкурсное производство: Длится 6 месяцев, полномочия переходят к конкурсному управляющему (АУ).",
+      "text": "Вознаграждение АУ на юридическое лицо в ТКБ стоит 33 руб.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "ТКБ",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "au_reward_to_yul_fee",
+      "topic": null,
+      "value_num": 33.0,
+      "value_text": "33 руб.",
+      "aliases": [
+        "ткб",
+        "транскапиталбанк",
+        "transcapitalbank"
+      ],
+      "tags": [
+        "pricing",
+        "au_reward",
+        "yul",
+        "active"
+      ],
+      "fact": "Вознаграждение АУ на юридическое лицо в ТКБ стоит 33 руб.",
+      "positioning": null,
+      "search_text": "pricing ткб au_reward_to_yul_fee 33 руб. вознаграждение ау на юридическое лицо в ткб стоит 33 руб. юл ткб транскапиталбанк transcapitalbank pricing au_reward yul active",
+      "is_internal": false
     },
     {
       "chunk_id": 22,
-      "text": "---CHUNK--- СТАДИЯ | КЛИЕНТ: ФЛ / ИП | Реструктуризация долгов: Расчетные документы исполняются банком только с письменного согласия финансового управляющего.",
+      "text": "Все расходные операции по физическим лицам в ТКБ проходят согласование через юристов банка, документы нужно присылать заранее.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "feature",
+      "bank": "ТКБ",
+      "client_type": [
+        "ФЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "operations_review",
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [
+        "ткб",
+        "транскапиталбанк",
+        "transcapitalbank"
+      ],
+      "tags": [
+        "feature",
+        "operations_review",
+        "fl",
+        "active"
+      ],
+      "fact": "Все расходные операции по физическим лицам в ТКБ проходят согласование через юристов банка, документы нужно присылать заранее.",
+      "positioning": null,
+      "search_text": "feature ткб operations_review все расходные операции по физическим лицам в ткб проходят согласование через юристов банка, документы нужно присылать заранее. фл ткб транскапиталбанк transcapitalbank feature operations_review fl active",
+      "is_internal": false
     },
     {
       "chunk_id": 23,
-      "text": "---CHUNK--- СТАДИЯ | КЛИЕНТ: ФЛ / ИП | Реализация имущества: Права на распоряжение имуществом совершаются только финансовым управляющим от имени гражданина.",
+      "text": "Открытие счета для физического лица в ТКБ снижено до 1 500 руб.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "ТКБ",
+      "client_type": [
+        "ФЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "opening_fee",
+      "topic": null,
+      "value_num": 1500.0,
+      "value_text": "1 500 руб.",
+      "aliases": [
+        "ткб",
+        "транскапиталбанк",
+        "transcapitalbank"
+      ],
+      "tags": [
+        "pricing",
+        "opening_fee",
+        "fl",
+        "active"
+      ],
+      "fact": "Открытие счета для физического лица в ТКБ снижено до 1 500 руб.",
+      "positioning": null,
+      "search_text": "pricing ткб opening_fee 1 500 руб. открытие счета для физического лица в ткб снижено до 1 500 руб. фл ткб транскапиталбанк transcapitalbank pricing opening_fee fl active",
+      "is_internal": false
     },
     {
       "chunk_id": 24,
-      "text": "---CHUNK--- ДОСТУПНОСТЬ | БАНК: Уралсиб | КЛИЕНТ: ЮЛ: Открывает счета юридическим лицам.",
+      "text": "Ведение счета для физического лица в ТКБ бесплатно.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "ТКБ",
+      "client_type": [
+        "ФЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "monthly_fee",
+      "topic": null,
+      "value_num": 0.0,
+      "value_text": "0 руб.",
+      "aliases": [
+        "ткб",
+        "транскапиталбанк",
+        "transcapitalbank"
+      ],
+      "tags": [
+        "pricing",
+        "monthly_fee",
+        "fl",
+        "active"
+      ],
+      "fact": "Ведение счета для физического лица в ТКБ бесплатно.",
+      "positioning": null,
+      "search_text": "pricing ткб monthly_fee 0 руб. ведение счета для физического лица в ткб бесплатно. фл ткб транскапиталбанк transcapitalbank pricing monthly_fee fl active",
+      "is_internal": false
     },
     {
       "chunk_id": 25,
-      "text": "---CHUNK--- ДОСТУПНОСТЬ | БАНК: Уралсиб | КЛИЕНТ: ФЛ: Открывает счета физическим лицам.",
+      "text": "Внешние платежи для физического лица в ТКБ стоят 1.2% от суммы, минимум 50 руб. и максимум 1 500 руб.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "ТКБ",
+      "client_type": [
+        "ФЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "external_transfer_fee",
+      "topic": null,
+      "value_num": null,
+      "value_text": "1.2% от суммы; минимум 50 руб.; максимум 1 500 руб.",
+      "aliases": [
+        "ткб",
+        "транскапиталбанк",
+        "transcapitalbank"
+      ],
+      "tags": [
+        "pricing",
+        "transfer_fee",
+        "external",
+        "fl",
+        "active"
+      ],
+      "fact": "Внешние платежи для физического лица в ТКБ стоят 1.2% от суммы, минимум 50 руб. и максимум 1 500 руб.",
+      "positioning": null,
+      "search_text": "pricing ткб external_transfer_fee 1.2% от суммы; минимум 50 руб.; максимум 1 500 руб. внешние платежи для физического лица в ткб стоят 1.2% от суммы, минимум 50 руб. и максимум 1 500 руб. фл ткб транскапиталбанк transcapitalbank pricing transfer_fee external fl active",
+      "is_internal": false
     },
     {
       "chunk_id": 26,
-      "text": "---CHUNK--- ДОСТУПНОСТЬ | БАНК: ТКБ | КЛИЕНТ: ЮЛ: Открывает счета юридическим лицам.",
+      "text": "Внутрибанковские переводы для физического лица в ТКБ без комиссии.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "ТКБ",
+      "client_type": [
+        "ФЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "internal_transfer_fee",
+      "topic": null,
+      "value_num": 0.0,
+      "value_text": "0 руб.",
+      "aliases": [
+        "ткб",
+        "транскапиталбанк",
+        "transcapitalbank"
+      ],
+      "tags": [
+        "pricing",
+        "transfer_fee",
+        "internal",
+        "fl",
+        "active"
+      ],
+      "fact": "Внутрибанковские переводы для физического лица в ТКБ без комиссии.",
+      "positioning": null,
+      "search_text": "pricing ткб internal_transfer_fee 0 руб. внутрибанковские переводы для физического лица в ткб без комиссии. фл ткб транскапиталбанк transcapitalbank pricing transfer_fee internal fl active",
+      "is_internal": false
     },
     {
       "chunk_id": 27,
-      "text": "---CHUNK--- ДОСТУПНОСТЬ | БАНК: ТКБ | КЛИЕНТ: ФЛ: Открывает счета физическим лицам.",
+      "text": "Открытие счета для юридического лица в Уралсибе стоит 3 500 руб.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "Уралсиб",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "opening_fee",
+      "topic": null,
+      "value_num": 3500.0,
+      "value_text": "3 500 руб.",
+      "aliases": [
+        "уралсиб",
+        "uralsib"
+      ],
+      "tags": [
+        "pricing",
+        "opening_fee",
+        "yul",
+        "active"
+      ],
+      "fact": "Открытие счета для юридического лица в Уралсибе стоит 3 500 руб.",
+      "positioning": null,
+      "search_text": "pricing уралсиб opening_fee 3 500 руб. открытие счета для юридического лица в уралсибе стоит 3 500 руб. юл уралсиб uralsib pricing opening_fee yul active",
+      "is_internal": false
     },
     {
       "chunk_id": 28,
-      "text": "---CHUNK--- ДОСТУПНОСТЬ | БАНК: Альфа-Банк | КЛИЕНТ: ЮЛ: Открывает счета только юридическим лицам.",
+      "text": "Ведение счета для юридического лица в Уралсибе стоит 1 600 руб.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "Уралсиб",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "monthly_fee",
+      "topic": null,
+      "value_num": 1600.0,
+      "value_text": "1 600 руб.",
+      "aliases": [
+        "уралсиб",
+        "uralsib"
+      ],
+      "tags": [
+        "pricing",
+        "monthly_fee",
+        "yul",
+        "active"
+      ],
+      "fact": "Ведение счета для юридического лица в Уралсибе стоит 1 600 руб.",
+      "positioning": null,
+      "search_text": "pricing уралсиб monthly_fee 1 600 руб. ведение счета для юридического лица в уралсибе стоит 1 600 руб. юл уралсиб uralsib pricing monthly_fee yul active",
+      "is_internal": false
     },
     {
       "chunk_id": 29,
-      "text": "---CHUNK--- ДОСТУПНОСТЬ | БАНК: Т-Банк | КЛИЕНТ: ЮЛ: Открывает счета только юридическим лицам.",
+      "text": "Контроль банкротных операций в Уралсибе стоит 150 руб. за каждую операцию.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "Уралсиб",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "bankruptcy_control_fee",
+      "topic": null,
+      "value_num": 150.0,
+      "value_text": "150 руб.",
+      "aliases": [
+        "уралсиб",
+        "uralsib"
+      ],
+      "tags": [
+        "pricing",
+        "control_fee",
+        "yul",
+        "active"
+      ],
+      "fact": "Контроль банкротных операций в Уралсибе стоит 150 руб. за каждую операцию.",
+      "positioning": null,
+      "search_text": "pricing уралсиб bankruptcy_control_fee 150 руб. контроль банкротных операций в уралсибе стоит 150 руб. за каждую операцию. юл уралсиб uralsib pricing control_fee yul active",
+      "is_internal": false
     },
     {
       "chunk_id": 30,
-      "text": "---CHUNK--- ДОСТУПНОСТЬ | БАНК: МКБ | КЛИЕНТ: ЮЛ: Открывает счета только юридическим лицам.",
+      "text": "Перевод на юридическое лицо в Уралсибе стоит 35 руб., дополнительно взимается 150 руб. за контроль банкротной операции.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "Уралсиб",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "transfer_to_yul_fee",
+      "topic": null,
+      "value_num": null,
+      "value_text": "35 руб. + 150 руб. за контроль",
+      "aliases": [
+        "уралсиб",
+        "uralsib"
+      ],
+      "tags": [
+        "pricing",
+        "transfer_fee",
+        "yul",
+        "active"
+      ],
+      "fact": "Перевод на юридическое лицо в Уралсибе стоит 35 руб., дополнительно взимается 150 руб. за контроль банкротной операции.",
+      "positioning": null,
+      "search_text": "pricing уралсиб transfer_to_yul_fee 35 руб. + 150 руб. за контроль перевод на юридическое лицо в уралсибе стоит 35 руб., дополнительно взимается 150 руб. за контроль банкротной операции. юл уралсиб uralsib pricing transfer_fee yul active",
+      "is_internal": false
     },
     {
       "chunk_id": 31,
-      "text": "---CHUNK--- ДОСТУПНОСТЬ | БАНК: Росбанк | КЛИЕНТ: ЮЛ: Открывает всем, для АО и ЗАО нужен актуальный реестр акционеров или письмо от АУ.",
+      "text": "Переводы на физических лиц в Уралсибе до 100 000 руб. без комиссии, свыше 100 000 руб. — 0.2%.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "Уралсиб",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "transfer_to_fl_fee",
+      "topic": null,
+      "value_num": null,
+      "value_text": "до 100 000 руб. — без комиссии; свыше 100 000 руб. — 0.2%",
+      "aliases": [
+        "уралсиб",
+        "uralsib"
+      ],
+      "tags": [
+        "pricing",
+        "transfer_fee",
+        "fl",
+        "yul",
+        "active"
+      ],
+      "fact": "Переводы на физических лиц в Уралсибе до 100 000 руб. без комиссии, свыше 100 000 руб. — 0.2%.",
+      "positioning": null,
+      "search_text": "pricing уралсиб transfer_to_fl_fee до 100 000 руб. — без комиссии; свыше 100 000 руб. — 0.2% переводы на физических лиц в уралсибе до 100 000 руб. без комиссии, свыше 100 000 руб. — 0.2%. юл уралсиб uralsib pricing transfer_fee fl yul active",
+      "is_internal": false
     },
     {
       "chunk_id": 32,
-      "text": "---CHUNK--- ОГРАНИЧЕНИЕ | Все банки | Умершие ФЛ: Счета умершим физическим лицам не открываются.",
+      "text": "Снятие наличных в Уралсибе зависит от суммы и составляет от 1.5% до 10%.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "Уралсиб",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "cash_withdrawal_fee",
+      "topic": null,
+      "value_num": null,
+      "value_text": "до 100 000 руб. — 1.5%; 100 000–500 000 руб. — 2%; 500 000–1 500 000 руб. — 3%; 1 500 000–3 000 000 руб. — 5%; свыше 3 000 000 руб. — 10%",
+      "aliases": [
+        "уралсиб",
+        "uralsib"
+      ],
+      "tags": [
+        "pricing",
+        "cash_withdrawal",
+        "yul",
+        "active"
+      ],
+      "fact": "Снятие наличных в Уралсибе зависит от суммы и составляет от 1.5% до 10%.",
+      "positioning": null,
+      "search_text": "pricing уралсиб cash_withdrawal_fee до 100 000 руб. — 1.5%; 100 000–500 000 руб. — 2%; 500 000–1 500 000 руб. — 3%; 1 500 000–3 000 000 руб. — 5%; свыше 3 000 000 руб. — 10% снятие наличных в уралсибе зависит от суммы и составляет от 1.5% до 10%. юл уралсиб uralsib pricing cash_withdrawal yul active",
+      "is_internal": false
     },
     {
       "chunk_id": 33,
-      "text": "---CHUNK--- ОГРАНИЧЕНИЕ | Все банки | Ликвидированные ЮЛ: Счета открываются, если ликвидация еще в процессе. Если должник уже ликвидирован, то открыть счета можно только в тех банках, в которых ранее у него были счета.",
+      "text": "Открытие счета для юридического лица в Т-Банке стоит 3 900 руб., но открытие сейчас приостановлено.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "Т-Банк",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "PAUSE",
+      "field": "opening_fee",
+      "topic": null,
+      "value_num": 3900.0,
+      "value_text": "3 900 руб.",
+      "aliases": [
+        "т-банк",
+        "тинькофф",
+        "tbank",
+        "tinkoff"
+      ],
+      "tags": [
+        "pricing",
+        "opening_fee",
+        "yul",
+        "pause"
+      ],
+      "fact": "Открытие счета для юридического лица в Т-Банке стоит 3 900 руб., но открытие сейчас приостановлено.",
+      "positioning": null,
+      "search_text": "pricing т-банк opening_fee 3 900 руб. открытие счета для юридического лица в т-банке стоит 3 900 руб., но открытие сейчас приостановлено. юл т-банк тинькофф tbank tinkoff pricing opening_fee yul pause",
+      "is_internal": false
     },
     {
       "chunk_id": 34,
-      "text": "---CHUNK--- ОГРАНИЧЕНИЕ | Нерезиденты: Счета открывать можно, требуется выписка из торговой палаты с апостилем по месту регистрации.",
+      "text": "Ведение счета для юридического лица в Т-Банке стоит 1 800 руб., но открытие сейчас приостановлено.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "Т-Банк",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "PAUSE",
+      "field": "monthly_fee",
+      "topic": null,
+      "value_num": 1800.0,
+      "value_text": "1 800 руб.",
+      "aliases": [
+        "т-банк",
+        "тинькофф",
+        "tbank",
+        "tinkoff"
+      ],
+      "tags": [
+        "pricing",
+        "monthly_fee",
+        "yul",
+        "pause"
+      ],
+      "fact": "Ведение счета для юридического лица в Т-Банке стоит 1 800 руб., но открытие сейчас приостановлено.",
+      "positioning": null,
+      "search_text": "pricing т-банк monthly_fee 1 800 руб. ведение счета для юридического лица в т-банке стоит 1 800 руб., но открытие сейчас приостановлено. юл т-банк тинькофф tbank tinkoff pricing monthly_fee yul pause",
+      "is_internal": false
     },
     {
       "chunk_id": 35,
-      "text": "---CHUNK--- ДОКУМЕНТЫ | БАНК: ТКБ и Т-Банк | КЛИЕНТ: ЮЛ: Нужна заявка в Битрикс24, скан паспорта АУ (разворот и регистрация) и решение суда.",
+      "text": "Перевод на юридическое лицо в Т-Банке стоит 36 руб., но открытие сейчас приостановлено.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "pricing",
+      "bank": "Т-Банк",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "PAUSE",
+      "field": "transfer_to_yul_fee",
+      "topic": null,
+      "value_num": 36.0,
+      "value_text": "36 руб.",
+      "aliases": [
+        "т-банк",
+        "тинькофф",
+        "tbank",
+        "tinkoff"
+      ],
+      "tags": [
+        "pricing",
+        "transfer_fee",
+        "yul",
+        "pause"
+      ],
+      "fact": "Перевод на юридическое лицо в Т-Банке стоит 36 руб., но открытие сейчас приостановлено.",
+      "positioning": null,
+      "search_text": "pricing т-банк transfer_to_yul_fee 36 руб. перевод на юридическое лицо в т-банке стоит 36 руб., но открытие сейчас приостановлено. юл т-банк тинькофф tbank tinkoff pricing transfer_fee yul pause",
+      "is_internal": false
     },
     {
       "chunk_id": 36,
-      "text": "---CHUNK--- ДОКУМЕНТЫ | БАНК: ТКБ | КЛИЕНТ: ФЛ: Заявка в Битрикс24, скан паспорта АУ, решение суда, а также копия паспорта должника или справка из МВД.",
+      "text": "Внутрибанковские переводы в МКБ требуют рукописного заявления и личного визита арбитражного управляющего.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "feature",
+      "bank": "МКБ",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "PAUSE",
+      "field": "internal_transfers_process",
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [
+        "мкб",
+        "mkb"
+      ],
+      "tags": [
+        "feature",
+        "process",
+        "yul",
+        "pause"
+      ],
+      "fact": "Внутрибанковские переводы в МКБ требуют рукописного заявления и личного визита арбитражного управляющего.",
+      "positioning": null,
+      "search_text": "feature мкб internal_transfers_process внутрибанковские переводы в мкб требуют рукописного заявления и личного визита арбитражного управляющего. юл мкб mkb feature process yul pause",
+      "is_internal": false
     },
     {
       "chunk_id": 37,
-      "text": "---CHUNK--- ДОКУМЕНТЫ | БАНКИ: Альфа, Уралсиб, МКБ | КЛИЕНТ: ЮЛ: Сканы документов от АУ не нужны, достаточно названия или ИНН должника и перечня счетов.",
+      "text": "Платежи в МКБ проводятся вручную; после создания платежа в личном кабинете нужно уведомлять менеджеров банка по email.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "feature",
+      "bank": "МКБ",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "PAUSE",
+      "field": "payments_process",
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [
+        "мкб",
+        "mkb"
+      ],
+      "tags": [
+        "feature",
+        "process",
+        "yul",
+        "pause"
+      ],
+      "fact": "Платежи в МКБ проводятся вручную; после создания платежа в личном кабинете нужно уведомлять менеджеров банка по email.",
+      "positioning": null,
+      "search_text": "feature мкб payments_process платежи в мкб проводятся вручную; после создания платежа в личном кабинете нужно уведомлять менеджеров банка по email. юл мкб mkb feature process yul pause",
+      "is_internal": false
     },
     {
       "chunk_id": 38,
-      "text": "---CHUNK--- ДОВЕРЕННОСТЬ | КЛИЕНТ: ЮЛ: Подписание по доверенности возможно, требуется оригинал бумажной нотариальной доверенности по ГК РФ с подписью и печатью.",
+      "text": "Бонусное вознаграждение рассчитывается по формуле ((∑S × P) / D) × O × 0,93. Баланс для расчета фиксируется ежедневно в 09:00 по МСК.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "bonus",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "formula",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "bonus",
+        "formula"
+      ],
+      "fact": "Бонусное вознаграждение рассчитывается по формуле ((∑S × P) / D) × O × 0,93. Баланс для расчета фиксируется ежедневно в 09:00 по МСК.",
+      "positioning": null,
+      "search_text": "bonus formula бонусное вознаграждение рассчитывается по формуле ((∑s × p) / d) × o × 0,93. баланс для расчета фиксируется ежедневно в 09:00 по мск. bonus formula",
+      "is_internal": false
     },
     {
       "chunk_id": 39,
-      "text": "---CHUNK--- БАНК: Альфа-Банк | КЛИЕНТ: ЮЛ | ТАРИФ | Открытие счета: 800 руб.",
+      "text": "По программе «Приведи друга» выплачивается от 0,2% до 1% годовых от остатков привлеченных коллег.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "bonus",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "referral",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "bonus",
+        "referral"
+      ],
+      "fact": "По программе «Приведи друга» выплачивается от 0,2% до 1% годовых от остатков привлеченных коллег.",
+      "positioning": null,
+      "search_text": "bonus referral по программе «приведи друга» выплачивается от 0,2% до 1% годовых от остатков привлеченных коллег. bonus referral",
+      "is_internal": false
     },
     {
       "chunk_id": 40,
-      "text": "---CHUNK--- БАНК: Альфа-Банк | КЛИЕНТ: ЮЛ | ТАРИФ | Ведение счета: 800 руб.",
+      "text": "Бонус в Уралсибе для ЮЛ (малый бизнес): до 10 млн руб. — 4%; 10–50 млн — 4.5%; 50–250 млн — 5.5%; 250–500 млн — 6%; 500–750 млн — 6.5%; 750 млн–1 млрд — 7.5%; свыше 1 млрд руб. — 8.5%.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "bonus",
+      "bank": "Уралсиб",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "bonus_rate",
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "bonus",
+        "yul",
+        "active",
+        "uralsib"
+      ],
+      "fact": "Бонус в Уралсибе для ЮЛ (малый бизнес): до 10 млн руб. — 4%; 10–50 млн — 4.5%; 50–250 млн — 5.5%; 250–500 млн — 6%; 500–750 млн — 6.5%; 750 млн–1 млрд — 7.5%; свыше 1 млрд руб. — 8.5%.",
+      "positioning": null,
+      "search_text": "bonus уралсиб bonus_rate бонус в уралсибе для юл (малый бизнес): до 10 млн руб. — 4%; 10–50 млн — 4.5%; 50–250 млн — 5.5%; 250–500 млн — 6%; 500–750 млн — 6.5%; 750 млн–1 млрд — 7.5%; свыше 1 млрд руб. — 8.5%. юл bonus yul active uralsib",
+      "is_internal": false
     },
     {
       "chunk_id": 41,
-      "text": "---CHUNK--- БАНК: Альфа-Банк | КЛИЕНТ: ЮЛ | ТАРИФ | Контроль банкротных операций: 0 руб.",
+      "text": "Бонус в ТКБ для ЮЛ: до 10 млн руб. — 4.5%; 10–50 млн — 5%; 50–250 млн — 6%; 250–500 млн — 6.5%; 500–750 млн — 7%; 750 млн–1 млрд — 8%; свыше 1 млрд руб. — 9%.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "bonus",
+      "bank": "ТКБ",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "bonus_rate",
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "bonus",
+        "yul",
+        "active",
+        "tkb"
+      ],
+      "fact": "Бонус в ТКБ для ЮЛ: до 10 млн руб. — 4.5%; 10–50 млн — 5%; 50–250 млн — 6%; 250–500 млн — 6.5%; 500–750 млн — 7%; 750 млн–1 млрд — 8%; свыше 1 млрд руб. — 9%.",
+      "positioning": null,
+      "search_text": "bonus ткб bonus_rate бонус в ткб для юл: до 10 млн руб. — 4.5%; 10–50 млн — 5%; 50–250 млн — 6%; 250–500 млн — 6.5%; 500–750 млн — 7%; 750 млн–1 млрд — 8%; свыше 1 млрд руб. — 9%. юл bonus yul active tkb",
+      "is_internal": false
     },
     {
       "chunk_id": 42,
-      "text": "---CHUNK--- БАНК: Альфа-Банк | КЛИЕНТ: ЮЛ | ТАРИФ | Переводы на ЮЛ: 35 руб.",
+      "text": "Бонус в ТКБ для ФЛ: до 5 млн руб. — 4%; 5–10 млн — 4.5%; 10–25 млн — 5%; 25–50 млн — 5.5%; свыше 50 млн руб. — 6%.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "bonus",
+      "bank": "ТКБ",
+      "client_type": [
+        "ФЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "bonus_rate",
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "bonus",
+        "fl",
+        "active",
+        "tkb"
+      ],
+      "fact": "Бонус в ТКБ для ФЛ: до 5 млн руб. — 4%; 5–10 млн — 4.5%; 10–25 млн — 5%; 25–50 млн — 5.5%; свыше 50 млн руб. — 6%.",
+      "positioning": null,
+      "search_text": "bonus ткб bonus_rate бонус в ткб для фл: до 5 млн руб. — 4%; 5–10 млн — 4.5%; 10–25 млн — 5%; 25–50 млн — 5.5%; свыше 50 млн руб. — 6%. фл bonus fl active tkb",
+      "is_internal": false
     },
     {
       "chunk_id": 43,
-      "text": "---CHUNK--- БАНК: Альфа-Банк | КЛИЕНТ: ЮЛ | ТАРИФ | Переводы на ФЛ: До 150 000 руб. — 0%; свыше 150 000 руб. — 0.5%.",
+      "text": "Бонус в Альфа-Банке для ЮЛ: до 10 млн руб. — 4%; 10–50 млн — 4.5%; 50–250 млн — 5.5%; 250–500 млн — 6%; 500–750 млн — 6.5%; 750 млн–1 млрд — 7.5%; свыше 1 млрд руб. — 8.5%.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "bonus",
+      "bank": "Альфа-Банк",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": "bonus_rate",
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "bonus",
+        "yul",
+        "active",
+        "alfabank"
+      ],
+      "fact": "Бонус в Альфа-Банке для ЮЛ: до 10 млн руб. — 4%; 10–50 млн — 4.5%; 50–250 млн — 5.5%; 250–500 млн — 6%; 500–750 млн — 6.5%; 750 млн–1 млрд — 7.5%; свыше 1 млрд руб. — 8.5%.",
+      "positioning": null,
+      "search_text": "bonus альфа-банк bonus_rate бонус в альфа-банке для юл: до 10 млн руб. — 4%; 10–50 млн — 4.5%; 50–250 млн — 5.5%; 250–500 млн — 6%; 500–750 млн — 6.5%; 750 млн–1 млрд — 7.5%; свыше 1 млрд руб. — 8.5%. юл bonus yul active alfabank",
+      "is_internal": false
     },
     {
       "chunk_id": 44,
-      "text": "---CHUNK--- БАНК: Альфа-Банк | КЛИЕНТ: ЮЛ | ТАРИФ | Возврат задатков на ФЛ: До 150 000 руб. — 0%; свыше 150 000 руб. — 0.5%.",
+      "text": "Капитализации нет ни в одном из банков-партнеров.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "capitalization",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "constraint",
+        "capitalization"
+      ],
+      "fact": "Капитализации нет ни в одном из банков-партнеров.",
+      "positioning": null,
+      "search_text": "constraint capitalization капитализации нет ни в одном из банков-партнеров. constraint capitalization",
+      "is_internal": false
     },
     {
       "chunk_id": 45,
-      "text": "---CHUNK--- БАНК: Альфа-Банк | КЛИЕНТ: ЮЛ | ТАРИФ | Вознаграждение АУ на ФЛ: До 150 000 руб. — 0%; свыше 150 000 руб. — 0.5%.",
+      "text": "Открыть только специальный счет без открытия основного счета нельзя.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "special_account_without_main",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "constraint",
+        "special_account",
+        "main_account"
+      ],
+      "fact": "Открыть только специальный счет без открытия основного счета нельзя.",
+      "positioning": null,
+      "search_text": "constraint special_account_without_main открыть только специальный счет без открытия основного счета нельзя. constraint special_account main_account",
+      "is_internal": false
     },
     {
       "chunk_id": 46,
-      "text": "---CHUNK--- БАНК: Альфа-Банк | КЛИЕНТ: ЮЛ | ТАРИФ | Вознаграждение АУ на ЮЛ: 35 руб.",
+      "text": "Подписание документов на открытие счета онлайн невозможно.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "online_signing",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "constraint",
+        "online_signing"
+      ],
+      "fact": "Подписание документов на открытие счета онлайн невозможно.",
+      "positioning": null,
+      "search_text": "constraint online_signing подписание документов на открытие счета онлайн невозможно. constraint online_signing",
+      "is_internal": false
     },
     {
       "chunk_id": 47,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ЮЛ | ТАРИФ | Открытие счета: Базовая 25 000 руб., снижение до 2 800 руб.",
+      "text": "Подписание документов арбитражным управляющим происходит лично в любом регионе РФ, где есть ближайшее отделение банка-партнера.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "personal_signing",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "constraint",
+        "signing",
+        "personal_visit"
+      ],
+      "fact": "Подписание документов арбитражным управляющим происходит лично в любом регионе РФ, где есть ближайшее отделение банка-партнера.",
+      "positioning": null,
+      "search_text": "constraint personal_signing подписание документов арбитражным управляющим происходит лично в любом регионе рф, где есть ближайшее отделение банка-партнера. constraint signing personal_visit",
+      "is_internal": false
     },
     {
       "chunk_id": 48,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ЮЛ | ТАРИФ | Ведение счета: 2 090 руб.",
+      "text": "Счета умершим физическим лицам не открываются.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [
+        "ФЛ"
+      ],
+      "status": null,
+      "field": null,
+      "topic": "deceased_fl",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "constraint",
+        "fl",
+        "deceased"
+      ],
+      "fact": "Счета умершим физическим лицам не открываются.",
+      "positioning": null,
+      "search_text": "constraint deceased_fl счета умершим физическим лицам не открываются. фл constraint fl deceased",
+      "is_internal": false
     },
     {
       "chunk_id": 49,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ЮЛ | ТАРИФ | Переводы на ЮЛ: 33 руб. электронно (400 руб. на бумажном носителе).",
+      "text": "Если ликвидация юридического лица еще в процессе, счет открыть можно. Если должник уже ликвидирован, открыть счет можно только в тех банках, где раньше у него были счета.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": null,
+      "field": null,
+      "topic": "liquidated_yul",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "constraint",
+        "yul",
+        "liquidation"
+      ],
+      "fact": "Если ликвидация юридического лица еще в процессе, счет открыть можно. Если должник уже ликвидирован, открыть счет можно только в тех банках, где раньше у него были счета.",
+      "positioning": null,
+      "search_text": "constraint liquidated_yul если ликвидация юридического лица еще в процессе, счет открыть можно. если должник уже ликвидирован, открыть счет можно только в тех банках, где раньше у него были счета. юл constraint yul liquidation",
+      "is_internal": false
     },
     {
       "chunk_id": 50,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ЮЛ | ТАРИФ | Переводы на ФЛ (до 150 000 руб.): 0.5% + 33 руб. за платежку.",
+      "text": "Счета нерезидентам открыть можно, но требуется выписка из торговой палаты с апостилем по месту регистрации.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "non_resident",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "constraint",
+        "non_resident",
+        "yul"
+      ],
+      "fact": "Счета нерезидентам открыть можно, но требуется выписка из торговой палаты с апостилем по месту регистрации.",
+      "positioning": null,
+      "search_text": "constraint non_resident счета нерезидентам открыть можно, но требуется выписка из торговой палаты с апостилем по месту регистрации. constraint non_resident yul",
+      "is_internal": false
     },
     {
       "chunk_id": 51,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ЮЛ | ТАРИФ | Переводы на ФЛ (от 150 001 до 500 000 руб.): 1% + 33 руб. за платежку.",
+      "text": "Подписание по доверенности возможно только для юридических лиц при наличии оригинала бумажной нотариальной доверенности.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": null,
+      "field": null,
+      "topic": "power_of_attorney",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "constraint",
+        "yul",
+        "power_of_attorney"
+      ],
+      "fact": "Подписание по доверенности возможно только для юридических лиц при наличии оригинала бумажной нотариальной доверенности.",
+      "positioning": null,
+      "search_text": "constraint power_of_attorney подписание по доверенности возможно только для юридических лиц при наличии оригинала бумажной нотариальной доверенности. юл constraint yul power_of_attorney",
+      "is_internal": false
     },
     {
       "chunk_id": 52,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ЮЛ | ТАРИФ | Переводы на ФЛ (от 500 001 до 1 500 000 руб.): 1.7% + 33 руб. за платежку.",
+      "text": "Если в регионе клиента нет отделения банка-партнера, нужно уточнить, бывает ли он в командировках в крупных городах или ближайших регионах, где есть отделение.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "no_branch",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "constraint",
+        "branch",
+        "geography"
+      ],
+      "fact": "Если в регионе клиента нет отделения банка-партнера, нужно уточнить, бывает ли он в командировках в крупных городах или ближайших регионах, где есть отделение.",
+      "positioning": null,
+      "search_text": "constraint no_branch если в регионе клиента нет отделения банка-партнера, нужно уточнить, бывает ли он в командировках в крупных городах или ближайших регионах, где есть отделение. constraint branch geography",
+      "is_internal": false
     },
     {
       "chunk_id": 53,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ЮЛ | ТАРИФ | Переводы на ФЛ (от 1 500 001 до 5 000 000 руб.): 3.5% + 33 руб. за платежку.",
+      "text": "Если счет нужен не сразу, его можно открыть заранее. Пока движений по счету нет, комиссия за ведение не взимается, но стоимость открытия при закрытии без поступлений оплатить придется.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "early_opening",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "constraint",
+        "opening",
+        "timing"
+      ],
+      "fact": "Если счет нужен не сразу, его можно открыть заранее. Пока движений по счету нет, комиссия за ведение не взимается, но стоимость открытия при закрытии без поступлений оплатить придется.",
+      "positioning": null,
+      "search_text": "constraint early_opening если счет нужен не сразу, его можно открыть заранее. пока движений по счету нет, комиссия за ведение не взимается, но стоимость открытия при закрытии без поступлений оплатить придется. constraint opening timing",
+      "is_internal": false
     },
     {
       "chunk_id": 54,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ЮЛ | ТАРИФ | Переводы на ФЛ (свыше 5 000 001 руб.): 4% + 33 руб. за платежку.",
+      "text": "Если кредитору-физлицу нужно перевести крупную сумму свыше лимитов, банк нужно предупредить за два дня и предоставить реестр кредиторов; тогда комиссия составит 0.2%.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "large_transfer_to_fl",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "constraint",
+        "transfer",
+        "fl",
+        "large_amount"
+      ],
+      "fact": "Если кредитору-физлицу нужно перевести крупную сумму свыше лимитов, банк нужно предупредить за два дня и предоставить реестр кредиторов; тогда комиссия составит 0.2%.",
+      "positioning": null,
+      "search_text": "constraint large_transfer_to_fl если кредитору-физлицу нужно перевести крупную сумму свыше лимитов, банк нужно предупредить за два дня и предоставить реестр кредиторов; тогда комиссия составит 0.2%. constraint transfer fl large_amount",
+      "is_internal": false
     },
     {
       "chunk_id": 55,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ЮЛ | ТАРИФ | Вознаграждение АУ на ЮЛ: 33 руб.",
+      "text": "Снять наличные по банкротным средствам можно только после вынесения судебного решения о выдаче наличными.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "cash_withdrawal_bankruptcy",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "constraint",
+        "cash",
+        "court_order"
+      ],
+      "fact": "Снять наличные по банкротным средствам можно только после вынесения судебного решения о выдаче наличными.",
+      "positioning": null,
+      "search_text": "constraint cash_withdrawal_bankruptcy снять наличные по банкротным средствам можно только после вынесения судебного решения о выдаче наличными. constraint cash court_order",
+      "is_internal": false
     },
     {
       "chunk_id": 56,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ФЛ | ОСОБЕННОСТЬ | Согласование операций: Все расходные операции проходят через юристов банка, документы присылать заранее.",
+      "text": "Если открывается счет для гражданина-банкрота или ИП, финансовому управляющему не подключается доступ в интернет-банк.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [
+        "ФЛ",
+        "ИП"
+      ],
+      "status": null,
+      "field": null,
+      "topic": "internet_bank_fl_ip",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "constraint",
+        "internet_bank",
+        "fl_ip"
+      ],
+      "fact": "Если открывается счет для гражданина-банкрота или ИП, финансовому управляющему не подключается доступ в интернет-банк.",
+      "positioning": null,
+      "search_text": "constraint internet_bank_fl_ip если открывается счет для гражданина-банкрота или ип, финансовому управляющему не подключается доступ в интернет-банк. фл ип constraint internet_bank fl_ip",
+      "is_internal": false
     },
     {
       "chunk_id": 57,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ФЛ | ТАРИФ | Открытие счета: Базовая 15 000 руб., снижение до 1 500 руб.",
+      "text": "Если в отношении ИП введена реструктуризация долгов, банк не исполняет платежи без письменного согласия финансового управляющего.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [
+        "ИП"
+      ],
+      "status": null,
+      "field": null,
+      "topic": "restructuring_ip",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "constraint",
+        "ip",
+        "restructuring"
+      ],
+      "fact": "Если в отношении ИП введена реструктуризация долгов, банк не исполняет платежи без письменного согласия финансового управляющего.",
+      "positioning": null,
+      "search_text": "constraint restructuring_ip если в отношении ип введена реструктуризация долгов, банк не исполняет платежи без письменного согласия финансового управляющего. ип constraint ip restructuring",
+      "is_internal": false
     },
     {
       "chunk_id": 58,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ФЛ | ТАРИФ | Ведение счета: Отсутствует (0 руб.).",
+      "text": "Если у гражданина введена реализация имущества, новая банковская карточка оформляется и подписывается исключительно финансовым управляющим.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [
+        "ФЛ"
+      ],
+      "status": null,
+      "field": null,
+      "topic": "implementation_fl_card",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "constraint",
+        "fl",
+        "card",
+        "implementation"
+      ],
+      "fact": "Если у гражданина введена реализация имущества, новая банковская карточка оформляется и подписывается исключительно финансовым управляющим.",
+      "positioning": null,
+      "search_text": "constraint implementation_fl_card если у гражданина введена реализация имущества, новая банковская карточка оформляется и подписывается исключительно финансовым управляющим. фл constraint fl card implementation",
+      "is_internal": false
     },
     {
       "chunk_id": 59,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ФЛ | ТАРИФ | Внешние платежи: 1.2% от суммы (мин. 50 руб., макс. 1500 руб.).",
+      "text": "Если у юридического лица введено внешнее управление или конкурсное производство, действующие корпоративные карты должны быть заблокированы без права выпуска новых.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": null,
+      "field": null,
+      "topic": "external_management_cards",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "constraint",
+        "yul",
+        "cards",
+        "external_management",
+        "bankruptcy"
+      ],
+      "fact": "Если у юридического лица введено внешнее управление или конкурсное производство, действующие корпоративные карты должны быть заблокированы без права выпуска новых.",
+      "positioning": null,
+      "search_text": "constraint external_management_cards если у юридического лица введено внешнее управление или конкурсное производство, действующие корпоративные карты должны быть заблокированы без права выпуска новых. юл constraint yul cards external_management bankruptcy",
+      "is_internal": false
     },
     {
       "chunk_id": 60,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ФЛ | ТАРИФ | Внутрибанковские переводы: Отсутствует (0 руб.).",
+      "text": "Если финансовый управляющий дает распоряжение выдать банкроту-пенсионеру пенсию, банк вправе выполнить такую выдачу.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [
+        "ФЛ"
+      ],
+      "status": null,
+      "field": null,
+      "topic": "pension_payment_fl",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "constraint",
+        "fl",
+        "pension"
+      ],
+      "fact": "Если финансовый управляющий дает распоряжение выдать банкроту-пенсионеру пенсию, банк вправе выполнить такую выдачу.",
+      "positioning": null,
+      "search_text": "constraint pension_payment_fl если финансовый управляющий дает распоряжение выдать банкроту-пенсионеру пенсию, банк вправе выполнить такую выдачу. фл constraint fl pension",
+      "is_internal": false
     },
     {
       "chunk_id": 61,
-      "text": "---CHUNK--- БАНК: Уралсиб | КЛИЕНТ: ЮЛ | ТАРИФ | Открытие счета: 3 500 руб.",
+      "text": "Зарплатного проекта для банкротов с бесплатными переводами нет.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "payroll_project",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "constraint",
+        "payroll_project"
+      ],
+      "fact": "Зарплатного проекта для банкротов с бесплатными переводами нет.",
+      "positioning": null,
+      "search_text": "constraint payroll_project зарплатного проекта для банкротов с бесплатными переводами нет. constraint payroll_project",
+      "is_internal": false
     },
     {
       "chunk_id": 62,
-      "text": "---CHUNK--- БАНК: Уралсиб | КЛИЕНТ: ЮЛ | ТАРИФ | Ведение счета: 1 600 руб. (взимается при наличии движений по счету).",
+      "text": "Если компания находится в красной зоне, открытие счета возможно только как исключение после индивидуального рассмотрения.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": null,
+      "field": null,
+      "topic": "red_zone_company",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "constraint",
+        "yul",
+        "red_zone",
+        "exception"
+      ],
+      "fact": "Если компания находится в красной зоне, открытие счета возможно только как исключение после индивидуального рассмотрения.",
+      "positioning": null,
+      "search_text": "constraint red_zone_company если компания находится в красной зоне, открытие счета возможно только как исключение после индивидуального рассмотрения. юл constraint yul red_zone exception",
+      "is_internal": false
     },
     {
       "chunk_id": 63,
-      "text": "---CHUNK--- БАНК: Уралсиб | КЛИЕНТ: ЮЛ | ТАРИФ | Контроль банкротных операций: 150 руб. за каждую операцию.",
+      "text": "Если компания действующая и не находится в процедуре банкротства, открыть счет можно в Уралсибе по стандартной тарифной сетке.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": null,
+      "field": null,
+      "topic": "active_company",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "constraint",
+        "yul",
+        "active_company",
+        "uralsib"
+      ],
+      "fact": "Если компания действующая и не находится в процедуре банкротства, открыть счет можно в Уралсибе по стандартной тарифной сетке.",
+      "positioning": null,
+      "search_text": "constraint active_company если компания действующая и не находится в процедуре банкротства, открыть счет можно в уралсибе по стандартной тарифной сетке. юл constraint yul active_company uralsib",
+      "is_internal": false
     },
     {
       "chunk_id": 64,
-      "text": "---CHUNK--- БАНК: Уралсиб | КЛИЕНТ: ЮЛ | ТАРИФ | Переводы на ЮЛ: 35 руб. (+150 руб. за контроль).",
+      "text": "Для открытия счета в ТКБ для ФЛ нужны заявка в Битрикс24, скан паспорта АУ, решение суда и копия паспорта должника или справка из МВД.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "docs",
+      "bank": "ТКБ",
+      "client_type": [
+        "ФЛ"
+      ],
+      "status": null,
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "docs",
+        "tkb",
+        "fl"
+      ],
+      "fact": "Для открытия счета в ТКБ для ФЛ нужны заявка в Битрикс24, скан паспорта АУ, решение суда и копия паспорта должника или справка из МВД.",
+      "positioning": null,
+      "search_text": "docs ткб для открытия счета в ткб для фл нужны заявка в битрикс24, скан паспорта ау, решение суда и копия паспорта должника или справка из мвд. фл docs tkb fl",
+      "is_internal": false
     },
     {
       "chunk_id": 65,
-      "text": "---CHUNK--- БАНК: Уралсиб | КЛИЕНТ: ЮЛ | ТАРИФ | Переводы на ФЛ (до 100 000 руб.): Без комиссии.",
+      "text": "Для открытия счета юридическому лицу в ТКБ нужны заявка в Битрикс24, скан паспорта АУ и решение суда.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "docs",
+      "bank": "ТКБ",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": null,
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "docs",
+        "tkb",
+        "yul"
+      ],
+      "fact": "Для открытия счета юридическому лицу в ТКБ нужны заявка в Битрикс24, скан паспорта АУ и решение суда.",
+      "positioning": null,
+      "search_text": "docs ткб для открытия счета юридическому лицу в ткб нужны заявка в битрикс24, скан паспорта ау и решение суда. юл docs tkb yul",
+      "is_internal": false
     },
     {
       "chunk_id": 66,
-      "text": "---CHUNK--- БАНК: Уралсиб | КЛИЕНТ: ЮЛ | ТАРИФ | Переводы на ФЛ (свыше 100 000 руб.): 0.2%.",
+      "text": "Для открытия счета юридическому лицу в Т-Банке нужны заявка в Битрикс24, скан паспорта АУ и решение суда.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "docs",
+      "bank": "Т-Банк",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": null,
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "docs",
+        "tbank",
+        "yul"
+      ],
+      "fact": "Для открытия счета юридическому лицу в Т-Банке нужны заявка в Битрикс24, скан паспорта АУ и решение суда.",
+      "positioning": null,
+      "search_text": "docs т-банк для открытия счета юридическому лицу в т-банке нужны заявка в битрикс24, скан паспорта ау и решение суда. юл docs tbank yul",
+      "is_internal": false
     },
     {
       "chunk_id": 67,
-      "text": "---CHUNK--- БАНК: Уралсиб | КЛИЕНТ: ЮЛ | ТАРИФ | Возврат задатков на ФЛ: До 1,5 млн руб. — бесплатно; свыше 1,5 млн руб. — 0.2%.",
+      "text": "Для открытия счета в Альфа-Банке по ЮЛ сканы документов от АУ не нужны, достаточно названия или ИНН должника и перечня счетов.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "docs",
+      "bank": "Альфа-Банк",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": null,
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "docs",
+        "alfabank",
+        "yul"
+      ],
+      "fact": "Для открытия счета в Альфа-Банке по ЮЛ сканы документов от АУ не нужны, достаточно названия или ИНН должника и перечня счетов.",
+      "positioning": null,
+      "search_text": "docs альфа-банк для открытия счета в альфа-банке по юл сканы документов от ау не нужны, достаточно названия или инн должника и перечня счетов. юл docs alfabank yul",
+      "is_internal": false
     },
     {
       "chunk_id": 68,
-      "text": "---CHUNK--- БАНК: Уралсиб | КЛИЕНТ: ЮЛ | ТАРИФ | Вознаграждение АУ на ЮЛ: 35 руб.",
+      "text": "Для открытия счета в Уралсибе по ЮЛ сканы документов от АУ не нужны, достаточно названия или ИНН должника и перечня счетов.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "docs",
+      "bank": "Уралсиб",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": null,
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "docs",
+        "uralsib",
+        "yul"
+      ],
+      "fact": "Для открытия счета в Уралсибе по ЮЛ сканы документов от АУ не нужны, достаточно названия или ИНН должника и перечня счетов.",
+      "positioning": null,
+      "search_text": "docs уралсиб для открытия счета в уралсибе по юл сканы документов от ау не нужны, достаточно названия или инн должника и перечня счетов. юл docs uralsib yul",
+      "is_internal": false
     },
     {
       "chunk_id": 69,
-      "text": "---CHUNK--- БАНК: Уралсиб | КЛИЕНТ: ЮЛ | ТАРИФ | Переводы со спецсчетов на ФЛ: Бесплатно.",
+      "text": "Для открытия счета в МКБ по ЮЛ сканы документов от АУ не нужны, достаточно названия или ИНН должника и перечня счетов.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "docs",
+      "bank": "МКБ",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": null,
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "docs",
+        "mkb",
+        "yul"
+      ],
+      "fact": "Для открытия счета в МКБ по ЮЛ сканы документов от АУ не нужны, достаточно названия или ИНН должника и перечня счетов.",
+      "positioning": null,
+      "search_text": "docs мкб для открытия счета в мкб по юл сканы документов от ау не нужны, достаточно названия или инн должника и перечня счетов. юл docs mkb yul",
+      "is_internal": false
     },
     {
       "chunk_id": 70,
-      "text": "---CHUNK--- БАНК: Уралсиб | КЛИЕНТ: ФЛ | ТАРИФ | Открытие счета: От 1000 до 5000 руб.",
+      "text": "Для открытия счета АО или ЗАО дополнительно нужен актуальный реестр акционеров или официальное письмо от конкурсного управляющего.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "docs",
+      "bank": "Росбанк",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": null,
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "docs",
+        "rosbank",
+        "yul",
+        "ao",
+        "zao"
+      ],
+      "fact": "Для открытия счета АО или ЗАО дополнительно нужен актуальный реестр акционеров или официальное письмо от конкурсного управляющего.",
+      "positioning": null,
+      "search_text": "docs росбанк для открытия счета ао или зао дополнительно нужен актуальный реестр акционеров или официальное письмо от конкурсного управляющего. юл docs rosbank yul ao zao",
+      "is_internal": false
     },
     {
       "chunk_id": 71,
-      "text": "---CHUNK--- БАНК: Т-Банк | КЛИЕНТ: ЮЛ | ТАРИФ | Открытие счета: 3 900 руб. за каждый счет.",
+      "text": "Для открытия счета организации-нерезиденту требуется выписка из торговой палаты с апостилем и переводом.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "docs",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "non_resident",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "docs",
+        "non_resident"
+      ],
+      "fact": "Для открытия счета организации-нерезиденту требуется выписка из торговой палаты с апостилем и переводом.",
+      "positioning": null,
+      "search_text": "docs non_resident для открытия счета организации-нерезиденту требуется выписка из торговой палаты с апостилем и переводом. docs non_resident",
+      "is_internal": false
     },
     {
       "chunk_id": 72,
-      "text": "---CHUNK--- БАНК: Т-Банк | КЛИЕНТ: ЮЛ | ТАРИФ | Ведение счета: 1 800 руб.",
+      "text": "Для физического лица ТКБ — рабочий вариант: открытие 1 500 руб., ведение 0 руб., внешние платежи 1.2%, внутрибанковские переводы 0 руб. Важная особенность: расходные операции согласуются через юристов банка.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "selection",
+      "bank": "ТКБ",
+      "client_type": [
+        "ФЛ"
+      ],
+      "status": "ACTIVE",
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "selection",
+        "fl",
+        "tkb",
+        "active"
+      ],
+      "fact": null,
+      "positioning": "Для физического лица ТКБ — рабочий вариант: открытие 1 500 руб., ведение 0 руб., внешние платежи 1.2%, внутрибанковские переводы 0 руб. Важная особенность: расходные операции согласуются через юристов банка.",
+      "search_text": "selection ткб для физического лица ткб — рабочий вариант: открытие 1 500 руб., ведение 0 руб., внешние платежи 1.2%, внутрибанковские переводы 0 руб. важная особенность: расходные операции согласуются через юристов банка. фл selection fl tkb active",
+      "is_internal": false
     },
     {
       "chunk_id": 73,
-      "text": "---CHUNK--- БАНК: Т-Банк | КЛИЕНТ: ЮЛ | ТАРИФ | Переводы на ЮЛ: 36 руб. электронно (400 руб. на бумажном носителе).",
+      "text": "Для юридического лица Альфа-Банк — один из самых бюджетных вариантов: открытие 800 руб., ведение 800 руб., контроль банкротных операций 0 руб., перевод на ЮЛ 35 руб.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "selection",
+      "bank": "Альфа-Банк",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "selection",
+        "yul",
+        "alfabank",
+        "active"
+      ],
+      "fact": null,
+      "positioning": "Для юридического лица Альфа-Банк — один из самых бюджетных вариантов: открытие 800 руб., ведение 800 руб., контроль банкротных операций 0 руб., перевод на ЮЛ 35 руб.",
+      "search_text": "selection альфа-банк для юридического лица альфа-банк — один из самых бюджетных вариантов: открытие 800 руб., ведение 800 руб., контроль банкротных операций 0 руб., перевод на юл 35 руб. юл selection yul alfabank active",
+      "is_internal": false
     },
     {
       "chunk_id": 74,
-      "text": "---CHUNK--- БАНК: Т-Банк | КЛИЕНТ: ЮЛ | ТАРИФ | Возврат задатков на ФЛ (со спецсчета): Комиссия отсутствует.",
+      "text": "Для юридического лица Уралсиб — рабочий вариант малого бизнеса: открытие 3 500 руб., ведение 1 600 руб., переводы на ЮЛ 35 руб., переводы на ФЛ до 100 000 руб. без комиссии, но есть 150 руб. за контроль каждой банкротной операции.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "selection",
+      "bank": "Уралсиб",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "selection",
+        "yul",
+        "uralsib",
+        "active"
+      ],
+      "fact": null,
+      "positioning": "Для юридического лица Уралсиб — рабочий вариант малого бизнеса: открытие 3 500 руб., ведение 1 600 руб., переводы на ЮЛ 35 руб., переводы на ФЛ до 100 000 руб. без комиссии, но есть 150 руб. за контроль каждой банкротной операции.",
+      "search_text": "selection уралсиб для юридического лица уралсиб — рабочий вариант малого бизнеса: открытие 3 500 руб., ведение 1 600 руб., переводы на юл 35 руб., переводы на фл до 100 000 руб. без комиссии, но есть 150 руб. за контроль каждой банкротной операции. юл selection yul uralsib active",
+      "is_internal": false
     },
     {
       "chunk_id": 75,
-      "text": "---CHUNK--- БАНК: Т-Банк | КЛИЕНТ: ЮЛ | ТАРИФ | Возврат задатков на ФЛ с основного счета (до 150 000 руб.): 0%.",
+      "text": "Для юридического лица ТКБ — вариант с открытием 2 800 руб. и ведением 2 090 руб.; переводы на ЮЛ стоят 33 руб. электронно, а переводы на ФЛ тарифицируются процентом от суммы плюс 33 руб. за платежку.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "selection",
+      "bank": "ТКБ",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "ACTIVE",
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "selection",
+        "yul",
+        "tkb",
+        "active"
+      ],
+      "fact": null,
+      "positioning": "Для юридического лица ТКБ — вариант с открытием 2 800 руб. и ведением 2 090 руб.; переводы на ЮЛ стоят 33 руб. электронно, а переводы на ФЛ тарифицируются процентом от суммы плюс 33 руб. за платежку.",
+      "search_text": "selection ткб для юридического лица ткб — вариант с открытием 2 800 руб. и ведением 2 090 руб.; переводы на юл стоят 33 руб. электронно, а переводы на фл тарифицируются процентом от суммы плюс 33 руб. за платежку. юл selection yul tkb active",
+      "is_internal": false
     },
     {
       "chunk_id": 76,
-      "text": "---CHUNK--- БАНК: Т-Банк | КЛИЕНТ: ЮЛ | ТАРИФ | Возврат задатков на ФЛ с основного счета (от 150 001 до 500 000 руб.): 1%.",
+      "text": "Для юридического лица Т-Банк исторически имел открытие 3 900 руб., ведение 1 800 руб. и переводы на ЮЛ 36 руб., но сейчас открытие временно приостановлено.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "selection",
+      "bank": "Т-Банк",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "PAUSE",
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "selection",
+        "yul",
+        "tbank",
+        "pause"
+      ],
+      "fact": null,
+      "positioning": "Для юридического лица Т-Банк исторически имел открытие 3 900 руб., ведение 1 800 руб. и переводы на ЮЛ 36 руб., но сейчас открытие временно приостановлено.",
+      "search_text": "selection т-банк для юридического лица т-банк исторически имел открытие 3 900 руб., ведение 1 800 руб. и переводы на юл 36 руб., но сейчас открытие временно приостановлено. юл selection yul tbank pause",
+      "is_internal": false
     },
     {
       "chunk_id": 77,
-      "text": "---CHUNK--- БАНК: Т-Банк | КЛИЕНТ: ЮЛ | ТАРИФ | Возврат задатков на ФЛ с основного счета (от 500 001 до 5 000 000 руб.): 2%.",
+      "text": "Для юридического лица МКБ сейчас недоступен для открытия. Особенности банка: внутрибанковские переводы требуют рукописного заявления и визита, а платежи проводятся вручную с уведомлением по email.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "selection",
+      "bank": "МКБ",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "PAUSE",
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "selection",
+        "yul",
+        "mkb",
+        "pause"
+      ],
+      "fact": null,
+      "positioning": "Для юридического лица МКБ сейчас недоступен для открытия. Особенности банка: внутрибанковские переводы требуют рукописного заявления и визита, а платежи проводятся вручную с уведомлением по email.",
+      "search_text": "selection мкб для юридического лица мкб сейчас недоступен для открытия. особенности банка: внутрибанковские переводы требуют рукописного заявления и визита, а платежи проводятся вручную с уведомлением по email. юл selection yul mkb pause",
+      "is_internal": false
     },
     {
       "chunk_id": 78,
-      "text": "---CHUNK--- БАНК: Т-Банк | КЛИЕНТ: ЮЛ | ТАРИФ | Возврат задатков на ФЛ с основного счета (свыше 5 000 000 руб.): 5%.",
+      "text": "Для юридического лица Росбанк сейчас недоступен для открытия. Исторически он подходит для ЮЛ, но для АО и ЗАО требует дополнительный реестр акционеров или письмо от конкурсного управляющего.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "selection",
+      "bank": "Росбанк",
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": "PAUSE",
+      "field": null,
+      "topic": null,
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "selection",
+        "yul",
+        "rosbank",
+        "pause"
+      ],
+      "fact": null,
+      "positioning": "Для юридического лица Росбанк сейчас недоступен для открытия. Исторически он подходит для ЮЛ, но для АО и ЗАО требует дополнительный реестр акционеров или письмо от конкурсного управляющего.",
+      "search_text": "selection росбанк для юридического лица росбанк сейчас недоступен для открытия. исторически он подходит для юл, но для ао и зао требует дополнительный реестр акционеров или письмо от конкурсного управляющего. юл selection yul rosbank pause",
+      "is_internal": false
     },
     {
       "chunk_id": 79,
-      "text": "---CHUNK--- БАНК: Т-Банк | КЛИЕНТ: ЮЛ | ТАРИФ | Вознаграждение АУ на ФЛ/ЮЛ (от 150 001 до 500 000 руб.): 1% взимается только от суммы перечислений, превышающей 150 000 руб.",
+      "text": "Для юридических лиц по стоимости открытия сейчас выгоднее всего выглядит Альфа-Банк (800 руб.), затем ТКБ (2 800 руб.), затем Уралсиб (3 500 руб.). Т-Банк, МКБ и Росбанк сейчас неактивны для нового открытия.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "selection",
+      "bank": null,
+      "client_type": [
+        "ЮЛ"
+      ],
+      "status": null,
+      "field": null,
+      "topic": "comparison_low_cost",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "selection",
+        "yul",
+        "comparison",
+        "opening_cost"
+      ],
+      "fact": null,
+      "positioning": "Для юридических лиц по стоимости открытия сейчас выгоднее всего выглядит Альфа-Банк (800 руб.), затем ТКБ (2 800 руб.), затем Уралсиб (3 500 руб.). Т-Банк, МКБ и Росбанк сейчас неактивны для нового открытия.",
+      "search_text": "selection comparison_low_cost для юридических лиц по стоимости открытия сейчас выгоднее всего выглядит альфа-банк (800 руб.), затем ткб (2 800 руб.), затем уралсиб (3 500 руб.). т-банк, мкб и росбанк сейчас неактивны для нового открытия. юл selection yul comparison opening_cost",
+      "is_internal": false
     },
     {
       "chunk_id": 80,
-      "text": "---CHUNK--- БАНК: Т-Банк | КЛИЕНТ: ЮЛ | ТАРИФ | Вознаграждение АУ на ФЛ/ЮЛ (от 500 001 до 5 000 000 руб.): 2% взимается только от суммы перечислений, превышающей 500 000 руб.",
+      "text": "Для физических лиц в партнерской сетке рабочий вариант — ТКБ: открытие 1 500 руб., ведение 0 руб., но расходные операции нужно заранее согласовывать с юристами банка.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "selection",
+      "bank": null,
+      "client_type": [
+        "ФЛ"
+      ],
+      "status": null,
+      "field": null,
+      "topic": "comparison_default",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "selection",
+        "fl",
+        "comparison",
+        "default"
+      ],
+      "fact": null,
+      "positioning": "Для физических лиц в партнерской сетке рабочий вариант — ТКБ: открытие 1 500 руб., ведение 0 руб., но расходные операции нужно заранее согласовывать с юристами банка.",
+      "search_text": "selection comparison_default для физических лиц в партнерской сетке рабочий вариант — ткб: открытие 1 500 руб., ведение 0 руб., но расходные операции нужно заранее согласовывать с юристами банка. фл selection fl comparison default",
+      "is_internal": false
     },
     {
       "chunk_id": 81,
-      "text": "---CHUNK--- БАНК: Т-Банк | КЛИЕНТ: ЮЛ | ТАРИФ | Вознаграждение АУ на ФЛ/ЮЛ (свыше 5 000 000 руб.): 5% взимается только от суммы перечислений, превышающей 5 000 000 руб.",
+      "text": "Полное открытие счета обычно занимает около недели с момента заявки; после подписания документов в банке открытие занимает до двух дней.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "timelines",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "timelines"
+      ],
+      "fact": "Полное открытие счета обычно занимает около недели с момента заявки; после подписания документов в банке открытие занимает до двух дней.",
+      "positioning": null,
+      "search_text": "internal_ops timelines полное открытие счета обычно занимает около недели с момента заявки; после подписания документов в банке открытие занимает до двух дней. internal_ops timelines",
+      "is_internal": true
     },
     {
       "chunk_id": 82,
-      "text": "---CHUNK--- БАНК: МКБ | КЛИЕНТ: ЮЛ | ОСОБЕННОСТЬ | Внутрибанковские переводы: Требуют рукописного заявления и личного визита АУ в отделение. Сотрудников банка нужно оповещать по email.",
+      "text": "Приоритеты заявок: не срочный — в течение месяца, стандартный — в течение двух недель, срочный — в течение недели, горящий — в течение трех дней, катастрофа — сегодня.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "priorities",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "priorities"
+      ],
+      "fact": "Приоритеты заявок: не срочный — в течение месяца, стандартный — в течение двух недель, срочный — в течение недели, горящий — в течение трех дней, катастрофа — сегодня.",
+      "positioning": null,
+      "search_text": "internal_ops priorities приоритеты заявок: не срочный — в течение месяца, стандартный — в течение двух недель, срочный — в течение недели, горящий — в течение трех дней, катастрофа — сегодня. internal_ops priorities",
+      "is_internal": true
     },
     {
       "chunk_id": 83,
-      "text": "---CHUNK--- БАНК: МКБ | КЛИЕНТ: ЮЛ | ТАРИФ | Открытие счета: Основной — 2 400 руб., Задатковый / Залоговый — 1 000 руб.",
+      "text": "Если заявка получила статус «Просрочено», изменить дату открытия счета может только сотрудник отдела контроля качества.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "overdue_priority",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "priority",
+        "overdue"
+      ],
+      "fact": "Если заявка получила статус «Просрочено», изменить дату открытия счета может только сотрудник отдела контроля качества.",
+      "positioning": null,
+      "search_text": "internal_ops overdue_priority если заявка получила статус «просрочено», изменить дату открытия счета может только сотрудник отдела контроля качества. internal_ops priority overdue",
+      "is_internal": true
     },
     {
       "chunk_id": 84,
-      "text": "---CHUNK--- БАНК: МКБ | КЛИЕНТ: ЮЛ | ТАРИФ | Ведение счета: 850 руб. в месяц при наличии оборотов.",
+      "text": "Если на открываемом счете уже есть средства, заявка получает приоритет «Срочно», и у клиента нужно запросить выписку об остатках.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "funds_available",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "priority",
+        "urgent",
+        "funds"
+      ],
+      "fact": "Если на открываемом счете уже есть средства, заявка получает приоритет «Срочно», и у клиента нужно запросить выписку об остатках.",
+      "positioning": null,
+      "search_text": "internal_ops funds_available если на открываемом счете уже есть средства, заявка получает приоритет «срочно», и у клиента нужно запросить выписку об остатках. internal_ops priority urgent funds",
+      "is_internal": true
     },
     {
       "chunk_id": 85,
-      "text": "---CHUNK--- БАНК: МКБ | КЛИЕНТ: ЮЛ | ТАРИФ | Переводы на ЮЛ (получатель зарегистрирован > 6 мес): 32 руб.",
+      "text": "Если торги проходят через неделю и счет нужен срочно, заявку нужно согласовать с руководителем отдела продаж и отправить с пометкой о срочности.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "urgent_auction",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "urgent",
+        "auction"
+      ],
+      "fact": "Если торги проходят через неделю и счет нужен срочно, заявку нужно согласовать с руководителем отдела продаж и отправить с пометкой о срочности.",
+      "positioning": null,
+      "search_text": "internal_ops urgent_auction если торги проходят через неделю и счет нужен срочно, заявку нужно согласовать с руководителем отдела продаж и отправить с пометкой о срочности. internal_ops urgent auction",
+      "is_internal": true
     },
     {
       "chunk_id": 86,
-      "text": "---CHUNK--- БАНК: МКБ | КЛИЕНТ: ЮЛ | ТАРИФ | Переводы на ЮЛ (получатель зарегистрирован < 6 мес): 70 руб.",
+      "text": "На стадии согласования встречи с банком менеджер обязан лично связаться с клиентом и подтвердить факт согласования встречи банком.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "stage_meeting_prep",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "meeting",
+        "stage"
+      ],
+      "fact": "На стадии согласования встречи с банком менеджер обязан лично связаться с клиентом и подтвердить факт согласования встречи банком.",
+      "positioning": null,
+      "search_text": "internal_ops stage_meeting_prep на стадии согласования встречи с банком менеджер обязан лично связаться с клиентом и подтвердить факт согласования встречи банком. internal_ops meeting stage",
+      "is_internal": true
     },
     {
       "chunk_id": 87,
-      "text": "---CHUNK--- БОНУС | Расчет остатков | Формула: ((∑S х P) / D) x O x 0,93 (где ∑S – сумма входящих остатков за каждый день, P – годовая ставка в %).",
+      "text": "Стадия «Сегодня встреча / Ждем АУ» требует повышенного контроля; менеджер обязан связаться с АУ и контролировать посещение банка.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "stage_meeting_today",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "meeting",
+        "stage"
+      ],
+      "fact": "Стадия «Сегодня встреча / Ждем АУ» требует повышенного контроля; менеджер обязан связаться с АУ и контролировать посещение банка.",
+      "positioning": null,
+      "search_text": "internal_ops stage_meeting_today стадия «сегодня встреча / ждем ау» требует повышенного контроля; менеджер обязан связаться с ау и контролировать посещение банка. internal_ops meeting stage",
+      "is_internal": true
     },
     {
       "chunk_id": 88,
-      "text": "---CHUNK--- БОНУС | Время фиксации: Баланс фиксируется каждый день в 09:00 по МСК. Учитывается дата операции, а не дата документа.",
+      "text": "Если заявка отложена по уважительной причине, ее можно перевести в статус «Долгосрок» максимум на один месяц.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "stage_longterm",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "longterm",
+        "stage"
+      ],
+      "fact": "Если заявка отложена по уважительной причине, ее можно перевести в статус «Долгосрок» максимум на один месяц.",
+      "positioning": null,
+      "search_text": "internal_ops stage_longterm если заявка отложена по уважительной причине, ее можно перевести в статус «долгосрок» максимум на один месяц. internal_ops longterm stage",
+      "is_internal": true
     },
     {
       "chunk_id": 89,
-      "text": "---CHUNK--- БОНУС | Программа \"Приведи друга\": Выплачивается от 0,2% до 1% годовых от остатков привлеченных АУ коллег.",
+      "text": "Этап получения реквизитов и доступов является критическим; закрывать заявку без подтверждения смены временного пароля нельзя.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "stage_requisites",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "requisites",
+        "access"
+      ],
+      "fact": "Этап получения реквизитов и доступов является критическим; закрывать заявку без подтверждения смены временного пароля нельзя.",
+      "positioning": null,
+      "search_text": "internal_ops stage_requisites этап получения реквизитов и доступов является критическим; закрывать заявку без подтверждения смены временного пароля нельзя. internal_ops requisites access",
+      "is_internal": true
     },
     {
       "chunk_id": 90,
-      "text": "---CHUNK--- БАНК: Уралсиб | СЕГМЕНТ: Малый бизнес | КЛИЕНТ: ЮЛ | БОНУС | 0 - 25 млн руб — 5.5%.",
+      "text": "Когда документы готовы, менеджер обязан уточнить у клиента, можно ли передать его телефон банку для согласования встречи.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "bank_call_consent",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "meeting",
+        "consent"
+      ],
+      "fact": "Когда документы готовы, менеджер обязан уточнить у клиента, можно ли передать его телефон банку для согласования встречи.",
+      "positioning": null,
+      "search_text": "internal_ops bank_call_consent когда документы готовы, менеджер обязан уточнить у клиента, можно ли передать его телефон банку для согласования встречи. internal_ops meeting consent",
+      "is_internal": true
     },
     {
       "chunk_id": 91,
-      "text": "---CHUNK--- БАНК: Уралсиб | СЕГМЕНТ: Малый бизнес | КЛИЕНТ: ЮЛ | БОНУС | 25 - 50 млн руб — 6%.",
+      "text": "Если банк не позвонил клиенту для назначения встречи, сотрудник бэк-офиса должен срочно связаться с менеджером банка.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "no_call_from_bank",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "bank_communication",
+        "meeting"
+      ],
+      "fact": "Если банк не позвонил клиенту для назначения встречи, сотрудник бэк-офиса должен срочно связаться с менеджером банка.",
+      "positioning": null,
+      "search_text": "internal_ops no_call_from_bank если банк не позвонил клиенту для назначения встречи, сотрудник бэк-офиса должен срочно связаться с менеджером банка. internal_ops bank_communication meeting",
+      "is_internal": true
     },
     {
       "chunk_id": 92,
-      "text": "---CHUNK--- БАНК: Уралсиб | СЕГМЕНТ: Малый бизнес | КЛИЕНТ: ЮЛ | БОНУС | 50 - 250 млн руб — 7%.",
+      "text": "Если данные о времени встречи от банка и клиента расходятся, бэк-офис обязан срочно уточнить корректную информацию.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "date_mismatch",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "bank_communication",
+        "mismatch"
+      ],
+      "fact": "Если данные о времени встречи от банка и клиента расходятся, бэк-офис обязан срочно уточнить корректную информацию.",
+      "positioning": null,
+      "search_text": "internal_ops date_mismatch если данные о времени встречи от банка и клиента расходятся, бэк-офис обязан срочно уточнить корректную информацию. internal_ops bank_communication mismatch",
+      "is_internal": true
     },
     {
       "chunk_id": 93,
-      "text": "---CHUNK--- БАНК: Уралсиб | СЕГМЕНТ: Малый бизнес | КЛИЕНТ: ЮЛ | БОНУС | 250 - 500 млн руб — 7.5%.",
+      "text": "Если клиент переносит встречу, заявка возвращается на стадию согласования, а менеджер фиксирует новую дату.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "meeting_reschedule_client",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "meeting",
+        "reschedule_client"
+      ],
+      "fact": "Если клиент переносит встречу, заявка возвращается на стадию согласования, а менеджер фиксирует новую дату.",
+      "positioning": null,
+      "search_text": "internal_ops meeting_reschedule_client если клиент переносит встречу, заявка возвращается на стадию согласования, а менеджер фиксирует новую дату. internal_ops meeting reschedule_client",
+      "is_internal": true
     },
     {
       "chunk_id": 94,
-      "text": "---CHUNK--- БАНК: Уралсиб | СЕГМЕНТ: Малый бизнес | КЛИЕНТ: ЮЛ | БОНУС | 500 - 750 млн руб — 8%.",
+      "text": "Если банк переносит встречу, менеджер должен срочно связаться с клиентом и договориться о новой дате.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "meeting_reschedule_bank",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "meeting",
+        "reschedule_bank"
+      ],
+      "fact": "Если банк переносит встречу, менеджер должен срочно связаться с клиентом и договориться о новой дате.",
+      "positioning": null,
+      "search_text": "internal_ops meeting_reschedule_bank если банк переносит встречу, менеджер должен срочно связаться с клиентом и договориться о новой дате. internal_ops meeting reschedule_bank",
+      "is_internal": true
     },
     {
       "chunk_id": 95,
-      "text": "---CHUNK--- БАНК: Уралсиб | СЕГМЕНТ: Малый бизнес | КЛИЕНТ: ЮЛ | БОНУС | 750 - 1 млрд руб — 9%.",
+      "text": "Если в день подписания документов возникла проблема, клиент не должен уходить из отделения, а менеджер должен решать вопрос через бэк-офис на месте.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "signing_issue",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "signing",
+        "issue"
+      ],
+      "fact": "Если в день подписания документов возникла проблема, клиент не должен уходить из отделения, а менеджер должен решать вопрос через бэк-офис на месте.",
+      "positioning": null,
+      "search_text": "internal_ops signing_issue если в день подписания документов возникла проблема, клиент не должен уходить из отделения, а менеджер должен решать вопрос через бэк-офис на месте. internal_ops signing issue",
+      "is_internal": true
     },
     {
       "chunk_id": 96,
-      "text": "---CHUNK--- БАНК: Уралсиб | СЕГМЕНТ: Малый бизнес | КЛИЕНТ: ЮЛ | БОНУС | Свыше 1 млрд руб — 10%.",
+      "text": "Если через 1–2 дня после подписания документов клиент не получил реквизиты и доступы, менеджер обязан срочно сообщить о проблеме.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "delay_access",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "access",
+        "delay"
+      ],
+      "fact": "Если через 1–2 дня после подписания документов клиент не получил реквизиты и доступы, менеджер обязан срочно сообщить о проблеме.",
+      "positioning": null,
+      "search_text": "internal_ops delay_access если через 1–2 дня после подписания документов клиент не получил реквизиты и доступы, менеджер обязан срочно сообщить о проблеме. internal_ops access delay",
+      "is_internal": true
     },
     {
       "chunk_id": 97,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ЮЛ | БОНУС | 0 - 25 млн руб — 6%.",
+      "text": "Если клиент ушел из банка без подписания документов из-за плохого обслуживания, заявка переводится в статус сбоя и подключается руководство.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "negative_experience",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "negative",
+        "issue",
+        "escalation"
+      ],
+      "fact": "Если клиент ушел из банка без подписания документов из-за плохого обслуживания, заявка переводится в статус сбоя и подключается руководство.",
+      "positioning": null,
+      "search_text": "internal_ops negative_experience если клиент ушел из банка без подписания документов из-за плохого обслуживания, заявка переводится в статус сбоя и подключается руководство. internal_ops negative issue escalation",
+      "is_internal": true
     },
     {
       "chunk_id": 98,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ЮЛ | БОНУС | 25 - 50 млн руб — 6.5%.",
+      "text": "Если срочная заявка была подана сразу в несколько банков, после успешного открытия счета в одном банке остальные заявки нужно аннулировать.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "duplicate_requests",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "duplicates"
+      ],
+      "fact": "Если срочная заявка была подана сразу в несколько банков, после успешного открытия счета в одном банке остальные заявки нужно аннулировать.",
+      "positioning": null,
+      "search_text": "internal_ops duplicate_requests если срочная заявка была подана сразу в несколько банков, после успешного открытия счета в одном банке остальные заявки нужно аннулировать. internal_ops duplicates",
+      "is_internal": true
     },
     {
       "chunk_id": 99,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ЮЛ | БОНУС | 50 - 250 млн руб — 7.5%.",
+      "text": "Если в новой заявке не хватает данных, а менеджер не отвечает бэк-офису в течение часа, об этом нужно срочно сообщить руководителю отдела продаж.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "missing_data",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "missing_data",
+        "escalation"
+      ],
+      "fact": "Если в новой заявке не хватает данных, а менеджер не отвечает бэк-офису в течение часа, об этом нужно срочно сообщить руководителю отдела продаж.",
+      "positioning": null,
+      "search_text": "internal_ops missing_data если в новой заявке не хватает данных, а менеджер не отвечает бэк-офису в течение часа, об этом нужно срочно сообщить руководителю отдела продаж. internal_ops missing_data escalation",
+      "is_internal": true
     },
     {
       "chunk_id": 100,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ЮЛ | БОНУС | 250 - 500 млн руб — 8%.",
+      "text": "Если клиент просит дополнительные льготы, их сначала нужно согласовать с руководителем отдела продаж, а затем передать задачу в бэк-офис.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "extra_benefits",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "benefits",
+        "approval"
+      ],
+      "fact": "Если клиент просит дополнительные льготы, их сначала нужно согласовать с руководителем отдела продаж, а затем передать задачу в бэк-офис.",
+      "positioning": null,
+      "search_text": "internal_ops extra_benefits если клиент просит дополнительные льготы, их сначала нужно согласовать с руководителем отдела продаж, а затем передать задачу в бэк-офис. internal_ops benefits approval",
+      "is_internal": true
     },
     {
       "chunk_id": 101,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ЮЛ | БОНУС | 500 - 750 млн руб — 8.5%.",
+      "text": "Если банк не согласовывает нужную льготу, сотрудник бэк-офиса должен связаться с руководителем отдела продаж банка или департаментом по банкротству.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "bank_denies_benefit",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "benefits",
+        "escalation"
+      ],
+      "fact": "Если банк не согласовывает нужную льготу, сотрудник бэк-офиса должен связаться с руководителем отдела продаж банка или департаментом по банкротству.",
+      "positioning": null,
+      "search_text": "internal_ops bank_denies_benefit если банк не согласовывает нужную льготу, сотрудник бэк-офиса должен связаться с руководителем отдела продаж банка или департаментом по банкротству. internal_ops benefits escalation",
+      "is_internal": true
     },
     {
       "chunk_id": 102,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ЮЛ | БОНУС | 750 - 1 млрд руб — 9.5%.",
+      "text": "Если счет открывается для нерезидента, сначала в банк отправляют заявку с ИНН должника для предварительной проверки, и только после ответа банка заказывают реестр.",
       "page_start": 0,
       "page_end": 0,
-      "source": "knowledge_base.txt"
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "non_resident_check",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "non_resident",
+        "verification"
+      ],
+      "fact": "Если счет открывается для нерезидента, сначала в банк отправляют заявку с ИНН должника для предварительной проверки, и только после ответа банка заказывают реестр.",
+      "positioning": null,
+      "search_text": "internal_ops non_resident_check если счет открывается для нерезидента, сначала в банк отправляют заявку с инн должника для предварительной проверки, и только после ответа банка заказывают реестр. internal_ops non_resident verification",
+      "is_internal": true
     },
     {
       "chunk_id": 103,
-      "text": "---CHUNK--- БАНК: ТКБ | КЛИЕНТ: ЮЛ | БОНУС | Свыше 1 млрд руб — 10.5%.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 104,
-      "text": "---CHUNK--- БАНК: Альфа-Банк | КЛИЕНТ: ЮЛ | БОНУС | 0 - 25 млн руб — 5.5%.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 105,
-      "text": "---CHUNK--- БАНК: Альфа-Банк | КЛИЕНТ: ЮЛ | БОНУС | 25 - 50 млн руб — 6%.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 106,
-      "text": "---CHUNK--- БАНК: Альфа-Банк | КЛИЕНТ: ЮЛ | БОНУС | 50 - 250 млн руб — 7%.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 107,
-      "text": "---CHUNK--- БАНК: Альфа-Банк | КЛИЕНТ: ЮЛ | БОНУС | 250 - 500 млн руб — 7.5%.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 108,
-      "text": "---CHUNK--- БАНК: Альфа-Банк | КЛИЕНТ: ЮЛ | БОНУС | 500 - 750 млн руб — 8%.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 109,
-      "text": "---CHUNK--- БАНК: Альфа-Банк | КЛИЕНТ: ЮЛ | БОНУС | 750 - 1 млрд руб — 9%.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 110,
-      "text": "---CHUNK--- БАНК: Альфа-Банк | КЛИЕНТ: ЮЛ | БОНУС | Свыше 1 млрд руб — 10%.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 111,
-      "text": "---CHUNK--- БАНК: Т-Банк | КЛИЕНТ: ЮЛ | БОНУС | 0 - 25 млн руб — 10%.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 112,
-      "text": "---CHUNK--- БАНК: Т-Банк | КЛИЕНТ: ЮЛ | БОНУС | 25 - 50 млн руб — 11%.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 113,
-      "text": "---CHUNK--- БАНК: Т-Банк | КЛИЕНТ: ЮЛ | БОНУС | 50 - 250 млн руб — 11.5%.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 114,
-      "text": "---CHUNK--- БАНК: Т-Банк | КЛИЕНТ: ЮЛ | БОНУС | 250 - 500 млн руб — 12%.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 115,
-      "text": "---CHUNK--- БАНК: Т-Банк | КЛИЕНТ: ЮЛ | БОНУС | 500 - 750 млн руб — 12.5%.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 116,
-      "text": "---CHUNK--- БАНК: Т-Банк | КЛИЕНТ: ЮЛ | БОНУС | 750 - 1 млрд руб — 13%.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 117,
-      "text": "---CHUNK--- БАНК: Т-Банк | КЛИЕНТ: ЮЛ | БОНУС | Свыше 1 млрд руб — Индивидуально.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 118,
-      "text": "---CHUNK--- CRM | СРОКИ | Процесс: Около 1 недели с момента заявки до открытия; до 2 дней уходит на открытие после подписания документов в банке.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 119,
-      "text": "---CHUNK--- CRM | ПРИОРИТЕТ | Не срочный: Счет должен быть открыт в течение месяца.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 120,
-      "text": "---CHUNK--- CRM | ПРИОРИТЕТ | Стандартный: Счет должен быть открыт в течение 2 недель.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 121,
-      "text": "---CHUNK--- CRM | ПРИОРИТЕТ | Срочный: Счет должен быть открыт в течение 1 недели.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 122,
-      "text": "---CHUNK--- CRM | ПРИОРИТЕТ | Горящий: Счет должен быть открыт в течение 3 дней.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 123,
-      "text": "---CHUNK--- CRM | ПРИОРИТЕТ | КАТАСТРОФА: Счет должен быть открыт СЕГОДНЯ.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 124,
-      "text": "---CHUNK--- CRM | ПРИОРИТЕТ | ПРОСРОЧЕНО: Срок упущен, перенос возможен только сотрудником отдела Контроля Качества,.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 125,
-      "text": "---CHUNK--- CRM | СТАДИИ | Согласование встречи АУ с банком: Менеджер по продажам обязан лично связаться с клиентом и подтвердить факт согласования встречи банком.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 126,
-      "text": "---CHUNK--- CRM | СТАДИИ | Сегодня встреча / Ждем АУ: Повышенный приоритет контроля. Менеджер по продажам обязан связаться с АУ и контролировать процесс посещения банка.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 127,
-      "text": "---CHUNK--- CRM | СТАДИИ | Долгосрок: Заявки, отложенные по уважительным причинам (например, на счет наложен арест). Максимальный срок нахождения — 1 месяц.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 128,
-      "text": "---CHUNK--- CRM | СТАДИИ | Выяснение реквизитов и доступов к ЛК: Критический этап. Без подтверждения того, что АУ получил доступы и сменил временный пароль, заявку закрывать нельзя (грозит штрафом и служебной запиской).",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 129,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Нет основного счета: Если клиент просит открыть только специальный счет (задатковый, залоговый), ему нужно сообщить, что открытие спецсчета без основного невозможно.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 130,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Подписание по доверенности: Если клиент хочет открыть счет по доверенности, ответьте, что это возможно только для юридических лиц при наличии оригинала бумажной нотариальной доверенности с подписью и печатью доверителя.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 131,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Смерть физического лица: Если клиент просит открыть счет на физическое лицо, которое ушло из жизни, необходимо сообщить, что банки не открывают счета умершим физическим лицам.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 132,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Ликвидация должника: Если должник уже полностью ликвидирован, то открыть счета можно исключительно в тех банках, в которых ранее у него уже были счета.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 133,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Отсутствие отделения: Если в регионе арбитражного управляющего нет отделения нашего банка-партнера, нужно спросить, бывает ли он в командировках в крупных городах или ближайших регионах, где такие отделения есть.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 134,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Смена АУ по суду: Если арбитражного управляющего меняют по решению суда, льготные условия исчезнут только в том случае, если новый управляющий решит сменить счет.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 135,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Открытие счета заранее: Если счет нужен не сразу, его можно открыть заранее, так как комиссия за ведение не взимается до начала движений по счету, но стоимость открытия придется оплатить при закрытии, если деньги так и не поступят.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 136,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Проблема при подписании: Если в день подписания документов в банке у клиента возникает проблема, он не должен уходить, а менеджеру необходимо оперативно решить вопрос через Бэк-офис прямо в присутствии клиента в отделении.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 137,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Задержка доступов: Если после подписания документов прошло 1-2 дня, а доступы в банк-клиент и реквизиты счета не поступили на почту клиента, менеджеру необходимо срочно сообщить об этой проблеме.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 138,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Капитализация: Если клиент спрашивает про услугу капитализации для конкурсной массы, следует ответить, что капитализации нет ни в одном из наших банков-партнеров.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 139,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Крупный перевод кредитору: Если требуется перевести кредитору-физлицу крупную сумму свыше лимитов (например, 30 млн рублей), нужно за два дня предупредить банк, предоставить реестр кредиторов, и тогда комиссия составит 0.2%.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 140,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Платежи в МКБ: Если клиент обслуживается в МКБ, ему нужно обязательно сообщать на почту менеджерам банка каждый раз после создания платежки в личном кабинете, так как платежи проводятся вручную.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 141,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Внутрибанковский перевод МКБ: Если в МКБ нужно перевести деньги между своими счетами, для этого потребуется рукописное заявление и личный визит арбитражного управляющего в отделение банка.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 142,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Закрытие чужого счета: Если клиент хочет закрыть счет в другом банке для перевода должника к нам, лучше порекомендовать открыть новые счета, так как процесс закрытия в других банках может занять от 2 до 3 месяцев.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 143,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Снятие наличных банкротам: Если арбитражный управляющий спрашивает о возможности снятия наличных по банкротам, следует ответить, что это возможно только после вынесения решения суда о выдаче наличными.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 144,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Действующая компания: Если клиент хочет открыть счет для действующей компании, которая не является банкротом, мы можем сделать это в Уралсиб банке по стандартной тарифной сетке.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 145,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Должник нерезидент: Если должник является организацией-нерезидентом, счет открыть можно, но клиенту потребуется самостоятельно заказать реестр торговой палаты с апостилем и переводом по месту регистрации должника.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 146,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Одобрение операций в ТКБ по ФЛ: Если открыт счет для физического лица в ТКБ, клиенту необходимо заранее присылать сканы документов для согласования расходных операций с юристами банка, чтобы не тратить время в отделении.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 147,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Онлайн подписание: Если клиент спрашивает, можно ли подписать документы на открытие счета онлайн, ответьте, что возможность подписания онлайн отсутствует.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 148,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Открытие счета для АО и ЗАО: Если открывается счет для акционерного общества в Росбанке, дополнительно потребуется актуальный (не старше 3 месяцев) реестр акционеров или официальное письмо от конкурсного управляющего.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 149,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Срочное открытие перед торгами: Если торги проходят через неделю и счета нужны очень срочно, необходимо договориться с руководителем отдела холодных продаж и отправить заявку с пометкой.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 150,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Проверка ИНН нерезидента: Если счет открывается для нерезидента, сначала нужно отправить в банк заявку с ИНН должника для предварительной проверки, и только после ответа банка заказывать реестр из торговой палаты.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 151,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Перевод в Тульскую налоговую: Если клиенту нужно сделать внебанковский перевод в Тульскую налоговую, то это возможно сделать исключительно по рукописному заявлению при личном визите в отделение банка.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 152,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Платежка в кассе Уралсиба: Если арбитражный управляющий проводит платеж через кассу в отделении Уралсиб банка, стоимость платежки составит минимум 600 рублей, а не льготные 35 рублей.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 153,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Отступное имущество: Если клиент спрашивает, может ли кредитор получить имущество должника вместо денег, ответьте, что это возможно и называется предложением о погашении требований путем предоставления отступного.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 154,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Зарплатный проект для банкротов: Если клиент интересуется наличием зарплатного проекта для банкротов с бесплатными переводами, следует ответить, что такой услуги нет.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 155,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Компания в красной зоне: Если компания-должник находится в красной зоне, открытие счета возможно только в качестве исключения после индивидуального рассмотрения.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 156,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Выдача пенсии банкроту: Если финансовый управляющий дает распоряжение выдать физлицу-банкроту пенсию, банк имеет право это сделать.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 157,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Возражение по процентам в договоре: Если клиент сомневается в выплатах из-за отсутствия четкого процента в договоре, нужно объяснить, что процент зависит от ключевой ставки ЦБ и поэтому фиксируется ежемесячно в актах.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 158,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Минимальная сумма для выплат по ФЛ: Если клиент уточняет условия выплат по счетам физических лиц, ответьте, что мы платим вознаграждение, только если на счете размещено более 5 млн рублей сроком от одного месяца.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 159,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Наличие средств до открытия: Если на открываемом счете уже имеются средства, заявка сразу получает приоритет «Срочно», и у клиента необходимо запросить выписку об остатках для ускорения открытия счета банком.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 160,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Согласование дополнительных льгот: Если клиенту требуются дополнительные льготы, менеджеру необходимо сначала согласовать их с РОПом, а затем передать задачу в Бэк-офис до подачи заявки.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 161,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Открытие нестандартного счета: Если клиенту нужен нестандартный счет (не основной, залоговый или задатковый), нужно выяснить его точное название, цели использования и статью ФЗ-127, после чего Бэк-офис уточнит возможность его открытия у банка.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 162,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Перенос встречи клиентом: Если клиент переносит встречу в банке на другую дату, заявка в CRM переводится обратно на стадию «Согласование встречи АУ с банком».",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 163,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Перенос встречи банком: Если менеджер банка переносит встречу из-за форс-мажора, сотрудник Бэк-офиса оповещает менеджера по продажам, который должен срочно связаться с клиентом для согласования новой даты.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 164,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Закрытие заявки без подтверждения доступов: Если менеджер закрыл заявку в CRM без письменного подтверждения от клиента о получении доступов в банк, сотрудник Бэк-офиса обязан написать служебную записку о нарушении регламента.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 165,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Аннулирование дублей заявок: Если срочная заявка подавалась сразу в несколько банков, после успешного открытия счета в одном из них остальные дубли заявок должны быть аннулированы менеджером по продажам.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 166,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Превышение лимита переводов ФЛ в Уралсибе: Если ежемесячные переводы на физлицо в Уралсибе превышают 2 млн рублей, комиссия может быть выше стандартной, если иное не было согласовано при открытии.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 167,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Документы для нерезидентов: Если открывается счет нерезиденту, процедура подготовки документов из торговой палаты занимает 2-3 недели и стоит 500-700 евро.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 168,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Сроки открытия счета: Если все документы поданы, полное открытие счета в банке обычно занимает около одной недели.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 169,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Платеж в кассе Уралсиба свыше 500 тысяч: Если сумма бумажной платежки в отделении Уралсиба превышает 500 000 рублей, она автоматически уходит на длительное согласование.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 170,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Обслуживание в ИТБ: Если клиенту удобнее, он может открывать счета и обслуживаться по тарифам ТКБ в любом отделении Инвестторгбанка (ИТБ).",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 171,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Приоритет «Просрочено»: Если заявка получила статус просроченной, изменить и перенести дату открытия счета имеет право только сотрудник отдела Контроля Качества.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 172,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Отказ банка в льготе: Если менеджер банка не согласовывает нужную клиенту льготу, сотрудник Бэк-офиса должен связаться с руководителем отдела продаж банка или департаментом по банкротству.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 173,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Отсутствие данных в заявке: Если в новой заявке не хватает данных, а менеджер не отвечает Бэк-офису в течение часа, необходимо срочно сообщить об этом руководителю отдела продаж.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 174,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Согласие на звонок банка: Если документы в банке готовы, менеджер обязан уточнить у клиента, могут ли сотрудники банка позвонить ему на телефон для согласования встречи.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 175,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Банк не связался с клиентом: Если банк не позвонил клиенту для назначения встречи, сотрудник Бэк-офиса должен немедленно связаться с менеджером банка и попытаться решить проблему.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 176,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Расхождение в дате встречи: Если данные о времени встречи от менеджера банка и клиента не совпадают, Бэк-офис обязан срочно выяснить достоверную информацию в банке.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 177,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Отмена встречи клиентом: Если клиент отменяет или переносит встречу в банке, заявка возвращается на стадию согласования, и менеджер должен узнать у клиента новую запланированную дату.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 178,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Отмена встречи банком: Если банк переносит встречу из-за форс-мажора, менеджер должен срочно связаться с арбитражным управляющим и передоговориться о новой дате подписания.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 179,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Негатив в отделении банка: Если клиент ушел из банка без подписания документов из-за плохого обслуживания, заявка переводится в статус «Сбой», и к решению подключается вышестоящее руководство.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 180,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Перевод в статус Долгосрок: Если клиент готов сотрудничать, но временно не может приехать в банк из-за ареста счета или иных причин, заявка переводится в «Долгосрок» максимум на 1 месяц.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 181,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Снятие вознаграждения АУ наличными в Уралсибе: Если арбитражный управляющий хочет снять свое вознаграждение наличными в отделении Уралсиба, комиссия составит от 1,5% до 10% в зависимости от снимаемой суммы.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 182,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Оформление карточки в банкротстве ФЛ: Если судом введена процедура реализации имущества гражданина, новая банковская карточка оформляется и подписывается исключительно финансовым управляющим.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 183,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Заморозка операций ИП при реструктуризации: Если в отношении индивидуального предпринимателя введена реструктуризация долгов, банк не исполняет платежи без предварительного письменного согласия финансового управляющего.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 184,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Внешнее управление ЮЛ: Если на предприятии введено внешнее управление или конкурсное производство, банк обязан заблокировать все действующие корпоративные карты должника без права выпуска новых.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 185,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Перевод должника из другого банка: Если арбитражный управляющий переводит должника к нам, он по закону обязан закрыть его предыдущие основные счета по мере их обнаружения и перевести остатки.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 186,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Валютный счет в банкротстве: Если у банкрота есть валютный счет, он может использоваться только для зачисления средств от иностранных дебиторов, но рассчитываться с кредиторами с него нельзя.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 187,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Возврат задатков участникам торгов: Если нужно вернуть гарантийные задатки участникам несостоявшихся торгов, средства должны списываться строго со специального задаткового счета должника.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 188,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Удовлетворение требований залоговых кредиторов: Если продано залоговое имущество должника, 70% от вырученной суммы направляется на погашение требований залогового кредитора через специальный залоговый счет.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
-    },
-    {
-      "chunk_id": 189,
-      "text": "---CHUNK--- СЦЕНАРИЙ | Интернет-банк для финансового управляющего: Если открывается счет для гражданина-банкрота или ИП, финансовому управляющему не подключается доступ в интернет-банк.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt"
+      "text": "Если клиенту нужен нестандартный счет, менеджер должен выяснить точное название счета, цели использования и статью ФЗ-127, после чего бэк-офис уточняет возможность открытия у банка.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "non_standard_account",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "non_standard_account",
+        "verification"
+      ],
+      "fact": "Если клиенту нужен нестандартный счет, менеджер должен выяснить точное название счета, цели использования и статью ФЗ-127, после чего бэк-офис уточняет возможность открытия у банка.",
+      "positioning": null,
+      "search_text": "internal_ops non_standard_account если клиенту нужен нестандартный счет, менеджер должен выяснить точное название счета, цели использования и статью фз-127, после чего бэк-офис уточняет возможность открытия у банка. internal_ops non_standard_account verification",
+      "is_internal": true
     }
   ]
 }

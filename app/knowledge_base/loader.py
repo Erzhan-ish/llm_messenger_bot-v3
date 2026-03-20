@@ -64,15 +64,12 @@ def get_kb() -> Optional[KnowledgeBase]:
         _KB_SINGLETON = KnowledgeBase.from_source(
             source_path,
             cache_path=cache_path,
-            chunk_chars=chunk_chars,
-            overlap_chars=overlap_chars,
             default_top_k=top_k,
         )
         logger.info(
-            "KB enabled | source={} | cache=DISABLED | chunk_chars={} | overlap_chars={} | top_k={}",
+            "KB enabled | source={} | cache={} | top_k={}",
             str(source_path),
-            chunk_chars,
-            overlap_chars,
+            str(cache_path),
             top_k,
         )
         return _KB_SINGLETON

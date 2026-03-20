@@ -60,25 +60,24 @@ def _add_sentence_overlap(chunks: list[str], overlap_sents: int, max_len: int) -
     return out
 
 
-def _normalize_keep_newlines(text: str) -> str:
+def _normalize_keep_newlines(text: str, is_structured: bool = False) -> str:
+    """Удаляет лишние пробелы, но сохраняет переносы строк."""
     if not text:
         return ""
-
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-
-    # убираем скрытые переносы и zero-width символы
-    text = text.replace("\u00ad", "")   # soft hyphen
-    text = text.replace("\u200b", "")   # zero-width space
-    text = text.replace("\ufeff", "")   # BOM
-
-    # КЛЮЧЕВОЕ: если перенос строки стоит внутри слова — склеиваем
-    # "качест\nве" -> "качестве"
-    text = _RE_JOIN_NL_IN_WORD.sub("", text)
-
-    # нормализуем пробелы, но сохраняем абзацы
+    # Normalize \r\n to \n
+    text = text.replace("\r\n", "\n")
+    # Collapse horizontal spaces
     text = re.sub(r"[ \t]+", " ", text)
+    
+    if not is_structured:
+        # For legacy PDF/DOCX: Join lines if they split a word
+        # (Already defined as _RE_JOIN_NL_IN_WORD)
+        text = _RE_JOIN_NL_IN_WORD.sub("", text)
+    
+    # Trim each line and collapse multiple newlines
+    lines = [line.strip() for line in text.split("\n")]
+    text = "\n".join(lines)
     text = re.sub(r"\n{3,}", "\n\n", text)
-
     return text.strip()
 
 
@@ -146,10 +145,25 @@ def _sent_overlap(prev_chunk: str, *, max_chars: int) -> str:
 @dataclass(frozen=True)
 class KBChunk:
     chunk_id: int
-    text: str
+    text: str # original or fact
     page_start: int
     page_end: int
     source: str
+    # New structured fields
+    type: Optional[str] = None
+    bank: Optional[str] = None
+    client_type: Optional[List[str]] = None
+    status: Optional[str] = None
+    field: Optional[str] = None
+    topic: Optional[str] = None
+    value_num: Optional[float] = None
+    value_text: Optional[str] = None
+    aliases: Optional[List[str]] = None
+    tags: Optional[List[str]] = None
+    fact: Optional[str] = None
+    positioning: Optional[str] = None
+    search_text: str = ""
+    is_internal: bool = False
 
 
 class KnowledgeBase:
@@ -170,7 +184,9 @@ class KnowledgeBase:
         df: Dict[str, int] = {}
 
         for ch in self._chunks:
-            counts = _term_counts(ch.text)
+            # Index search_text if available, fallback to text
+            txt = ch.search_text if ch.search_text else ch.text
+            counts = _term_counts(txt)
             self._chunk_term_counts.append(counts)
             for t in counts.keys():
                 df[t] = df.get(t, 0) + 1
@@ -179,42 +195,51 @@ class KnowledgeBase:
         self._n_docs = max(1, len(self._chunks))
 
     @classmethod
-    def from_source(
-        cls,
-        source_path: str | Path,
-        *,
-        cache_path: str | Path,
-        chunk_chars: int = 900,
-        overlap_chars: int = 160,
-        default_top_k: int = 5,
-    ) -> "KnowledgeBase":
-        source_path = Path(source_path)
-        cache_path = Path(cache_path)
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
+    def from_source(cls, source_path: Path, cache_path: Optional[Path] = None, default_top_k: int = 5) -> "KnowledgeBase":
+        """Loads from cache or rebuilds if needed."""
+        if not source_path.exists():
+            logger.warning(f"KB source not found: {source_path}")
+            return cls([], default_top_k=default_top_k)
 
-        if cache_path.exists() and _cache_is_valid(cache_path, source_path):
+        should_rebuild = True
+        if cache_path and cache_path.exists():
+            try:
+                payload = json.loads(cache_path.read_text(encoding="utf-8"))
+                meta = payload.get("meta", {})
+                version = payload.get("version", 0)
+                
+                # Invalidate if version mismatched or source changed
+                if version == 4:
+                    curr_sha = _sha256_file(source_path)
+                    if meta.get("source_sha256") == curr_sha:
+                        should_rebuild = False
+                        logger.info(f"KB cache hit: {cache_path} (v{version})")
+                    else:
+                        logger.info("KB source changed, rebuilding...")
+                else:
+                    logger.info(f"KB cache version mismatch (got {version}, want 4), rebuilding...")
+            except Exception as e:
+                logger.error(f"Error reading KB cache: {e}")
+
+        if should_rebuild:
+            text = source_path.read_text(encoding="utf-8")
+            chunks = _chunk_by_markers(text, source=str(source_path.name), chunk_chars=0, overlap_chars=0)
+            
+            # Post-rebuild validation
+            pricing = [c for c in chunks if c.type == "pricing"]
+            selection = [c for c in chunks if c.type == "selection"]
+            logger.info(f"KB Rebuilt | Total: {len(chunks)} | Pricing: {len(pricing)} | Selection: {len(selection)}")
+            if not chunks:
+                logger.error("KB Rebuild resulted in 0 chunks!")
+            
+            if cache_path:
+                _save_cache(cache_path, chunks, source_path)
+        else:
             chunks = _load_cache(cache_path)
-            logger.info("KB cache loaded | chunks={} | path={}", len(chunks), str(cache_path))
-            return cls(chunks, default_top_k=default_top_k)
-        elif cache_path.exists():
-            logger.info(
-                "KB cache invalidated, rebuilding | source={} | cache={}",
-                str(source_path),
-                str(cache_path),
-            )
 
-        logger.info("KB cache not found, building | source={}", str(source_path))
-        chunks = _build_from_source(
-            source_path,
-            chunk_chars=chunk_chars,
-            overlap_chars=overlap_chars,
-        )
-
-        _save_cache(cache_path, chunks, source_path)
-        logger.info("KB built and cached | chunks={} | path={}", len(chunks), str(cache_path))
         return cls(chunks, default_top_k=default_top_k)
 
-    def search(self, query: str, *, top_k: Optional[int] = None) -> List[KBChunk]:
+    def search(self, query: str, *, top_k: Optional[int] = None, allowed_types: Optional[List[str]] = None) -> List[KBChunk]:
         query = (query or "").strip()
         if not query:
             return []
@@ -225,6 +250,12 @@ class KnowledgeBase:
 
         scored: List[Tuple[float, int]] = []
         for idx, ch_counts in enumerate(self._chunk_term_counts):
+            ch = self._chunks[idx]
+            
+            # Filtering by type
+            if allowed_types and ch.type and ch.type not in allowed_types:
+                continue
+                
             score = _tfidf_score(q_counts, ch_counts, self._df, self._n_docs)
             if score >= self._min_score:
                 scored.append((score, idx))
@@ -233,7 +264,7 @@ class KnowledgeBase:
         k = top_k or self._default_top_k
         return [self._chunks[i] for _, i in scored[:k]]
 
-    def search_with_scores(self, query: str, *, top_k: Optional[int] = None) -> List[Tuple[KBChunk, float]]:
+    def search_with_scores(self, query: str, *, top_k: Optional[int] = None, allowed_types: Optional[List[str]] = None) -> List[Tuple[KBChunk, float]]:
         """Same as search(), but keeps relevance scores for aggregation across query variants."""
         query = (query or "").strip()
         if not query:
@@ -245,6 +276,12 @@ class KnowledgeBase:
 
         scored: List[Tuple[float, int]] = []
         for idx, ch_counts in enumerate(self._chunk_term_counts):
+            ch = self._chunks[idx]
+            
+            # Filtering by type
+            if allowed_types and ch.type and ch.type not in allowed_types:
+                continue
+                
             score = _tfidf_score(q_counts, ch_counts, self._df, self._n_docs)
             if score >= self._min_score:
                 scored.append((score, idx))
@@ -318,31 +355,137 @@ def _read_docx(docx_path: Path) -> str:
 
 def _chunk_by_markers(text: str, *, source: str, chunk_chars: int, overlap_chars: int) -> List[KBChunk]:
     """Сплиттер для формата, где каждый факт начинается с маркера `---CHUNK---`."""
-    text = re.sub(r"(?<!\n)---CHUNK---", "\n---CHUNK---", text)
-    text = _normalize_keep_newlines(text)
-    if not text:
-        return []
-
-    parts = re.split(r"(?m)^\s*---CHUNK---\s*", text)
-    parts = [p.strip() for p in parts if p and p.strip()]
+    # Structured mode: preserve newlines between fields
+    text = _normalize_keep_newlines(text, is_structured=True)
+    
+    # Split by marker
+    blocks = [b.strip() for b in text.split("---CHUNK---") if b.strip()]
 
     chunks: List[KBChunk] = []
     chunk_id = 1
-    for p in parts:
-        piece = "---CHUNK--- " + p.strip()
-        if chunk_chars and len(piece) > chunk_chars:
-            sub_pieces = _chunk_text(piece, chunk_chars=chunk_chars, overlap_chars=overlap_chars)
-        else:
-            sub_pieces = [piece]
-
-        for sp in sub_pieces:
-            sp = sp.strip()
-            if not sp:
-                continue
-            chunks.append(KBChunk(chunk_id=chunk_id, text=sp, page_start=0, page_end=0, source=source))
-            chunk_id += 1
+    for block in blocks:
+        raw_data = _parse_block(block)
+        normalized = _normalize_chunk(raw_data)
+        
+        # Build search text
+        st = _make_search_text(normalized)
+        
+        # Determine main text for snippet (positioning for selection, fact for others)
+        snippet_text = normalized.get("positioning") if normalized.get("type") == "selection" else normalized.get("fact")
+        if not snippet_text:
+            snippet_text = block # fallback to full block if keys missing
+            
+        chunks.append(KBChunk(
+            chunk_id=chunk_id,
+            text=snippet_text,
+            page_start=0,
+            page_end=0,
+            source=source,
+            type=normalized.get("type"),
+            bank=normalized.get("bank"),
+            client_type=normalized.get("client_type"),
+            status=normalized.get("status"),
+            field=normalized.get("field"),
+            topic=normalized.get("topic"),
+            value_num=normalized.get("value_num"),
+            value_text=normalized.get("value_text"),
+            aliases=normalized.get("aliases"),
+            tags=normalized.get("tags"),
+            fact=normalized.get("fact"),
+            positioning=normalized.get("positioning"),
+            search_text=st,
+            is_internal=(normalized.get("type") == "internal_ops")
+        ))
+        chunk_id += 1
 
     return chunks
+
+def _parse_block(block: str) -> dict:
+    lines = block.splitlines()
+    data = {}
+    valid_keys = {
+        "TYPE", "BANK", "CLIENT_TYPE", "STATUS", "FIELD", 
+        "TOPIC", "VALUE_NUM", "VALUE_TEXT", "FACT", 
+        "POSITIONING", "ALIASES", "TAGS"
+    }
+    for line in lines:
+        line = line.strip()
+        if not line: continue
+        
+        # Match "KEY: VALUE" strictly at the start
+        if ":" in line:
+            parts = line.split(":", 1)
+            key = parts[0].strip().upper()
+            val = parts[1].strip()
+            
+            if key in valid_keys:
+                data[key.lower()] = val
+    return data
+
+def _normalize_chunk(raw: dict) -> dict:
+    normalized = raw.copy()
+    
+    # type -> lowercase
+    if "type" in normalized:
+        normalized["type"] = normalized["type"].lower()
+    
+    # bank -> canonical
+    bank = normalized.get("bank", "")
+    if bank:
+        b_low = bank.lower()
+        if "альфа" in b_low: normalized["bank"] = "Альфа-Банк"
+        elif "ткб" in b_low or "транскапитал" in b_low: normalized["bank"] = "ТКБ"
+        elif "уралсиб" in b_low: normalized["bank"] = "Уралсиб"
+        elif "т-банк" in b_low or "тинькофф" in b_low: normalized["bank"] = "Т-Банк"
+        elif "мкб" in b_low: normalized["bank"] = "МКБ"
+        elif "росбанк" in b_low: normalized["bank"] = "Росбанк"
+    
+    # client_type -> list [ФЛ, ИП, ЮЛ]
+    ct = normalized.get("client_type", "")
+    if ct:
+        parts = []
+        if "ФЛ" in ct.upper(): parts.append("ФЛ")
+        if "ИП" in ct.upper(): parts.append("ИП")
+        if "ЮЛ" in ct.upper() or "ООО" in ct.upper(): parts.append("ЮЛ")
+        normalized["client_type"] = parts
+    else:
+        normalized["client_type"] = []
+    
+    # aliases, tags -> list
+    for k in ["aliases", "tags"]:
+        if k in normalized:
+            normalized[k] = [x.strip() for x in normalized[k].replace(",", " ").split() if x.strip()]
+        else:
+            normalized[k] = []
+            
+    # value_num -> float
+    vn = normalized.get("value_num")
+    if vn:
+        try:
+            # clean comma for float conversion
+            normalized["value_num"] = float(str(vn).replace(",", ".").replace(" ", ""))
+        except:
+            normalized["value_num"] = None
+            
+    return normalized
+
+def _make_search_text(chunk: dict) -> str:
+    parts = []
+    keys = ["type", "bank", "field", "topic", "value_text", "fact", "positioning"]
+    for k in keys:
+        v = chunk.get(k)
+        if v:
+            parts.append(str(v))
+            
+    if chunk.get("client_type"):
+        parts.extend(chunk["client_type"])
+    if chunk.get("aliases"):
+        parts.extend(chunk["aliases"])
+    if chunk.get("tags"):
+        parts.extend(chunk["tags"])
+        
+    res = " ".join(parts).lower()
+    return re.sub(r"\s+", " ", res).strip()
 
 def _chunk_whole_text(text: str, *, source: str, chunk_chars: int, overlap_chars: int) -> List[KBChunk]:
     text = _normalize_keep_newlines(text)
@@ -537,7 +680,7 @@ def _cache_is_valid(cache_path: Path, source_path: Path) -> bool:
 
 def _save_cache(cache_path: Path, chunks: List[KBChunk], source_path: Path) -> None:
     payload = {
-        "version": 3,
+        "version": 4,
         "meta": {
             "source_path": str(source_path),
             "source_mtime": float(source_path.stat().st_mtime),
@@ -550,6 +693,20 @@ def _save_cache(cache_path: Path, chunks: List[KBChunk], source_path: Path) -> N
                 "page_start": c.page_start,
                 "page_end": c.page_end,
                 "source": c.source,
+                "type": c.type,
+                "bank": c.bank,
+                "client_type": c.client_type,
+                "status": c.status,
+                "field": c.field,
+                "topic": c.topic,
+                "value_num": c.value_num,
+                "value_text": c.value_text,
+                "aliases": c.aliases,
+                "tags": c.tags,
+                "fact": c.fact,
+                "positioning": c.positioning,
+                "search_text": c.search_text,
+                "is_internal": c.is_internal,
             }
             for c in chunks
         ],
@@ -559,18 +716,47 @@ def _save_cache(cache_path: Path, chunks: List[KBChunk], source_path: Path) -> N
 
 def _load_cache(cache_path: Path) -> List[KBChunk]:
     payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    version = payload.get("version", 0)
     items = payload.get("chunks") or []
     chunks: List[KBChunk] = []
+    
     for it in items:
-        chunks.append(
-            KBChunk(
-                chunk_id=int(it["chunk_id"]),
-                text=str(it["text"]),
-                page_start=int(it.get("page_start", 0)),
-                page_end=int(it.get("page_end", 0)),
-                source=str(it.get("source", "")),
+        if version >= 4:
+            chunks.append(
+                KBChunk(
+                    chunk_id=int(it["chunk_id"]),
+                    text=str(it["text"]),
+                    page_start=int(it.get("page_start", 0)),
+                    page_end=int(it.get("page_end", 0)),
+                    source=str(it.get("source", "")),
+                    type=it.get("type"),
+                    bank=it.get("bank"),
+                    client_type=it.get("client_type"),
+                    status=it.get("status"),
+                    field=it.get("field"),
+                    topic=it.get("topic"),
+                    value_num=it.get("value_num"),
+                    value_text=it.get("value_text"),
+                    aliases=it.get("aliases"),
+                    tags=it.get("tags"),
+                    fact=it.get("fact"),
+                    positioning=it.get("positioning"),
+                    search_text=str(it.get("search_text", "")),
+                    is_internal=bool(it.get("is_internal", False))
+                )
             )
-        )
+        else:
+            # v3 or older compatibility
+            chunks.append(
+                KBChunk(
+                    chunk_id=int(it["chunk_id"]),
+                    text=str(it["text"]),
+                    page_start=int(it.get("page_start", 0)),
+                    page_end=int(it.get("page_end", 0)),
+                    source=str(it.get("source", "")),
+                    search_text=str(it.get("text", "")) # use text as search_text for v3
+                )
+            )
     return chunks
 
 

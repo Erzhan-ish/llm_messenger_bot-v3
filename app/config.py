@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     STT_MODEL_NAME: str = Field(default="small")
     STT_DEVICE: str = Field(default="cpu")
     STT_COMPUTE_TYPE: str = Field(default="int8")
+    
+    # Banks
+    PARTNER_BANKS: List[str] = ["ТКБ", "Уралсиб", "Росбанк", "Альфа-Банк", "Т-Банк", "ВТБ", "Сбербанк"]
 
     model_config = SettingsConfigDict(
         env_file=".env",

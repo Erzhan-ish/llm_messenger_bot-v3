@@ -1,61 +1,284 @@
+"""Dialog analyzer — determines routing (stage/action/query_mode).
+
+Rule-based paths cover the majority of cases.
+LLM fallback (OLLAMA_ANALYZER_MODEL) is used only when rules don't match.
+"""
 from __future__ import annotations
 
 import json
 import re
-from typing import Optional, TypedDict, Literal, List
+from typing import Literal, Optional, TypedDict
 
 from app.llm.providers import ask_llm
 from app.logging import logger
 from app.config import settings
 
-IntentType = Literal[
-    "PRICING",
-    "OPEN_ACCOUNT",
-    "OPEN_SPECIAL_ACCOUNT",
-    "DOCUMENTS",
-    "CONSULTATION",
-    "END_DIALOG",
-    "OTHER",
+DialogStage  = Literal[
+    "GREETING", "PRESENTATION", "OBJECTION", "DOC_TRANSFER",
+    "OOD", "FOLLOW_UP", "SERVICE", "OTHER", "INTRO", "ACK", "THANKS", "BANK_SELECTION",
 ]
+DialogAction = Literal["ANSWER", "CLARIFY", "HANDOFF", "STOP"]
+QueryMode    = Literal["service", "smalltalk", "intro", "specific_bank", "bank_selection", "docs", "pricing"]
+IntentType   = Literal["PRICING", "OPEN_SPECIAL_ACCOUNT", "OPEN_ACCOUNT", "DOCUMENTS",
+                        "CONSULTATION", "END_DIALOG", "OTHER"]
+NextStep     = Literal["none", "ask_clarify", "handoff_manager"]
 
-NextStep = Literal["none", "ask_clarify", "handoff_manager"]
+
+class DecisionSignal(TypedDict):
+    stage: str
+    action: str
+    query_mode: str
+    needs_kb: bool
+    needs_handoff: bool
+    confidence: float
+    handoff_reason: Optional[str]
+
 
 class AnalysisSignal(TypedDict):
-    intent: IntentType
+    intent: str
     intent_confidence: float
     escalate: bool
     escalate_reason: str
     interest_score: int
     escalate_confidence: float
-    next_step: NextStep
+    next_step: str
     client_need: str
 
-SYSTEM_PROMPT = """
-Ты — эксперт-аналитик диалогов для отдела продаж. Твоя задача — проанализировать текущее состояние диалога и вернуть JSON с параметрами.
 
-### ПАРАМЕТРЫ ДЛЯ ОПРЕДЕЛЕНИЯ:
+# ---------------------------------------------------------------------------
+# Rule-based classifier (extended)
+# ---------------------------------------------------------------------------
 
-1. **intent**: Активное намерение клиента прямо сейчас.
-   - PRICING: тарифы/комиссии/стоимость.
-   - OPEN_SPECIAL_ACCOUNT: спецсчёт/залоговый/задатковый.
-   - OPEN_ACCOUNT: обычный расчетный счет.
-   - DOCUMENTS: какие документы нужны.
-   - CONSULTATION: зовет человека/менеджера.
-   - END_DIALOG: клиент прощается (пока, до свидания, досвидания), говорит "на этом все", "на сегодня всё", "спасибо это все" или "больше вопросов нет". Формулировки могут быть с ошибками, обращай внимание на смысл завершения.
-   - OTHER: остальное.
+_GREETING_RE = re.compile(
+    r"^\s*(привет|здравствуй|добрый\s+(день|вечер|утро)|ку|хай|салам|доброго|хелло)\b",
+    re.I,
+)
+_THANKS_RE = re.compile(r"\b(спасибо|благодарю|спс|от\s+души|благодарен)\b", re.I)
+_ACK_RE    = re.compile(
+    r"^\s*(ок|окей|понял|хорошо|ясно|ладно|оки|всё?\s+понял|ага|угу|ок|о[кк]ей)\b",
+    re.I,
+)
+_INTRO_RE  = re.compile(
+    r"\b(кто\s+вы|что\s+за\s+компания|чем\s+занимаетесь|вы\s+кто|откуда\s+пишете"
+    r"|что\s+вы\s+делаете|расскажите\s+о\s+(себе|компании))\b",
+    re.I,
+)
+_BANK_SEL_RE = re.compile(
+    r"\b(подобрать|выбрать|какой\s+лучше|варианты|посоветуете|какой\s+подойдет"
+    r"|что\s+посоветуете|сравните|сравни|лучший\s+банк|подходящий\s+банк"
+    r"|какой\s+банк|какие\s+банки|какими\s+банками|с\s+какими\s+банками"
+    r"|какой\s+рекомендуете|с\s+какими\s+работаете"
+    r"|для\s+(физ|юр|физических|юридических)\s+лиц)\b",
+    re.I,
+)
+_SPECIFIC_BANK_RE = re.compile(
+    r"\b(альфа|ткб|уралсиб|т-банк|тинькофф|мкб|росбанк|россельхоз)\b", re.I
+)
+_DOCS_RE = re.compile(
+    r"\b(документ|докум|паспорт|инн|огрн|устав|справк|выписк|что\s+нужно\s+принести"
+    r"|какие\s+документы|список\s+документ)\b",
+    re.I,
+)
+_PRICING_RE = re.compile(
+    r"\b(тариф|стоимост|цен|комисси|сколько\s+стоит|бесплатн|обслуживани"
+    r"|плата|ежемесячн|открыт|рко|ведение)\b",
+    re.I,
+)
+_HANDOFF_RE = re.compile(
+    r"\b(позовите|позвоните|позвони|перезвоните|перезвони|наберите|набери"
+    r"|оператор|живой\s+человек|менеджер|специалист"
+    r"|соедините|подключите\s+человека)\b",
+    re.I,
+)
+_CONSENT_RE = re.compile(
+    r"\b(оформляем|оформить|открывайте|давайте\s+начнем|что\s+дальше|куда\s+оплатить"
+    r"|готов\s+начать|готов|согласен|давайте|начнем|поехали|приступим|открыть\s+счет"
+    r"|хочу\s+открыть|открыть)\b",
+    re.I,
+)
 
-2. **escalate**: Нужно ли ПРЯМО СЕЙЧАС передать диалог живому менеджеру или закрыть сессию с передачей истории.
-   - true: если клиент явно готов к открытию или просит человека. ОЧЕНЬ ВАЖНО: Если клиент завершает диалог/прощается (intent = END_DIALOG), ТЫ ОБЯЗАН поставить escalate: true!
-   - false: во всех остальных случаях, включая просто вопросы по тарифам.
 
-3. **interest_score**: Оценка интереса клиента (0-100).
-4. **next_step**:
-   - handoff_manager: если escalate=true.
-   - ask_clarify: если вопрос неполный.
-   - none: если диалог идет в штатном режиме.
+def _get_rule_based_decision(text: str) -> Optional[DecisionSignal]:
+    t = (text or "").strip()
 
-### ТРЕБОВАНИЯ К ФОРМАТУ:
-Верни СТРОГО JSON:
+    if _GREETING_RE.match(t):
+        # Strip greeting prefix and check if substantive intent follows
+        stripped = _GREETING_RE.sub("", t).strip(" ,!.?—")
+        if stripped and len(stripped.split()) >= 2:
+            substantive = _get_rule_based_decision(stripped)
+            if substantive and substantive.get("query_mode") not in ("service",):
+                return substantive
+        return _d("GREETING",      "ANSWER", "service",       needs_kb=False, conf=1.0)
+    if _THANKS_RE.search(t) and len(t.split()) <= 5:
+        return _d("THANKS",        "ANSWER", "service",       needs_kb=False, conf=1.0)
+    if _ACK_RE.match(t) and len(t.split()) <= 4:
+        return _d("ACK",           "ANSWER", "service",       needs_kb=False, conf=1.0)
+    if _INTRO_RE.search(t):
+        return _d("INTRO",         "ANSWER", "intro",         needs_kb=False, conf=1.0)
+
+    # Explicit handoff / operator request
+    if _HANDOFF_RE.search(t):
+        return _d("SERVICE",       "HANDOFF","service",       needs_kb=False,
+                  needs_handoff=True, handoff_reason="human_request", conf=0.95)
+
+    # Consent signals -> handoff
+    if _CONSENT_RE.search(t):
+        return _d("DOC_TRANSFER",  "HANDOFF","service",       needs_kb=False,
+                  needs_handoff=True, handoff_reason="ready_to_open", conf=0.90)
+
+    # Bank selection (generic)
+    if _BANK_SEL_RE.search(t) and not _SPECIFIC_BANK_RE.search(t):
+        return _d("BANK_SELECTION","ANSWER", "bank_selection",needs_kb=True,  conf=0.90)
+
+    # Docs only
+    if _DOCS_RE.search(t) and not _PRICING_RE.search(t):
+        return _d("PRESENTATION",  "ANSWER", "docs",          needs_kb=True,  conf=0.85)
+
+    # Specific bank mentioned + pricing keywords
+    if _SPECIFIC_BANK_RE.search(t):
+        if _PRICING_RE.search(t) or _DOCS_RE.search(t):
+            return _d("PRESENTATION","ANSWER","specific_bank", needs_kb=True,  conf=0.88)
+        # Bank mentioned without clear intent -> specific_bank to get profile
+        return _d("PRESENTATION",  "ANSWER", "specific_bank", needs_kb=True,  conf=0.75)
+
+    # Generic pricing query (no specific bank)
+    if _PRICING_RE.search(t):
+        return _d("PRESENTATION",  "ANSWER", "pricing",       needs_kb=True,  conf=0.80)
+
+    return None
+
+
+def _d(
+    stage: str,
+    action: str,
+    query_mode: str,
+    *,
+    needs_kb: bool = False,
+    needs_handoff: bool = False,
+    handoff_reason: Optional[str] = None,
+    conf: float = 0.8,
+) -> DecisionSignal:
+    if action == "HANDOFF":
+        needs_handoff = True
+    if needs_handoff:
+        action = "HANDOFF"
+    return {
+        "stage": stage,
+        "action": action,
+        "query_mode": query_mode,
+        "needs_kb": needs_kb,
+        "needs_handoff": needs_handoff,
+        "confidence": conf,
+        "handoff_reason": handoff_reason,
+    }
+
+
+# ---------------------------------------------------------------------------
+# LLM classifier (fallback for complex messages)
+# ---------------------------------------------------------------------------
+
+CLASSIFIER_PROMPT = """
+Ты — узкоспециализированный роутер диалогов. Проанализируй последнее сообщение клиента.
+
+### QUERY_MODES:
+- service: приветствие, ACK, благодарность, короткие нейтральные реплики.
+- smalltalk: не по теме (OOD).
+- intro: клиент спрашивает, кто вы, что за компания.
+- specific_bank: вопрос про КОНКРЕТНЫЙ банк (Альфа, ТКБ и т.д.).
+- bank_selection: просит ПОДОБРАТЬ или СРАВНИТЬ банки.
+- docs: только про документы.
+- pricing: тарифы/цены без конкретного банка.
+
+### ACTIONS:
+- ANSWER: содержательный ответ.
+- CLARIFY: нужно уточнение от клиента.
+- HANDOFF: нужен живой менеджер (клиент просит, конфликт, или готов оформлять).
+- STOP: агрессия / диалог завершён.
+
+Верни СТРОГО JSON без пояснений:
+{
+  "stage": "GREETING|PRESENTATION|BANK_SELECTION|OBJECTION|DOC_TRANSFER|OOD|FOLLOW_UP|SERVICE|OTHER|INTRO|ACK|THANKS",
+  "action": "ANSWER|CLARIFY|HANDOFF|STOP",
+  "query_mode": "service|smalltalk|intro|specific_bank|bank_selection|docs|pricing",
+  "needs_kb": true|false,
+  "needs_handoff": true|false,
+  "confidence": 0..1,
+  "handoff_reason": "human_request|ready_to_open|complex_case|complaint|null"
+}
+""".strip()
+
+_JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+
+def _clamp_f(v, lo, hi, default):
+    try:
+        x = float(v)
+        return max(lo, min(hi, x))
+    except Exception:
+        return default
+
+
+async def detect_stage_and_action(dialog_text: str) -> DecisionSignal:
+    """Route the message. Rule-based first, LLM fallback for complex cases."""
+    rule = _get_rule_based_decision(dialog_text)
+    if rule:
+        logger.info("Rule-based decision: {} / {}", rule["stage"], rule["query_mode"])
+        return rule
+
+    default: DecisionSignal = {
+        "stage": "OTHER",
+        "action": "ANSWER",
+        "query_mode": "smalltalk",
+        "needs_kb": False,
+        "needs_handoff": False,
+        "confidence": 0.0,
+        "handoff_reason": None,
+    }
+
+    try:
+        raw  = await ask_llm(
+            [{"role": "system", "content": CLASSIFIER_PROMPT},
+             {"role": "user",   "content": dialog_text or ""}],
+            model=settings.OLLAMA_ANALYZER_MODEL,
+        )
+        m = _JSON_RE.search(raw)
+        if not m:
+            return default
+        data = json.loads(m.group(0).strip())
+        res: DecisionSignal = {
+            "stage":         str(data.get("stage")      or "OTHER").upper(),
+            "action":        str(data.get("action")     or "ANSWER").upper(),
+            "query_mode":    str(data.get("query_mode") or "smalltalk").lower(),
+            "needs_kb":      bool(data.get("needs_kb",      False)),
+            "needs_handoff": bool(data.get("needs_handoff", False)),
+            "confidence":    _clamp_f(data.get("confidence"), 0.0, 1.0, 0.0),
+            "handoff_reason":data.get("handoff_reason"),
+        }
+        if res["action"] == "HANDOFF":
+            res["needs_handoff"] = True
+        if res["needs_handoff"]:
+            res["action"] = "HANDOFF"
+        return res
+    except Exception:
+        logger.exception("detect_stage_and_action LLM failed")
+        return default
+
+
+# ---------------------------------------------------------------------------
+# Background analysis (escalation + intent tracking)
+# ---------------------------------------------------------------------------
+
+ANALYSIS_PROMPT = """
+Ты — аналитик диалогов продаж. Проанализируй историю и верни JSON.
+
+### ПАРАМЕТРЫ:
+- intent: активное намерение (PRICING|OPEN_SPECIAL_ACCOUNT|OPEN_ACCOUNT|DOCUMENTS|CONSULTATION|END_DIALOG|OTHER)
+- escalate: true если клиент явно готов к следующему шагу или просит человека
+- interest_score: 0–100
+- next_step: none|ask_clarify|handoff_manager
+- client_need: OPEN_ACCOUNT|CONDITIONS|DOCUMENTS|CONSULTATION|SUPPORT|UNKNOWN
+
+Верни ТОЛЬКО JSON:
 {
   "intent": "...",
   "intent_confidence": 0..1,
@@ -64,43 +287,18 @@ SYSTEM_PROMPT = """
   "interest_score": 0..100,
   "escalate_confidence": 0..1,
   "next_step": "none|ask_clarify|handoff_manager",
-  "client_need": "OPEN_ACCOUNT|CONDITIONS|DOCUMENTS|CONSULTATION|SUPPORT|UNKNOWN"
+  "client_need": "..."
 }
-
-ВЫВЕДИ ТОЛЬКО РЕЗУЛЬТИРУЮЩИЙ JSON. НЕ ПИШИ НИКАКИХ ПОЯСНЕНИЙ ИЛИ ТЕКСТА ДО И ПОСЛЕ JSON!
 """.strip()
 
-_JSON_OBJ_RE = re.compile(r"\{.*\}", re.DOTALL)
-
-def _clamp_float(v: object, lo: float, hi: float, default: float) -> float:
-    try:
-        x = float(v)  # type: ignore[arg-type]
-        if x < lo: return lo
-        if x > hi: return hi
-        return x
-    except Exception:
-        return default
-
-def _clamp_int(v: object, lo: int, hi: int, default: int) -> int:
-    try:
-        x = int(float(v))  # type: ignore[arg-type]
-        if x < lo: return lo
-        if x > hi: return hi
-        return x
-    except Exception:
-        return default
 
 async def analyze_dialog(dialog_text: str, had_unknown_kb: bool = False) -> AnalysisSignal:
-    user_payload = dialog_text or ""
+    """Background analysis for escalation/intent tracking."""
+    payload = dialog_text or ""
     if had_unknown_kb:
-        user_payload += "\n\n[NOTICE] Бот не нашел ответа в базе знаний на последний вопрос."
+        payload += "\n\n[NOTICE] Бот не нашел ответа в базе знаний на последний вопрос."
 
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_payload},
-    ]
-
-    default_signal: AnalysisSignal = {
+    default: AnalysisSignal = {
         "intent": "OTHER",
         "intent_confidence": 0.0,
         "escalate": False,
@@ -112,42 +310,30 @@ async def analyze_dialog(dialog_text: str, had_unknown_kb: bool = False) -> Anal
     }
 
     try:
-        raw = await ask_llm(messages, model=settings.OLLAMA_ANALYZER_MODEL)
-        # Try to find the JSON block. We look for { ... } using non-greedy approach first, 
-        # but take the longest possible valid-looking block.
-        m = re.search(r"\{.*\}", raw, re.DOTALL)
+        raw = await ask_llm(
+            [{"role": "system", "content": ANALYSIS_PROMPT},
+             {"role": "user",   "content": payload}],
+            model=settings.OLLAMA_ANALYZER_MODEL,
+        )
+        m = _JSON_RE.search(raw)
         if not m:
-            logger.warning(f"No JSON found in LLM response: {raw}")
-            return default_signal
-        
-        json_str = m.group(0).strip()
-        try:
-            data = json.loads(json_str)
-        except json.JSONDecodeError:
-            # Attempt a quick fix for common LLM issues (like trailing commas or unescaped quotes)
-            # but simpler is better: let's just log and return default if it's too broken.
-            logger.error(f"JSONDecodeError in dialog_analyzer. Raw: {raw}")
-            return default_signal
-        
-        # Mapping and validation
+            return default
+        data = json.loads(m.group(0).strip())
         res: AnalysisSignal = {
-            "intent": str(data.get("intent") or "OTHER").upper(),
-            "intent_confidence": _clamp_float(data.get("intent_confidence"), 0.0, 1.0, 0.0),
-            "escalate": bool(data.get("escalate", False)),
-            "escalate_reason": str(data.get("escalate_reason") or "other"),
-            "interest_score": _clamp_int(data.get("interest_score"), 0, 100, 0),
-            "escalate_confidence": _clamp_float(data.get("escalate_confidence"), 0.0, 1.0, 0.0),
-            "next_step": data.get("next_step", "none"),
-            "client_need": str(data.get("client_need") or "UNKNOWN"),
+            "intent":            str(data.get("intent") or "OTHER").upper(),
+            "intent_confidence": _clamp_f(data.get("intent_confidence"), 0.0, 1.0, 0.0),
+            "escalate":          bool(data.get("escalate", False)),
+            "escalate_reason":   str(data.get("escalate_reason") or "other"),
+            "interest_score":    int(_clamp_f(data.get("interest_score"), 0, 100, 0)),
+            "escalate_confidence":_clamp_f(data.get("escalate_confidence"), 0.0, 1.0, 0.0),
+            "next_step":         str(data.get("next_step") or "none"),
+            "client_need":       str(data.get("client_need") or "UNKNOWN"),
         }
-        
-        # Force consistency
         if res["escalate"]:
             res["next_step"] = "handoff_manager"
         elif res["next_step"] == "handoff_manager":
             res["escalate"] = True
-            
         return res
     except Exception:
         logger.exception("analyze_dialog failed")
-        return default_signal
+        return default
