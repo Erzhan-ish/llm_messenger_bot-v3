@@ -46,11 +46,18 @@ def _extract_banks_from_text(text: str, whitelist: Set[str]) -> Set[str]:
     return found
 
 
+# Only numbers appearing before a price/percentage unit are validated.
+# This prevents false positives like "24 часа", "10 минут", "3 документа".
+_PRICE_NUM_RE = re.compile(
+    r"(\d[\d\s,.]*)(?=\s*(?:руб|₽|рублей|рубл|%|процент))",
+    re.I,
+)
+
+
 def _extract_numbers(text: str) -> Set[str]:
-    raw = re.findall(r"(\d[\d\s,.]*)", text)
     refined: Set[str] = set()
-    for val in raw:
-        clean = re.sub(r"[\s,]", "", val).rstrip(".")
+    for m in _PRICE_NUM_RE.finditer(text):
+        clean = re.sub(r"[\s,]", "", m.group(1)).rstrip(".")
         if not clean:
             continue
         try:
@@ -66,6 +73,18 @@ def _extract_client_types(text: str) -> Set[str]:
     TYPES = ["ип", "ооо", "юрлицо", "физлицо", "фл", "юл", "самозанят"]
     tl = text.lower()
     return {t for t in TYPES if re.search(rf"\b{t}", tl)}
+
+
+# ООО / юрлицо are synonyms of ЮЛ; физлицо is synonym of ФЛ.
+_TYPE_CANONICAL: Dict[str, str] = {
+    "ооо": "юл",
+    "юрлицо": "юл",
+    "физлицо": "фл",
+}
+
+
+def _normalize_type(t: str) -> str:
+    return _TYPE_CANONICAL.get(t, t)
 
 
 # ---------------------------------------------------------------------------
@@ -149,8 +168,9 @@ def validate_answer_against_facts(answer: str, facts: Dict[str, Any]) -> Dict[st
         if n not in allowed_nums:
             return {"is_valid": False, "reason": f"hallucinated value: {n}"}
 
+    normalized_allowed = {_normalize_type(t) for t in allowed_types}
     for t in found_types:
-        if allowed_types and t not in allowed_types:
+        if normalized_allowed and _normalize_type(t) not in normalized_allowed:
             return {"is_valid": False, "reason": f"hallucinated client type: {t}"}
 
     return {"is_valid": True, "reason": None}

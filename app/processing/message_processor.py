@@ -956,6 +956,14 @@ async def process_message(message):
 
         user_text_lower = re.sub(r"[^а-яёa-z\s]", "", user_text.lower()).strip()
         dialog_state = detect_state(user_text)
+        # Guard: short "нет/нету" in response to a pending question is a slot answer,
+        # not dialog refusal — don't exit the dialog.
+        if (
+            dialog_state in (DialogState.NOT_INTERESTED, DialogState.LATER)
+            and slots.get("_pending_question_type")
+            and len(user_text.split()) <= 2
+        ):
+            dialog_state = DialogState.IN_PROGRESS
 
         if dialog_state == DialogState.AGGRESSIVE:
             await send_bot(
