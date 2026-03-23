@@ -9,7 +9,7 @@ class OllamaProvider:
         self.base_url = settings.OLLAMA_BASE_URL
         self.model = model or settings.OLLAMA_MODEL
 
-    async def generate(self, messages: list[dict]) -> str:
+    async def generate(self, messages: list[dict], *, max_tokens: int | None = None) -> str:
         url = f"{self.base_url}/api/chat"
 
         payload = {
@@ -17,11 +17,11 @@ class OllamaProvider:
             "messages": messages,
             "stream": False,
             "options": {
-                "temperature": 0.1,  # Минимальная креативность для factual control
-                "top_p": 0.7,
+                "temperature": 0.55,
+                "top_p": 0.90,
                 "num_ctx": 4096,
-                "num_predict": 150,  # Ограничиваем длину ответа
-                "repeat_penalty": 1.2
+                "num_predict": max_tokens if max_tokens is not None else 450,
+                "repeat_penalty": 1.15,
             }
         }
 
@@ -40,7 +40,7 @@ class OllamaProvider:
 
 
 # === единая точка вызова ===
-async def ask_ollama(messages: list[dict], model: str | None = None) -> str:
+async def ask_ollama(messages: list[dict], model: str | None = None, max_tokens: int | None = None) -> str:
     provider = OllamaProvider(model=model)
-    return await provider.generate(messages)
+    return await provider.generate(messages, max_tokens=max_tokens)
 

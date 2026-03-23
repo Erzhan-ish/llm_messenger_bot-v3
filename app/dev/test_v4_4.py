@@ -42,14 +42,14 @@ async def test_session_flow():
 
 async def test_escalation_sensitivity():
     print("\n>>> TEST: Escalation Sensitivity")
-    from app.services.dialog_analyzer import analyze_dialog
-    
+    from app.services.escalation_detector import detect_escalation_signal
+
     # Scenario: Just asking about pricing
     ctx = "User: привет\nBot: Здравствуйте! Я Алексей из 'В плюсе'. Какой банк вас интересует?\nUser: а какие тарифы у Альфы?"
-    signal = await analyze_dialog(ctx)
+    signal = await detect_escalation_signal(ctx)
     print(f"Context: {ctx}")
     print(f"Escalate: {signal['escalate']}, Next Step: {signal['next_step']}")
-    
+
     if signal['escalate'] == False:
         print("SUCCESS: Low sensitivity. No premature escalation.")
     else:
@@ -57,10 +57,10 @@ async def test_escalation_sensitivity():
 
     # Scenario: Ready to open
     ctx2 = ctx + "\nBot: Тарифы Альфы...\nUser: окей мне подходит, оформляем тогда"
-    signal2 = await analyze_dialog(ctx2)
+    signal2 = await detect_escalation_signal(ctx2)
     print(f"Context 2: ... {ctx2.splitlines()[-1]}")
     print(f"Escalate: {signal2['escalate']}, Next Step: {signal2['next_step']}")
-    
+
     if signal2['escalate'] == True:
         print("SUCCESS: Escalated on agreement.")
     else:

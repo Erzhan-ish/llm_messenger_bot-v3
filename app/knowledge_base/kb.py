@@ -10,6 +10,11 @@ from typing import Dict, List, Optional, Tuple
 
 from app.logging import logger
 
+try:
+    import numpy as np
+except ImportError:
+    np = None  # type: ignore
+
 # --- regex ---
 _SENT_SPLIT = re.compile(r"(?<=[\.\!\?])\s+")  # split by sentence end + whitespace
 _WS = re.compile(r"\s+")
@@ -193,6 +198,35 @@ class KnowledgeBase:
 
         self._df = df
         self._n_docs = max(1, len(self._chunks))
+        self._embeddings = None
+        self._embed_model = None
+
+    def _ensure_embeddings(self) -> bool:
+        """Lazy-load embedding model and encode all chunks. Returns False if unavailable."""
+        if self._embeddings is not None:
+            return True
+        try:
+            from sentence_transformers import SentenceTransformer
+            import numpy as np
+            if self._embed_model is None:
+                self._embed_model = SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
+            texts = [ch.search_text if ch.search_text else ch.text for ch in self._chunks]
+            self._embeddings = self._embed_model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
+            return True
+        except Exception:
+            logger.warning("Semantic search unavailable (sentence-transformers not loaded)")
+            return False
+
+    def _semantic_scores(self, query: str) -> list:
+        if not self._ensure_embeddings():
+            return [0.0] * len(self._chunks)
+        try:
+            import numpy as np
+            q_emb = self._embed_model.encode([query], normalize_embeddings=True)[0]
+            sims = (self._embeddings @ q_emb).tolist()
+            return sims
+        except Exception:
+            return [0.0] * len(self._chunks)
 
     @classmethod
     def from_source(cls, source_path: Path, cache_path: Optional[Path] = None, default_top_k: int = 5) -> "KnowledgeBase":
@@ -271,23 +305,26 @@ class KnowledgeBase:
             return []
 
         q_counts = _term_counts(query)
-        if not q_counts:
-            return []
+        sem_scores = self._semantic_scores(query)
+        k = top_k or self._default_top_k
 
         scored: List[Tuple[float, int]] = []
         for idx, ch_counts in enumerate(self._chunk_term_counts):
             ch = self._chunks[idx]
-            
+
             # Filtering by type
             if allowed_types and ch.type and ch.type not in allowed_types:
                 continue
-                
-            score = _tfidf_score(q_counts, ch_counts, self._df, self._n_docs)
-            if score >= self._min_score:
-                scored.append((score, idx))
+
+            tfidf = _tfidf_score(q_counts, ch_counts, self._df, self._n_docs)
+            sem = sem_scores[idx] if idx < len(sem_scores) else 0.0
+            # Normalize tfidf to ~[0,1] range (divide by typical max ~5.0)
+            tfidf_norm = min(1.0, tfidf / 5.0)
+            hybrid = 0.4 * tfidf_norm + 0.6 * max(0.0, sem)
+            if hybrid >= self._min_score or tfidf >= self._min_score:
+                scored.append((hybrid, idx))
 
         scored.sort(key=lambda x: x[0], reverse=True)
-        k = top_k or self._default_top_k
         return [(self._chunks[i], s) for s, i in scored[:k]]
 
     @staticmethod

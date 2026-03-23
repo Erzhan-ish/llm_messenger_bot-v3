@@ -10,10 +10,10 @@ from app.knowledge_base.service import get_kb, _kb_query_variants, _extract_bank
 from app.logging import logger
 
 QUERY_MODE_FILTER_MAP: Dict[str, List[str]] = {
-    "pricing":       ["pricing", "availability"],
+    "pricing":       ["pricing", "availability", "bonus"],
     "docs":          ["docs"],
-    "specific_bank": ["pricing", "feature", "availability", "constraint", "docs"],
-    "bank_selection":["selection", "availability", "feature", "pricing"],
+    "specific_bank": ["pricing", "feature", "availability", "constraint", "docs", "bonus"],
+    "bank_selection":["selection", "availability", "feature", "pricing", "bonus"],
     "smalltalk":     [],
     "service":       [],
     "intro":         [],
@@ -47,6 +47,7 @@ def _build_bank_profile(chunks: list, *, client_type: Optional[str] = None) -> D
         "monthly_fee": None,
         "transfer_fee": None,
         "cashout_fee": None,
+        "bonus_rate": None,
         "status": None,
         "docs": [],
         "constraints": [],
@@ -93,6 +94,12 @@ def _build_bank_profile(chunks: list, *, client_type: Optional[str] = None) -> D
             elif "cashout" in field and profile["cashout_fee"] is None:
                 profile["cashout_fee"] = vnum
 
+        if ch_type == "bonus" and fact and profile["bonus_rate"] is None:
+            # Only take bonus if it matches the requested client_type (or no filter set)
+            ct_list = getattr(ch, "client_type", None) or []
+            if not client_type or not ct_list or client_type in ct_list:
+                profile["bonus_rate"] = fact
+
         if ch_type == "docs" and fact and fact not in profile["docs"]:
             profile["docs"].append(fact)
 
@@ -129,6 +136,7 @@ def _build_candidate_profiles(chunks: list, *, client_type: Optional[str] = None
                 "status": getattr(ch, "status", None),
                 "opening_fee": None,
                 "monthly_fee": None,
+                "bonus_rate": None,
                 "positioning": None,
                 "main_feature": None,
                 "features": [],
@@ -157,6 +165,11 @@ def _build_candidate_profiles(chunks: list, *, client_type: Optional[str] = None
                 p["positioning"] = pos
 
         fact = getattr(ch, "fact", None)
+        if ch_type == "bonus" and fact and p["bonus_rate"] is None:
+            ct_list = getattr(ch, "client_type", None) or []
+            if not client_type or not ct_list or client_type in ct_list:
+                p["bonus_rate"] = fact
+
         if ch_type == "feature" and fact:
             if fact not in p["features"]:
                 p["features"].append(fact)
@@ -165,6 +178,8 @@ def _build_candidate_profiles(chunks: list, *, client_type: Optional[str] = None
     result = []
     for p in profiles.values():
         feat = p["positioning"]
+        if not feat and p["bonus_rate"]:
+            feat = f"Бонус АУ: {p['bonus_rate']}"
         if not feat and p["opening_fee"] is not None:
             feat = f"Открытие: {int(p['opening_fee'])} руб."
         if not feat and p["monthly_fee"] is not None:
@@ -217,15 +232,21 @@ def _calc_rank_score(profile: dict, priority: str | None) -> float:
     score  += 0.05 * sum([has_of, has_mf, has_pos])
 
     if priority == "price":
-        of  = profile.get("opening_fee")
-        mf  = profile.get("monthly_fee")
-        available = [f for f in [of, mf] if f is not None]
-        if available:
-            fee = min(available)
-            # 0 руб → +0.3 bonus, 5000 руб → 0, linear
-            score += max(0.0, 0.3 * (1.0 - fee / 5000.0))
+        of = profile.get("opening_fee")
+        mf = profile.get("monthly_fee")
+        if of is not None:
+            # Первичный критерий: стоимость открытия (разовый вход)
+            # 0 руб → +0.30, 5000 руб → 0, линейно
+            score += max(0.0, 0.30 * (1.0 - of / 5000.0))
+            # Бонус если известно ещё и ведение — профиль полный
+            if mf is not None:
+                score += 0.05
+        elif mf is not None:
+            # Только ведение известно — вторичный сигнал, меньший вес
+            score += max(0.0, 0.12 * (1.0 - mf / 5000.0))
         else:
-            score -= 0.05  # penalty: no price data available
+            # Нет ценовых данных — штраф: не показывать первым
+            score -= 0.12
 
     elif priority == "speed":
         # Primary: explicit speed keywords in positioning/features
@@ -340,6 +361,13 @@ async def retrieve_facts(
     top_chunks = [ch for _, ch in top_data]
     max_score  = top_data[0][0] if top_data else 0.0
 
+    # Filter top_chunks to only include chunks matching the requested bank
+    if bank_hints and query_mode in ("specific_bank", "pricing", "docs"):
+        bank_filtered = [ch for _, ch in top_data
+                         if any(h in (getattr(ch, "bank", "") or "").lower() for h in bank_hints)]
+        if bank_filtered:
+            top_chunks = bank_filtered[:k]
+
     # --- Build facts ---
     if query_mode == "bank_selection":
         candidates = _build_candidate_profiles(top_chunks, client_type=client_type, priority=priority)
@@ -366,7 +394,7 @@ async def retrieve_facts(
             reason = "top_matches"
 
     all_schema_fields = [
-        "bank", "client_type", "opening_fee", "monthly_fee", "status", "docs", "constraints"
+        "bank", "client_type", "opening_fee", "monthly_fee", "bonus_rate", "status", "docs", "constraints"
     ]
     matched = [f for f in all_schema_fields if facts.get(f) not in (None, [], "")]
     missing = [f for f in all_schema_fields if f not in matched]

@@ -44,21 +44,23 @@ def _format_candidates(candidates: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def build_render_prompt(plan: Dict[str, Any]) -> str:
+def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx: str = "") -> str:
     """
     Build the single LLM system prompt from a response_plan.
     LLM must only voice the plan — no new facts, no new banks, no new prices.
     """
-    action      = plan.get("action", "answer")
-    intent      = plan.get("intent", "")
-    bank        = plan.get("bank")
-    client_type = plan.get("client_type")
-    items       = plan.get("items") or []
-    candidates  = plan.get("candidates") or []
-    question    = plan.get("question_to_ask")
-    docs        = plan.get("docs") or []
-    constraints = plan.get("constraints") or []
-    status      = plan.get("status")
+    action         = plan.get("action", "answer")
+    intent         = plan.get("intent", "")
+    bank           = plan.get("bank")
+    client_type    = plan.get("client_type")
+    items          = plan.get("items") or []
+    candidates     = plan.get("candidates") or []
+    question       = plan.get("question_to_ask")
+    docs           = plan.get("docs") or []
+    constraints    = plan.get("constraints") or []
+    status         = plan.get("status")
+    allowed_points = plan.get("allowed_points") or []
+    funnel_next    = plan.get("funnel_next")  # "docs" / "pricing" / None
 
     # --- DATA SECTION ---
     data_lines: List[str] = []
@@ -74,19 +76,57 @@ def build_render_prompt(plan: Dict[str, Any]) -> str:
         data_lines.append(f"Ограничения: {'; '.join(constraints[:3])}")
     if candidates:
         data_lines.append(_format_candidates(candidates))
+    # For selection_opening: also show explicit allowed_points as concrete facts
+    if action == "selection_opening" and allowed_points:
+        data_lines.append("Ключевые факты:\n" + "\n".join(f"- {p}" for p in allowed_points))
 
     data_text = "\n".join(data_lines) if data_lines else "Конкретных данных нет."
 
     # --- INSTRUCTIONS by action ---
     if action == "answer":
         instr = (
-            "Озвучь эти данные как менеджер. "
+            "Озвучь эти данные как менеджер — живо и коротко. "
             "Не добавляй банков, сумм или условий, которых нет в разделе ДАННЫЕ. "
             "Максимум 2–3 предложения."
         )
+        if question == "client_type":
+            instr += (
+                " В конце задай один вопрос: «Уточните, открываете счёт"
+                " как физическое лицо, ИП или ООО?»"
+            )
+        elif question:
+            q_text = _Q_TEXTS.get(question, _Q_TEXTS["other"])
+            instr += f" В конце задай один вопрос: «{q_text}»"
+        elif funnel_next == "docs":
+            instr += " В конце предложи: «Хотите узнать, какие документы понадобятся?»"
+        elif funnel_next == "pricing":
+            instr += " В конце предложи: «Хотите разобрать условия по тарифам?»"
+        else:
+            instr += " Если естественно — предложи один следующий шаг: документы, сравнение или детали тарифа."
+
+    elif action == "selection_opening":
+        # First-contact bank selection — warm framing, 1–2 options, one clear next step
+        n_banks = len(candidates) or 1
+        if n_banks == 1:
+            instr = (
+                "Представь рабочий вариант из ДАННЫЕ живо и по-человечески. "
+                "Один ключевой факт (цена открытия или бонус АУ). "
+                "Не добавляй банков и сумм, которых нет в разделе ДАННЫЕ. "
+                "Максимум 2 предложения."
+            )
+        else:
+            instr = (
+                f"Покажи {n_banks} рабочих варианта из ДАННЫЕ. "
+                "По каждому — один ключевой факт (цена или бонус АУ). "
+                "Тон живой, как у менеджера, а не справочника. "
+                "Не добавляй оценочных слов. "
+                f"Максимум {n_banks + 1} предложений."
+            )
         if question:
             q_text = _Q_TEXTS.get(question, _Q_TEXTS["other"])
             instr += f" В конце задай один вопрос: «{q_text}»"
+        else:
+            instr += " В конце предложи: «Разобрать подробнее — условия, документы или ограничения?»"
 
     elif action == "compare":
         n_banks = len(candidates)
@@ -108,6 +148,48 @@ def build_render_prompt(plan: Dict[str, Any]) -> str:
         instr = (
             f"Задай клиенту один вежливый вопрос: «{q_text}» "
             "Не добавляй лишних фраз и не используй данные из раздела ДАННЫЕ если их нет."
+        )
+
+    elif action == "selection_explain":
+        n = len(candidates)
+        points_str = ""
+        if allowed_points:
+            points_str = "\nДопустимые тезисы:\n" + "\n".join(f"- {p}" for p in allowed_points)
+        if n == 1:
+            instr = (
+                "Клиент спрашивает, есть ли другие варианты кроме того, что ты уже назвал. "
+                "Объясни: для данного типа клиента сейчас доступен именно этот банк, "
+                "и кратко поясни почему (цена, доступность, статус). Максимум 2 предложения."
+                + points_str
+            )
+        else:
+            instr = (
+                f"Клиент спрашивает, только ли эти {n} банков есть. "
+                "Подтверди, что это текущий рабочий список, и предложи выбрать один для детального разбора. "
+                "Максимум 2 предложения."
+                + points_str
+            )
+
+    elif action == "pricing_expand":
+        points_str = ""
+        if allowed_points:
+            points_str = "\nДопустимые тезисы (только их озвучь):\n" + "\n".join(f"- {p}" for p in allowed_points)
+        instr = (
+            "Клиент просит больше деталей по тарифам банка из предыдущего ответа. "
+            "Используй ТОЛЬКО тезисы ниже — не добавляй данных которых там нет. "
+            "Максимум 3 предложения."
+            + points_str
+        )
+
+    elif action == "params_explain":
+        points_str = ""
+        if allowed_points:
+            points_str = "\nДопустимые параметры (только их используй):\n" + "\n".join(f"- {p}" for p in allowed_points)
+        instr = (
+            "Клиент спрашивает, по каким параметрам подходит этот банк. "
+            "Используй ТОЛЬКО параметры из списка ниже — не придумывай других. "
+            "Максимум 3 предложения."
+            + points_str
         )
 
     else:
@@ -138,14 +220,46 @@ def build_render_prompt(plan: Dict[str, Any]) -> str:
         if allowed_banks else
         "Не называй ни одного банка — данных нет."
     )
+
+    # Client type restriction — block LLM from switching types
+    _ALL_TYPES = {"ФЛ", "ИП", "ЮЛ", "ООО"}
+    if client_type and client_type in _ALL_TYPES:
+        _forbidden_types = _ALL_TYPES - {client_type}
+        # Map synonyms
+        _syn = {"ЮЛ": ["ЮЛ", "ООО", "юрлицо"], "ФЛ": ["ФЛ", "физлицо", "физлицу"], "ИП": ["ИП"]}
+        _forbidden_words_set: list[str] = []
+        _seen: set[str] = set()
+        for ft in sorted(_forbidden_types):
+            for w in _syn.get(ft, [ft]):
+                if w not in _seen:
+                    _forbidden_words_set.append(w)
+                    _seen.add(w)
+        _forbidden_words = _forbidden_words_set
+        client_type_restriction = (
+            f"Клиент — {client_type}. Не упоминай другие типы: {', '.join(_forbidden_words)}."
+        )
+    else:
+        client_type_restriction = ""
     num_restriction = (
         f"Используй ТОЛЬКО эти числа: {allowed_nums_str} (в любом падеже: руб., рублей, р/мес и т.д.)."
         if allowed_nums_str else
         "Не называй никаких цифр и сумм — данных нет."
     )
 
+    client_type_line = f"\n- {client_type_restriction}" if client_type_restriction else ""
+
+    # Build context section
+    ctx_parts: List[str] = []
+    if dialog_ctx:
+        ctx_parts.append(f"### ИСТОРИЯ ДИАЛОГА:\n{dialog_ctx}")
+    if user_text:
+        ctx_parts.append(f"### ПОСЛЕДНИЙ ВОПРОС КЛИЕНТА:\n{user_text}")
+    ctx_section = "\n\n".join(ctx_parts)
+
     return f"""### ROLE
 Ты — Алексей, менеджер ООО «В плюсе». Пишешь живо, как человек, без канцеляритов.
+
+{ctx_section}
 
 ### ДАННЫЕ ДЛЯ ОТВЕТА (используй только их):
 {data_text}
@@ -155,7 +269,7 @@ def build_render_prompt(plan: Dict[str, Any]) -> str:
 
 ### ЖЁСТКИЕ ЗАПРЕТЫ:
 - {bank_restriction}
-- {num_restriction}
+- {num_restriction}{client_type_line}
 - Не добавляй документы, условия, ограничения, которых нет в разделе ДАННЫЕ.
 - Не используй оценочные слова: «самый лучший», «выгоднее всех», «рекомендую» (если этого нет в данных).
 - Не пиши слова: «черновик», «база данных», «система», «бот», «ИИ», «алгоритм».

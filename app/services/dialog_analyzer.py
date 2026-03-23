@@ -34,17 +34,6 @@ class DecisionSignal(TypedDict):
     handoff_reason: Optional[str]
 
 
-class AnalysisSignal(TypedDict):
-    intent: str
-    intent_confidence: float
-    escalate: bool
-    escalate_reason: str
-    interest_score: int
-    escalate_confidence: float
-    next_step: str
-    client_need: str
-
-
 # ---------------------------------------------------------------------------
 # Rule-based classifier (extended)
 # ---------------------------------------------------------------------------
@@ -64,12 +53,25 @@ _INTRO_RE  = re.compile(
     r"|ты\s+бот|вы\s+бот|это\s+бот|ты\s+робот|вы\s+робот|живой\s+ли|человек\s+ли)\b",
     re.I,
 )
+_PARTNER_BANKS_DIRECT_RE = re.compile(
+    r"(с\s+кем\s+(вы\s+)?(работаете|сотрудничаете)|какие\s+банки\s+у\s+вас"
+    r"|с\s+какими\s+банками\s+(вы\s+)?работаете|ваши\s+банки"
+    r"|список\s+банков|с\s+какими\s+партнерами|банки\s*[?!]\s*$)",
+    re.I,
+)
 _BANK_SEL_RE = re.compile(
     r"\b(подобрать|подберем|подберём|выбрать|какой\s+лучше|варианты|посоветуете|какой\s+подойдет"
     r"|что\s+посоветуете|сравните|сравни|лучший\s+банк|подходящий\s+банк"
-    r"|какой\s+банк|какие\s+банки|какими\s+банками|с\s+какими\s+банками"
-    r"|какой\s+рекомендуете|с\s+какими\s+работаете"
-    r"|для\s+(физ|юр|физических|юридических)\s+лиц)\b",
+    r"|какой\s+банк|какие\s+банки|какими\s+банками"
+    r"|какой\s+рекомендуете"
+    r"|для\s+(физ|юр|физических|юридических)\s+лиц"
+    r"|нужен\s+(банк|счет|счёт)|нужно\s+открыть|хочу\s+(открыть|счет|счёт)|открыть\s+счет|открыть\s+счёт"
+    r"|нужен\s+рко|нужно\s+рко)\b",
+    re.I,
+)
+# Signals that a greeting message contains a real account/bank need
+_BANK_NEED_RE = re.compile(
+    r"\b(банк|счет|счёт|рко|нужен|открыть|тариф|стоимост|для\s+(физ|юр|ип)\b)",
     re.I,
 )
 _SPECIFIC_BANK_RE = re.compile(
@@ -92,9 +94,9 @@ _HANDOFF_RE = re.compile(
     re.I,
 )
 _CONSENT_RE = re.compile(
-    r"\b(оформляем|оформить|открывайте|давайте\s+начнем|что\s+дальше|куда\s+оплатить"
-    r"|готов\s+начать|готов|согласен|давайте|начнем|поехали|приступим|открыть\s+счет"
-    r"|хочу\s+открыть|открыть)\b",
+    r"\b(оформляем|оформить|открывайте|давайте\s+начнем|давайте\s+оформим"
+    r"|что\s+дальше|куда\s+оплатить|готов\s+начать|согласен|начнем|поехали"
+    r"|приступим|открыть\s+счет|хочу\s+открыть)\b",
     re.I,
 )
 
@@ -109,6 +111,9 @@ def _get_rule_based_decision(text: str) -> Optional[DecisionSignal]:
             substantive = _get_rule_based_decision(stripped)
             if substantive and substantive.get("query_mode") not in ("service",):
                 return substantive
+            # Fallback: any signal of a bank/account need → route to bank_selection
+            if _BANK_NEED_RE.search(stripped):
+                return _d("BANK_SELECTION", "ANSWER", "bank_selection", needs_kb=True, conf=0.75)
         return _d("GREETING",      "ANSWER", "service",       needs_kb=False, conf=1.0)
     if _THANKS_RE.search(t) and len(t.split()) <= 5:
         return _d("THANKS",        "ANSWER", "service",       needs_kb=False, conf=1.0)
@@ -126,6 +131,10 @@ def _get_rule_based_decision(text: str) -> Optional[DecisionSignal]:
     if _CONSENT_RE.search(t):
         return _d("DOC_TRANSFER",  "HANDOFF","service",       needs_kb=False,
                   needs_handoff=True, handoff_reason="ready_to_open", conf=0.90)
+
+    # Partner banks direct intent (before bank_selection to avoid wrong routing)
+    if _PARTNER_BANKS_DIRECT_RE.search(t):
+        return _d("PRESENTATION",  "ANSWER", "partner_banks", needs_kb=False, conf=0.95)
 
     # Bank selection (generic)
     if _BANK_SEL_RE.search(t) and not _SPECIFIC_BANK_RE.search(t):
@@ -269,72 +278,3 @@ async def detect_stage_and_action(dialog_text: str) -> DecisionSignal:
 # Background analysis (escalation + intent tracking)
 # ---------------------------------------------------------------------------
 
-ANALYSIS_PROMPT = """
-Ты — аналитик диалогов продаж. Проанализируй историю и верни JSON.
-
-### ПАРАМЕТРЫ:
-- intent: активное намерение (PRICING|OPEN_SPECIAL_ACCOUNT|OPEN_ACCOUNT|DOCUMENTS|CONSULTATION|END_DIALOG|OTHER)
-- escalate: true если клиент явно готов к следующему шагу или просит человека
-- interest_score: 0–100
-- next_step: none|ask_clarify|handoff_manager
-- client_need: OPEN_ACCOUNT|CONDITIONS|DOCUMENTS|CONSULTATION|SUPPORT|UNKNOWN
-
-Верни ТОЛЬКО JSON:
-{
-  "intent": "...",
-  "intent_confidence": 0..1,
-  "escalate": true|false,
-  "escalate_reason": "ready_to_open|callback|human_request|complex_case|pricing|other",
-  "interest_score": 0..100,
-  "escalate_confidence": 0..1,
-  "next_step": "none|ask_clarify|handoff_manager",
-  "client_need": "..."
-}
-""".strip()
-
-
-async def analyze_dialog(dialog_text: str, had_unknown_kb: bool = False) -> AnalysisSignal:
-    """Background analysis for escalation/intent tracking."""
-    payload = dialog_text or ""
-    if had_unknown_kb:
-        payload += "\n\n[NOTICE] Бот не нашел ответа в базе знаний на последний вопрос."
-
-    default: AnalysisSignal = {
-        "intent": "OTHER",
-        "intent_confidence": 0.0,
-        "escalate": False,
-        "escalate_reason": "other",
-        "interest_score": 0,
-        "escalate_confidence": 0.0,
-        "next_step": "none",
-        "client_need": "UNKNOWN",
-    }
-
-    try:
-        raw = await ask_llm(
-            [{"role": "system", "content": ANALYSIS_PROMPT},
-             {"role": "user",   "content": payload}],
-            model=settings.OLLAMA_ANALYZER_MODEL,
-        )
-        m = _JSON_RE.search(raw)
-        if not m:
-            return default
-        data = json.loads(m.group(0).strip())
-        res: AnalysisSignal = {
-            "intent":            str(data.get("intent") or "OTHER").upper(),
-            "intent_confidence": _clamp_f(data.get("intent_confidence"), 0.0, 1.0, 0.0),
-            "escalate":          bool(data.get("escalate", False)),
-            "escalate_reason":   str(data.get("escalate_reason") or "other"),
-            "interest_score":    int(_clamp_f(data.get("interest_score"), 0, 100, 0)),
-            "escalate_confidence":_clamp_f(data.get("escalate_confidence"), 0.0, 1.0, 0.0),
-            "next_step":         str(data.get("next_step") or "none"),
-            "client_need":       str(data.get("client_need") or "UNKNOWN"),
-        }
-        if res["escalate"]:
-            res["next_step"] = "handoff_manager"
-        elif res["next_step"] == "handoff_manager":
-            res["escalate"] = True
-        return res
-    except Exception:
-        logger.exception("analyze_dialog failed")
-        return default

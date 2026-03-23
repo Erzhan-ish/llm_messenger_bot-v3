@@ -72,7 +72,7 @@ def _extract_numbers(text: str) -> Set[str]:
 def _extract_client_types(text: str) -> Set[str]:
     TYPES = ["ип", "ооо", "юрлицо", "физлицо", "фл", "юл", "самозанят"]
     tl = text.lower()
-    return {t for t in TYPES if re.search(rf"\b{t}", tl)}
+    return {t for t in TYPES if re.search(rf"\b{t}\b", tl)}
 
 
 # ООО / юрлицо are synonyms of ЮЛ; физлицо is synonym of ФЛ.
