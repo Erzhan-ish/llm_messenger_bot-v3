@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import time
 
 from app.context.session_manager import get_or_create_session, reset_session
 from app.logging import logger
@@ -42,6 +43,7 @@ from app.processing.slots import DEFAULT_SLOTS, extract_runtime_slots, _invalida
 from app.processing.utils import (
     _build_dialog_context,
     _is_aggressive,
+    _maybe_send_pause_phrase,
     _needs_facts,
     _TypingScope,
     cleanup_text,
@@ -212,6 +214,8 @@ async def process_message(message):
         )
         return
 
+    processing_start = time.monotonic()
+
     slots = await get_slots(session.id) or DEFAULT_SLOTS.copy()
     slots.pop("_mode", None)
 
@@ -338,11 +342,21 @@ async def process_message(message):
             return
 
         # --- New pipeline: retrieve → plan → validate → render ---
+        qmode = decision.get("query_mode", "service")
+        await _maybe_send_pause_phrase(
+            session.id, message.channel, message.external_user_id, qmode, slots
+        )
+
         a, had_unknown_any = await answer_with_plan(session.id, user_text, slots, decision)
 
-        await send_bot(session, message.channel, message.external_user_id, a, slots)
+        await send_bot(
+            session, message.channel, message.external_user_id, a, slots,
+            query_mode=qmode,
+            processing_start=processing_start,
+            client_msg_len=len(user_text),
+        )
 
-        qmode_final = decision.get("query_mode", "smalltalk")
+        qmode_final = qmode
         if (
             user_text_lower not in SHORT_NEUTRAL
             and user_text_lower not in END_DIALOG_PHRASES

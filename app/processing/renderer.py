@@ -53,12 +53,11 @@ _PARTNER_BANKS_ALL = (
 )
 
 _HANDOFF_BRIDGE_TEMPLATES = {
-    "ready_with_bank_no_inn": "Отлично, {bank} — фиксируем. Пришлите ИНН должника, и я сразу передам заявку в работу — подключу старшего менеджера.",
-    "ready_with_bank_inn":    "Отлично, {bank} — фиксируем. Подключаю старшего менеджера — он свяжется с вами и возьмёт документы.",
-    "ready_nobank_no_inn":    "Хорошо, двигаемся! Пришлите ИНН должника — и я сразу передам в работу, подключу старшего менеджера.",
-    "ready_nobank_inn":       "Хорошо, двигаемся дальше. Подключаю старшего менеджера — он свяжется с вами и поможет с оформлением.",
-    "human_request":          "Конечно, подключаю старшего менеджера. Он ответит вам в ближайшее время.",
-    "default":                "Подключаю старшего менеджера — он разберёт ситуацию подробнее.",
+    "ready_with_bank":  "Отлично, {bank} — фиксируем. Подключаю старшего менеджера, он свяжется с вами и возьмёт всё необходимое.",
+    "ready_nobank":     "Хорошо, двигаемся! Подключаю старшего менеджера — он свяжется с вами и поможет с оформлением.",
+    "human_request":    "Конечно, подключаю старшего менеджера. Он ответит вам в ближайшее время.",
+    "action_intent":    "Минутку, подключаю старшего менеджера — он примет всё напрямую.",
+    "default":          "Подключаю старшего менеджера — он разберёт ситуацию подробнее.",
 }
 
 _CLARIFY_VARIANTS: dict[str, list[str]] = {
@@ -97,17 +96,15 @@ def _render_partner_banks(plan: dict) -> str:
 
 
 def _build_handoff_bridge(slots: dict, reason: str) -> str:
-    bank    = slots.get("_last_bank") or slots.get("bank_name")
-    has_inn = bool(slots.get("inn"))
+    bank = slots.get("_last_bank") or slots.get("bank_name")
+
+    if reason == "action_intent":
+        return _HANDOFF_BRIDGE_TEMPLATES["action_intent"]
 
     if reason == "ready_to_open":
-        if bank and not has_inn:
-            return _HANDOFF_BRIDGE_TEMPLATES["ready_with_bank_no_inn"].format(bank=bank)
         if bank:
-            return _HANDOFF_BRIDGE_TEMPLATES["ready_with_bank_inn"].format(bank=bank)
-        if not has_inn:
-            return _HANDOFF_BRIDGE_TEMPLATES["ready_nobank_no_inn"]
-        return _HANDOFF_BRIDGE_TEMPLATES["ready_nobank_inn"]
+            return _HANDOFF_BRIDGE_TEMPLATES["ready_with_bank"].format(bank=bank)
+        return _HANDOFF_BRIDGE_TEMPLATES["ready_nobank"]
 
     if reason == "human_request":
         return _HANDOFF_BRIDGE_TEMPLATES["human_request"]
@@ -267,6 +264,7 @@ async def answer_with_plan(
 
     plan = build_response_plan(user_text, slots, decision, facts_result)
     plan["_seed"] = user_text
+    plan["client_style"] = slots.get("client_style")
 
     if plan.get("action") in ("answer", "compare", "selection_opening"):
         slots["_last_mode"]      = qmode
@@ -314,6 +312,22 @@ async def answer_with_plan(
 
     text = await render_manager_text(plan, user_text=user_text, dialog_ctx=dialog_ctx)
     text = (text or "").strip() or _FALLBACK_TEXT
+
+    # Self-check: если ответ похож на предыдущий — один авторетрай с анти-повтором
+    from app.processing.utils import _is_near_duplicate
+    if plan.get("action") in ("answer", "compare", "selection_opening"):
+        prev_text = slots.get("_last_bot_text") or ""
+        if prev_text and _is_near_duplicate(text, prev_text):
+            logger.info("Session {} | Self-check: near-duplicate, retrying render", session_id)
+            retry_plan = {**plan, "_prev_bot_text": prev_text}
+            try:
+                retry_text = await render_manager_text(retry_plan, user_text=user_text, dialog_ctx=dialog_ctx)
+                retry_text = (retry_text or "").strip()
+                if retry_text and not _is_near_duplicate(retry_text, prev_text):
+                    text = retry_text
+                    logger.info("Session {} | Self-check: retry succeeded", session_id)
+            except Exception:
+                logger.exception("Self-check retry failed (ignored)")
 
     had_unknown = (
         facts_result.get("retrieval_reason") in {"empty", "low_score", "no_kb"}

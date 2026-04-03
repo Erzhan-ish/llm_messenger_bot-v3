@@ -15,6 +15,21 @@ from typing import Any, Dict, List, Optional
 # NEW: single render prompt
 # ---------------------------------------------------------------------------
 
+_STYLE_INSTRUCTIONS: Dict[str, str] = {
+    "hurried": (
+        "Клиент торопится — отвечай максимально кратко, 1–2 предложения, "
+        "только ключевой факт. Без вводных слов."
+    ),
+    "doubtful": (
+        "Клиент сомневается — добавь одну фразу уверенности или надёжности, "
+        "без давления. Максимум 3 предложения."
+    ),
+    "detailed": (
+        "Клиент хочет подробности — можно чуть развернуть ответ, "
+        "добавь 1–2 конкретных факта из данных. Максимум 4 предложения."
+    ),
+}
+
 _Q_TEXTS: Dict[str, str] = {
     "client_type": "Уточните, для кого нужен счёт: ИП, ООО или физическое лицо?",
     "bank_name":   "Есть предпочтения по банку?",
@@ -50,6 +65,8 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
     LLM must only voice the plan — no new facts, no new banks, no new prices.
     """
     action         = plan.get("action", "answer")
+    client_style   = plan.get("client_style")
+    prev_bot_text  = plan.get("_prev_bot_text") or ""
     intent         = plan.get("intent", "")
     bank           = plan.get("bank")
     client_type    = plan.get("client_type")
@@ -248,6 +265,19 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
 
     client_type_line = f"\n- {client_type_restriction}" if client_type_restriction else ""
 
+    # Style adaptation section
+    style_section = (
+        f"\n### СТИЛЬ ОТВЕТА:\n{_STYLE_INSTRUCTIONS[client_style]}"
+        if client_style in _STYLE_INSTRUCTIONS else ""
+    )
+
+    # Anti-repeat section (injected only on self-check retry)
+    anti_repeat_section = (
+        f"\n\n### ВАЖНО — НЕ ПОВТОРЯЙ:\nПредыдущий ответ был:\n«{prev_bot_text[:300]}»\n"
+        "Сформулируй иначе — другие слова, другой порядок, другой акцент."
+        if prev_bot_text else ""
+    )
+
     # Build context section
     ctx_parts: List[str] = []
     if dialog_ctx:
@@ -258,6 +288,7 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
 
     return f"""### ROLE
 Ты — Алексей, менеджер ООО «В плюсе». Пишешь живо, как человек, без канцеляритов.
+{style_section}
 
 {ctx_section}
 
@@ -265,7 +296,7 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
 {data_text}
 
 ### ЗАДАЧА:
-{instr}
+{instr}{anti_repeat_section}
 
 ### ЖЁСТКИЕ ЗАПРЕТЫ:
 - {bank_restriction}

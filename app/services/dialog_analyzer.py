@@ -90,8 +90,18 @@ _PRICING_RE = re.compile(
 _HANDOFF_RE = re.compile(
     r"\b(позовите|позвоните|позвони|перезвоните|перезвони|наберите|набери"
     r"|оператор|живой\s+человек|менеджер|специалист"
-    r"|соедините|подключите\s+человека)\b",
-    re.I,
+    r"|соедините|подключите\s+человека"
+    r"|ваш\s+номер|дайте\s+номер|напишите\s+номер|оставьте\s+контакт"
+    r"|как\s+с\s+вами\s+связаться|как\s+вам\s+позвонить)\b",
+    re.I | re.U,
+)
+
+# Намерение отправить что-либо (документы, файлы, данные) → немедленная эскалация
+_ACTION_SEND_RE = re.compile(
+    r"\b(пришлю|отправлю|вышлю|скину|высылаю|отправляю|направлю|прикреплю"
+    r"|могу\s+прислать|могу\s+отправить|могу\s+выслать|могу\s+скинуть"
+    r"|буду\s+отправлять|сейчас\s+пришлю|сейчас\s+отправлю|уже\s+отправляю)\b",
+    re.I | re.U,
 )
 _CONSENT_RE = re.compile(
     r"\b(оформляем|оформить|открывайте|давайте\s+начнем|давайте\s+оформим"
@@ -121,6 +131,11 @@ def _get_rule_based_decision(text: str) -> Optional[DecisionSignal]:
         return _d("ACK",           "ANSWER", "service",       needs_kb=False, conf=1.0)
     if _INTRO_RE.search(t):
         return _d("INTRO",         "ANSWER", "intro",         needs_kb=False, conf=1.0)
+
+    # Намерение что-то отправить/прислать → сразу менеджеру
+    if _ACTION_SEND_RE.search(t):
+        return _d("DOC_TRANSFER",  "HANDOFF","service",       needs_kb=False,
+                  needs_handoff=True, handoff_reason="action_intent", conf=0.95)
 
     # Explicit handoff / operator request
     if _HANDOFF_RE.search(t):
@@ -200,10 +215,12 @@ CLASSIFIER_PROMPT = """
 - pricing: тарифы/цены без конкретного банка.
 
 ### ACTIONS:
-- ANSWER: содержательный ответ.
+- ANSWER: содержательный ответ (только консультация).
 - CLARIFY: нужно уточнение от клиента.
-- HANDOFF: нужен живой менеджер (клиент просит, конфликт, или готов оформлять).
+- HANDOFF: нужен живой менеджер — клиент готов открыть счёт, хочет позвонить/отправить документы/сделать что-то конкретное, просит оператора, конфликт.
 - STOP: агрессия / диалог завершён.
+
+ВАЖНО: любое намерение совершить действие (открыть счёт, отправить документы, позвонить, получить реквизиты и т.д.) → всегда HANDOFF, не ANSWER.
 
 Верни СТРОГО JSON без пояснений:
 {
@@ -213,7 +230,7 @@ CLASSIFIER_PROMPT = """
   "needs_kb": true|false,
   "needs_handoff": true|false,
   "confidence": 0..1,
-  "handoff_reason": "human_request|ready_to_open|complex_case|complaint|null"
+  "handoff_reason": "human_request|ready_to_open|action_intent|complex_case|complaint|null"
 }
 """.strip()
 

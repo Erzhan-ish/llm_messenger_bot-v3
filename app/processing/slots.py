@@ -32,6 +32,63 @@ _EMAIL_RE      = re.compile(r"(?i)\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b")
 _INN_RE        = re.compile(r"\b(\d{10}|\d{12})\b")
 _INN_LABELED_RE = re.compile(r"(?i)\bинн[:\s]*([0-9]{10}|[0-9]{12})\b")
 
+# ---------------------------------------------------------------------------
+# Client style detection
+# ---------------------------------------------------------------------------
+_HURRIED_RE = re.compile(
+    r"\b(срочно|побыстрее|быстро|некогда|вкратце|кратко|коротко"
+    r"|без\s+деталей|скорее|только\s+главное|в\s+двух\s+словах"
+    r"|нет\s+времени|сжато)\b",
+    re.I | re.U,
+)
+_DOUBTFUL_RE = re.compile(
+    r"\b(а\s+вдруг|не\s+уверен|не\s+уверена|сомнева\w+|рискованно|надёжно\s+ли"
+    r"|ненадёжно|гарантии|гарантия|а\s+если|что\s+если|а\s+что\s+если"
+    r"|какие\s+минусы|минусы|подводные\s+камни|риски|риск|опасения"
+    r"|нет\s+ли|есть\s+ли\s+риск|насколько\s+надёжно|смущает)\b",
+    re.I | re.U,
+)
+_DETAILED_RE = re.compile(
+    r"\b(подробнее|поподробнее|расскажите|объясните|как\s+именно|детально"
+    r"|все\s+детали|полностью|хочу\s+узнать\s+больше|расскажи|подробно"
+    r"|развёрнуто|поподробней|расписать|расписите)\b",
+    re.I | re.U,
+)
+
+
+def _update_client_style(text: str, slots: Dict) -> None:
+    """Накапливает сигналы стиля клиента и обновляет slots['client_style'].
+
+    Победитель определяется при накоплении ≥2 баллов — защита от случайной смены стиля.
+    """
+    t = text or ""
+    signals: dict = slots.setdefault(
+        "_style_signals", {"hurried": 0, "doubtful": 0, "detailed": 0}
+    )
+
+    if _HURRIED_RE.search(t):
+        signals["hurried"] += 2
+    elif slots.get("_last_bot_text") and len(t.split()) <= 4:
+        signals["hurried"] += 1
+
+    if _DOUBTFUL_RE.search(t):
+        signals["doubtful"] += 2
+
+    if _DETAILED_RE.search(t):
+        signals["detailed"] += 2
+    elif len(t.split()) >= 20:
+        signals["detailed"] += 1
+
+    msg_count = slots.get("_msg_count", 0) + 1
+    slots["_msg_count"] = msg_count
+    if msg_count % 5 == 0:
+        for k in signals:
+            signals[k] = max(0, signals[k] - 1)
+
+    best = max(signals, key=lambda k: signals[k])
+    if signals[best] >= 2:
+        slots["client_style"] = best
+
 
 def normalize_email(text: str) -> Optional[str]:
     if not text:
@@ -172,5 +229,8 @@ def extract_runtime_slots(text: str, slots: Dict) -> Dict:
     email = normalize_email(text)
     if email:
         slots["email"] = email
+
+    # 8. Client style (accumulated signals)
+    _update_client_style(text, slots)
 
     return slots

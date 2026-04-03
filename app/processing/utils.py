@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import random
 import re
+import time
 from dataclasses import dataclass
 from typing import List
 
@@ -33,6 +35,17 @@ BAD_PREFIX_RE = re.compile(
     r"(\s*[\"\'].*?[\"\'][\.\,]?\s*(Ответ:)?\s*)?|вот\s+ответ\s*(на\s+новый\s+вопрос\s+клиента)?\s*:?"
     r"|уточняющий\s+(ваш\s+)?вопрос\s*:?|отвечать\s+на\s+этот\s+вопрос\s+можно"
     r"(?:\s+следующим\s+образом)?(?:[^:\r\n]*:)?\s*)\s*"
+)
+
+# «Вежливые» открывашки — LLM иногда вставляет несмотря на запрет в промпте.
+OPENER_STRIP_RE = re.compile(
+    r"(?im)^\s*("
+    r"конечно[,!\.\s]|разумеется[,!\.\s]|отлично[,!\.\s]|прекрасно[,!\.\s]"
+    r"|замечательно[,!\.\s]|безусловно[,!\.\s]|естественно[,!\.\s]"
+    r"|с\s+удовольствием[,!\.\s]|рад\s+помочь[,!\.\s]|я\s+рад[,!\.\s]"
+    r"|хорошо[,!\s]|понял[,!\s]|ясно[,!\s]|да[,!\s]|окей[,!\s]|ок[,!\s]"
+    r")\s*",
+    re.I | re.U,
 )
 META_LINE_RE = re.compile(
     r"(?im)^\s*(внимание|фрагменты\s+базы|вопрос\s+клиента|требования\s+к\s+стилю)\b"
@@ -74,6 +87,65 @@ def _is_aggressive(text: str) -> bool:
     return bool(PROFANITY_RE.search(text))
 
 
+# ---------------------------------------------------------------------------
+# Human-like timing
+# ---------------------------------------------------------------------------
+
+_THINKING_DELAYS: dict[str, tuple[float, float]] = {
+    "service":        (3.0,   8.0),
+    "intro":          (5.0,  12.0),
+    "smalltalk":      (4.0,  10.0),
+    "clarify":        (8.0,  18.0),
+    "pricing":        (20.0, 45.0),
+    "docs":           (18.0, 40.0),
+    "specific_bank":  (22.0, 50.0),
+    "bank_selection": (25.0, 55.0),
+    "handoff":        (4.0,  10.0),
+    "default":        (10.0, 25.0),
+}
+_FIRST_SESSION_DELAY: tuple[float, float] = (5.0, 12.0)
+
+_PAUSE_PHRASES = ["секунду", "сейчас уточню", "момент", "сейчас проверю", "уточняю"]
+_KB_MODES = {"pricing", "docs", "specific_bank", "bank_selection"}
+
+
+def _target_thinking_delay(query_mode: str, client_msg_len: int, is_first_session: bool) -> float:
+    if is_first_session:
+        lo, hi = _FIRST_SESSION_DELAY
+    else:
+        lo, hi = _THINKING_DELAYS.get(query_mode, _THINKING_DELAYS["default"])
+    reading_extra = min(5.0, client_msg_len / 60.0)
+    return random.uniform(lo, hi) + random.uniform(0.0, reading_extra)
+
+
+def _inter_bubble_delay(part_len: int) -> float:
+    base = part_len / 20.0
+    return max(3.0, min(8.0, base + random.uniform(0.5, 2.0)))
+
+
+async def _maybe_send_pause_phrase(
+    session_id: int,
+    channel: str,
+    external_user_id: str,
+    query_mode: str,
+    slots: dict,
+) -> None:
+    """Иногда отправляет живую фразу-паузу перед основным ответом (30% вероятность)."""
+    if query_mode not in _KB_MODES:
+        return
+    if not slots.get("_last_bot_text"):
+        return
+    if random.random() > 0.30:
+        return
+    phrase = random.choice(_PAUSE_PHRASES)
+    await asyncio.sleep(random.uniform(1.5, 4.0))
+    try:
+        await save_message(session_id, "bot", phrase, channel)
+        await OutboundDispatcher.send(channel=channel, external_user_id=external_user_id, text=phrase)
+    except Exception:
+        logger.debug("pause phrase send failed (ignored)")
+
+
 def cleanup_text(text: str) -> str:
     if not text:
         return ""
@@ -92,6 +164,7 @@ def cleanup_text(text: str) -> str:
     while t != prev:
         prev = t
         t = BAD_PREFIX_RE.sub("", t).strip()
+        t = OPENER_STRIP_RE.sub("", t).strip()
         t = THIRD_PERSON_RE.sub("", t).strip()
 
     t = t.strip(" \n\r\t\"'\u201c\u201d\u00ab\u00bb")
@@ -227,12 +300,20 @@ class _TypingScope:
 # ---------------------------------------------------------------------------
 # Send helpers
 # ---------------------------------------------------------------------------
-async def send_bot(session, channel: str, external_user_id: str, text: str, slots: dict) -> dict:
+async def send_bot(
+    session,
+    channel: str,
+    external_user_id: str,
+    text: str,
+    slots: dict,
+    *,
+    query_mode: str = "service",
+    processing_start: float | None = None,
+    client_msg_len: int = 0,
+) -> dict:
     text = cleanup_text(text)
     text = _limit_sentences_and_len(text)
     text = (text or "").strip() or "Уточните, пожалуйста, что именно нужно?"
-
-    import random
 
     raw_parts = [p.strip() for p in re.split(r'\n+', text) if p.strip()]
 
@@ -255,7 +336,7 @@ async def send_bot(session, channel: str, external_user_id: str, text: str, slot
         else:
             parts.append(p)
 
-    is_first = not bool(slots.get("_last_bot_text"))
+    is_first_session = not bool(slots.get("_last_bot_text"))
     slots["_last_bot_text"] = text
 
     if not slots.get("_introduced") and re.search(r"\b(меня\s+зовут|это)\s+алексей\b", text, re.IGNORECASE):
@@ -264,13 +345,17 @@ async def send_bot(session, channel: str, external_user_id: str, text: str, slot
     await set_slots(session.id, slots)
 
     for i, part in enumerate(parts):
-        if is_first and i == 0:
-            delay = random.uniform(1.5, 2.5)
+        if i == 0:
+            target = _target_thinking_delay(query_mode, client_msg_len, is_first_session)
+            if processing_start is not None:
+                elapsed = time.monotonic() - processing_start
+                wait = max(1.0, target - elapsed)
+            else:
+                wait = random.uniform(target * 0.3, target * 0.6)
+            await asyncio.sleep(wait)
         else:
-            base_delay = len(part) / 25.0
-            delay = max(1.5, min(5.0, base_delay + random.uniform(0.0, 1.0)))
+            await asyncio.sleep(_inter_bubble_delay(len(part)))
 
-        await asyncio.sleep(delay)
         await save_message(session.id, "bot", part, channel)
         await OutboundDispatcher.send(channel=channel, external_user_id=external_user_id, text=part)
 

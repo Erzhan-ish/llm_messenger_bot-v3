@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=True,
-        extra="ignore",  # чтобы лишние env не валили запуск
+        extra="ignore",  # чтобы лишние .env не валили запуск
     )
 
     @field_validator("DUTY_MANAGER_ID", "BITRIX_DISK_FOLDER_ID", mode="before")
