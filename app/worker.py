@@ -72,6 +72,7 @@ async def handle_job(job) -> None:
     job_type = (job.job_type or "").strip()
 
     if job_type == "inbound":
+        payload["_job_id"] = job.id
         await _handle_inbound(payload)
         return
 

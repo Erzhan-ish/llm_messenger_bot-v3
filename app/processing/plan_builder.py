@@ -38,9 +38,12 @@ _FOLLOWUP_PARAMS_RE = re.compile(
     re.I | re.U,
 )
 _YES_RE = re.compile(
-    r"^\s*(да|да\s*,?\s*(хочу|давайте|конечно|пожалуйста|интересно|расскажи|можно)"
+    r"^\s*(да|да\s*,?\s*(хочу|давайте|конечно|пожалуйста|интересно|расскажи|можно|подробнее|поподробнее)"
     r"|ок\s+давайте|хочу\s+узнать|да\s+пожалуйста|ну\s+да|конечно\s+да"
-    r"|расскажите?|давайте|можно|интересно)\s*[.!?]?\s*$",
+    r"|да\s+поподробнее|да\s+подробнее|подробнее\s+пожалуйста|хочу\s+подробнее"
+    r"|давайте\s+(подробнее|поподробнее|расскажите?|детальнее|разберём|разберем)"
+    r"|расскажите?\s+(подробнее|поподробнее|детальнее)"
+    r"|расскажите?|давайте|можно|интересно|хм+|мм+)\s*[.!?]?\s*$",
     re.I | re.U,
 )
 _EXPAND_BANKS_RE = re.compile(
@@ -341,6 +344,10 @@ def _plan_factual(base: dict, qmode: str, facts_result: dict, facts: dict,
 
     bank_profile = facts.get("bank_profile") or {}
     bank         = bank_profile.get("bank") or facts.get("bank")
+
+    # Generic pricing/docs query with no known client_type and no explicit bank → clarify first
+    if not client_type and qmode in ("pricing", "docs") and not slots.get("bank_name"):
+        return _plan_clarify(base, qmode, "client_type", slots)
 
     if confidence < 0.25 and not bank:
         q = "bank_name" if not slots.get("bank_name") else "client_type"

@@ -44,9 +44,12 @@ _GREETING_RE = re.compile(
 )
 _THANKS_RE = re.compile(r"\b(спасибо|благодарю|спс|от\s+души|благодарен)\b", re.I)
 _ACK_RE    = re.compile(
-    r"^\s*(ок|окей|понял|хорошо|ясно|ладно|оки|всё?\s+понял|ага|угу|ок|о[кк]ей)\b",
+    r"^\s*(ок|окей|понял|хорошо|ясно|ладно|оки|всё?\s+понял|ага|угу|ок|о[кк]ей"
+    r"|понятно|ясненько|ладненько)\b",
     re.I,
 )
+# Short «thinking» sounds — only when the ENTIRE message is just these characters
+_PONDER_RE = re.compile(r"^\s*(хм+|мм+|нуу*)\s*[.!?]?\s*$", re.I)
 _INTRO_RE  = re.compile(
     r"\b(кто\s+вы|что\s+за\s+компания|чем\s+занимаетесь|вы\s+кто|откуда\s+пишете"
     r"|что\s+вы\s+делаете|расскажите\s+о\s+(себе|компании)"
@@ -79,12 +82,12 @@ _SPECIFIC_BANK_RE = re.compile(
 )
 _DOCS_RE = re.compile(
     r"\b(документ|докум|паспорт|инн|огрн|устав|справк|выписк|что\s+нужно\s+принести"
-    r"|какие\s+документы|список\s+документ)\b",
+    r"|какие\s+документы|список\s+документ)",
     re.I,
 )
 _PRICING_RE = re.compile(
     r"\b(тариф|стоимост|цен|комисси|сколько\s+стоит|бесплатн|обслуживани"
-    r"|плата|ежемесячн|открыт|рко|ведение)\b",
+    r"|плата|ежемесячн|открыт|рко|ведение)",
     re.I,
 )
 _HANDOFF_RE = re.compile(
@@ -109,6 +112,13 @@ _CONSENT_RE = re.compile(
     r"|приступим|открыть\s+счет|хочу\s+открыть)\b",
     re.I,
 )
+# Standalone client-type statement (answer to "для кого нужен счёт?")
+_CLIENT_TYPE_STMT_RE = re.compile(
+    r"(физ[\.\s]?лиц[ао]|физическое\s+лиц[ао]|физлицо|\bфл\b"
+    r"|юр[\.\s]?лиц[ао]|юридическое\s+лиц[ао]|юрлицо|\bюл\b"
+    r"|должник\s+(фл|юл|физ|юр))",
+    re.I | re.U,
+)
 
 
 def _get_rule_based_decision(text: str) -> Optional[DecisionSignal]:
@@ -128,6 +138,8 @@ def _get_rule_based_decision(text: str) -> Optional[DecisionSignal]:
     if _THANKS_RE.search(t) and len(t.split()) <= 5:
         return _d("THANKS",        "ANSWER", "service",       needs_kb=False, conf=1.0)
     if _ACK_RE.match(t) and len(t.split()) <= 4:
+        return _d("ACK",           "ANSWER", "service",       needs_kb=False, conf=1.0)
+    if _PONDER_RE.match(t):
         return _d("ACK",           "ANSWER", "service",       needs_kb=False, conf=1.0)
     if _INTRO_RE.search(t):
         return _d("INTRO",         "ANSWER", "intro",         needs_kb=False, conf=1.0)
@@ -169,6 +181,10 @@ def _get_rule_based_decision(text: str) -> Optional[DecisionSignal]:
     # Generic pricing query (no specific bank)
     if _PRICING_RE.search(t):
         return _d("PRESENTATION",  "ANSWER", "pricing",       needs_kb=True,  conf=0.80)
+
+    # Client-type statement ("физ лицо должник", "юр лицо", "фл" etc.) → bank selection
+    if _CLIENT_TYPE_STMT_RE.search(t):
+        return _d("BANK_SELECTION", "ANSWER", "bank_selection", needs_kb=True, conf=0.85)
 
     return None
 

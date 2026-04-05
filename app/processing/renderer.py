@@ -44,7 +44,7 @@ _HANDOFF_TEXT = (
 _PARTNER_BANKS_BY_TYPE: dict[str, str] = {
     "ЮЛ": "Для юридических лиц (ООО/ИП) работаем с Альфа-Банком, ТКБ, Уралсибом, МКБ, Росбанком, Т-Банком.",
     "ИП": "Для ИП работаем с ТКБ, Уралсибом, Росбанком, МКБ, Альфа-Банком, Т-Банком.",
-    "ФЛ": "Для физических лиц доступны ТКБ, Уралсиб, Росбанк. Альфа-Банк и Т-Банк для физлиц не открывают.",
+    "ФЛ": "Для физических лиц сейчас работаем с ТКБ. Открытие от 1 500 руб., ведение бесплатно.",
 }
 _PARTNER_BANKS_ALL = (
     "Работаем с банками-партнёрами: Альфа-Банк, ТКБ, Уралсиб, МКБ, Росбанк, Т-Банк. "
@@ -119,6 +119,13 @@ def _clarify_text(plan: dict, seed: str = "") -> str:
     return variants[abs(idx)]
 
 
+_FALLBACK_QUESTIONS = {
+    "client_type": "Уточните, для кого нужен счёт — ФЛ, ИП или ООО?",
+    "bank_name":   "Есть предпочтения по банку?",
+    "priority":    "Что важнее: минимальная стоимость или скорость открытия?",
+}
+
+
 def _plan_fallback_text(plan: dict) -> str:
     """
     Safe client-facing fallback when LLM render fails validation.
@@ -129,6 +136,8 @@ def _plan_fallback_text(plan: dict) -> str:
     docs        = plan.get("docs") or []
     candidates  = plan.get("candidates") or []
     client_type = plan.get("client_type") or ""
+    question    = plan.get("question_to_ask")
+    q_suffix    = f" {_FALLBACK_QUESTIONS[question]}" if question in _FALLBACK_QUESTIONS else ""
 
     if candidates:
         names = ", ".join(c["bank"] for c in candidates if c.get("bank"))
@@ -142,12 +151,117 @@ def _plan_fallback_text(plan: dict) -> str:
     if bank and items:
         parts = [f"По {bank}:"]
         parts += [f"{i['label']} — {i['value']}" for i in items if i.get("label") and i.get("value")]
-        return " ".join(parts) + " Что хотите уточнить — документы или условия работы?"
+        tail = " Что хотите уточнить — документы или условия работы?" if not q_suffix else q_suffix
+        return " ".join(parts) + tail
 
     if bank:
         return f"По {bank} — уточните, что именно хотите разобрать: тарифы, документы или условия?"
 
+    if q_suffix:
+        return q_suffix.strip()
+
     return _FALLBACK_TEXT
+
+
+_SELECTION_OPENING_ENDINGS = [
+    "Разобрать подробнее — условия, документы или ограничения?",
+    "Что интересует больше — документы для открытия или дополнительные условия?",
+    "Хотите разобрать подробнее или сразу по документам?",
+]
+
+_SPECIFIC_BANK_ENDINGS = [
+    "Нужна информация о документах для открытия?",
+    "Что-то ещё уточнить — документы или условия работы?",
+    "Разобрать документы или есть другие вопросы?",
+]
+
+
+def _fmt_fee(value, suffix: str = " руб./мес.") -> str:
+    """Format a fee value: 0 → 'бесплатно', otherwise number + suffix."""
+    if value == 0:
+        return "бесплатно"
+    return f"{int(value)} руб./мес." if "мес" in suffix else f"{int(value)} руб."
+
+
+def _render_selection_opening_static(plan: dict) -> str:
+    """Static render for single-bank selection_opening — no LLM, no hallucinations."""
+    candidates  = plan.get("candidates") or []
+    client_type = plan.get("client_type") or ""
+    question    = plan.get("question_to_ask")
+
+    ct_label = {"ФЛ": "физических лиц", "ЮЛ": "юридических лиц", "ИП": "ИП"}.get(client_type, "")
+    ct_prefix = f"Для {ct_label} " if ct_label else ""
+
+    if not candidates:
+        return _FALLBACK_TEXT
+
+    c    = candidates[0]
+    bank = c.get("bank", "")
+    of   = c.get("opening_fee")
+    mf   = c.get("monthly_fee")
+    bonus = c.get("bonus_rate") or c.get("main_feature") or ""
+
+    parts = []
+    if of is not None:
+        parts.append(f"открытие {_fmt_fee(of, ' руб.')}")
+    if mf is not None:
+        parts.append(f"ведение {_fmt_fee(mf, ' руб./мес.')}")
+    if bonus:
+        parts.append(f"бонус АУ {bonus}")
+
+    pricing = ", ".join(parts)
+    # Use a comma instead of colon so it reads naturally: "рабочий вариант — ТКБ, открытие 1500 руб."
+    body = f"{ct_prefix}рабочий вариант — {bank}" + (f", {pricing}" if pricing else "") + "."
+
+    if question in _CLARIFY_VARIANTS:
+        q_text = _CLARIFY_VARIANTS[question][0]
+        return f"{body} {q_text}"
+
+    idx = abs(hash(bank + client_type)) % len(_SELECTION_OPENING_ENDINGS)
+    return f"{body} {_SELECTION_OPENING_ENDINGS[idx]}"
+
+
+def _render_specific_bank_static(plan: dict) -> str:
+    """Static render for single-bank answer with pricing data — no LLM, no hallucinations."""
+    bank        = plan.get("bank") or ""
+    items       = plan.get("items") or []
+    client_type = plan.get("client_type") or ""
+    docs        = plan.get("docs") or []
+
+    ct_label = {"ФЛ": "физических лиц", "ЮЛ": "юридических лиц", "ИП": "ИП"}.get(client_type, "")
+
+    fees = []
+    for item in items:
+        label = item.get("label", "") or ""
+        val   = (item.get("value", "") or "").strip()
+        if not (label and val):
+            continue
+        if val in ("0 руб./мес.", "0 руб.", "0"):
+            val = "бесплатно"
+        # Natural phrasing: strip label capitals, write inline
+        if "Открытие" in label:
+            fees.append(f"открытие {val}")
+        elif "Ведение" in label:
+            fees.append(f"ведение {val}")
+        elif "Бонус" in label:
+            fees.append(f"бонус АУ {val}")
+        else:
+            fees.append(f"{label.lower()} {val}")
+
+    if docs:
+        fees.append(f"документы: {', '.join(docs[:4])}")
+
+    if not fees:
+        return f"По {bank} — что именно уточнить: тарифы, документы или условия?"
+
+    pricing = ", ".join(fees).rstrip(".")
+    if ct_label:
+        body = f"Для {ct_label} у {bank} {pricing}."
+    else:
+        body = f"У {bank} {pricing}."
+
+    idx = abs(hash(bank + client_type)) % len(_SPECIFIC_BANK_ENDINGS)
+    return f"{body} {_SPECIFIC_BANK_ENDINGS[idx]}"
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +283,14 @@ async def render_manager_text(plan: dict, *, user_text: str = "", dialog_ctx: st
 
     if action == "partner_banks":
         return _render_partner_banks(plan)
+
+    # Single-bank selection_opening → static render, no LLM hallucinations
+    if action == "selection_opening" and len(plan.get("candidates") or []) <= 1:
+        return _render_selection_opening_static(plan)
+
+    # Single-bank answer with pricing items → static render prevents hallucinated values
+    if action == "answer" and plan.get("bank") and plan.get("items"):
+        return _render_specific_bank_static(plan)
 
     if action == "where_answer":
         bank = plan.get("bank")
@@ -265,6 +387,10 @@ async def answer_with_plan(
     plan = build_response_plan(user_text, slots, decision, facts_result)
     plan["_seed"] = user_text
     plan["client_style"] = slots.get("client_style")
+
+    # Greeting asks "Для кого нужен счёт?" — set pending so short replies are routed correctly
+    if plan.get("action") == "service" and plan.get("intent") == "greeting":
+        slots["_pending_question_type"] = "client_type"
 
     if plan.get("action") in ("answer", "compare", "selection_opening"):
         slots["_last_mode"]      = qmode

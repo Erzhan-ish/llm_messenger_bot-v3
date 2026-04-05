@@ -56,6 +56,13 @@ class Settings(BaseSettings):
     STT_DEVICE: str = Field(default="cpu")
     STT_COMPUTE_TYPE: str = Field(default="int8")
     
+    # Knowledge Base
+    KB_SOURCE_PATH: str = Field(default="")
+    KB_CACHE_PATH: str = Field(default="app/knowledge_base/data/kb_cache.json")
+    KB_CHUNK_CHARS: int = Field(default=900)
+    KB_OVERLAP_CHARS: int = Field(default=160)
+    KB_TOP_K: int = Field(default=5)
+
     # Banks
     PARTNER_BANKS: List[str] = ["ТКБ", "Уралсиб", "Росбанк", "Альфа-Банк", "Т-Банк", "ВТБ", "Сбербанк"]
 

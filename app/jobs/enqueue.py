@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.channels.base import UnifiedMessage
 from app.logging import logger
 from app.storage.repositories.jobs_repo import enqueue_job
+
+_INBOUND_DEBOUNCE_SECONDS = 5  # wait this long before processing, to batch rapid messages
 
 
 def _to_payload(msg: UnifiedMessage) -> dict[str, Any]:
@@ -27,10 +30,11 @@ def _to_payload(msg: UnifiedMessage) -> dict[str, Any]:
 async def enqueue_inbound_message_job(msg: UnifiedMessage) -> int:
     payload = _to_payload(msg)
 
+    run_after = datetime.now(timezone.utc) + timedelta(seconds=_INBOUND_DEBOUNCE_SECONDS)
     job_id = await enqueue_job(
         job_type="inbound",
         payload=payload,
-        run_after=None,
+        run_after=run_after,
         max_attempts=5,
     )
 

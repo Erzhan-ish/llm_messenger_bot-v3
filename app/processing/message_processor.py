@@ -68,6 +68,7 @@ from app.storage.repositories.sessions_repo import (
     set_slots,
     touch_session_activity,
 )
+from app.storage.repositories.jobs_repo import has_newer_queued_job
 
 from datetime import datetime
 
@@ -127,8 +128,11 @@ async def process_message(message):
     print("RUNNING message_processor FROM:", __file__, "PID:", os.getpid())
 
     if isinstance(message, dict):
+        job_id = message.pop("_job_id", None)
         from app.channels.base import UnifiedMessage
         message = UnifiedMessage(**message)
+    else:
+        job_id = None
 
     if await is_duplicate_message(
             channel=message.channel,
@@ -196,6 +200,16 @@ async def process_message(message):
         channel=message.channel,
         external_message_id=message.message_id,
     )
+
+    # Debounce: give rapid consecutive messages a moment to arrive, then skip if a newer job is waiting
+    if job_id:
+        await asyncio.sleep(2.0)
+        if await has_newer_queued_job(job_id, str(message.external_user_id)):
+            logger.info(
+                "Session {} | Debounce: skipping job {} — newer message from user {} is pending",
+                session.id, job_id, message.external_user_id,
+            )
+            return
 
     slots = await get_slots(session.id) or DEFAULT_SLOTS.copy()
     if slots.get("_escalation_sent"):

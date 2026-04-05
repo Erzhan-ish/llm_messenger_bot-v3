@@ -15,6 +15,7 @@ from app.services.escalation_detector import detect_escalation_signal
 from app.storage.repositories.messages_repo import get_messages_by_session, save_message
 from app.storage.repositories.sessions_repo import (
     get_client_need,
+    get_slots,
     set_client_need,
     set_slots,
 )
@@ -369,9 +370,14 @@ async def maybe_escalate(session_id: int, slots: dict, reason: str) -> None:
     if slots.get("_escalation_sent"):
         return
 
-    slots["_escalation_sent"] = True
-    slots["_escalation_reason"] = reason
-    await set_slots(session_id, slots)
+    # Re-read fresh slots to avoid clobbering concurrent updates
+    current = await get_slots(session_id) or {}
+    if current.get("_escalation_sent"):
+        return
+
+    current["_escalation_sent"] = True
+    current["_escalation_reason"] = reason
+    await set_slots(session_id, current)
 
     if not ENABLE_ESCALATION_CALL or escalate_to_manager is None:
         return
@@ -405,15 +411,19 @@ async def maybe_escalate_from_signal(
     except Exception:
         score = 0
 
-    scores = slots.get("_interest_scores")
+    # Re-read fresh slots to avoid overwriting changes made by concurrent message jobs
+    current = await get_slots(session_id) or {}
+    if current.get("_escalation_sent"):
+        return
+
+    scores = current.get("_interest_scores")
     if not isinstance(scores, list):
         scores = []
-
     scores.append(score)
     scores = scores[-5:]
-    slots["_interest_scores"] = scores
-    slots["_interest_score_last"] = score
-    await set_slots(session_id, slots)
+    current["_interest_scores"] = scores
+    current["_interest_score_last"] = score
+    await set_slots(session_id, current)
 
     confidence = float(signal.get("confidence", 0.0) or 0.0)
     wants_handoff = bool(signal.get("escalate"))
@@ -421,7 +431,7 @@ async def maybe_escalate_from_signal(
     next_step = str(signal.get("next_step") or "none")
 
     if wants_handoff and next_step == "handoff_manager" and confidence >= 0.80 and score >= 85:
-        await maybe_escalate(session_id, slots, reason=f"{reason_hint}:{reason}")
+        await maybe_escalate(session_id, current, reason=f"{reason_hint}:{reason}")
 
 
 async def maybe_escalate_by_llm_signal(
@@ -445,10 +455,6 @@ async def maybe_escalate_by_llm_signal(
     except Exception:
         logger.exception("set_client_need from escalation signal failed (ignored)")
 
-    scores = slots.get("_interest_scores")
-    if not isinstance(scores, list):
-        scores = []
-
     try:
         score = int(signal.get("interest_score", 0) or 0)
     except Exception:
@@ -457,18 +463,26 @@ async def maybe_escalate_by_llm_signal(
     if had_unknown_kb:
         score = min(100, score + 10)
 
+    # Re-read fresh slots to avoid overwriting changes made by concurrent message jobs
+    current = await get_slots(session_id) or {}
+    if current.get("_escalation_sent"):
+        return
+
+    scores = current.get("_interest_scores")
+    if not isinstance(scores, list):
+        scores = []
     scores.append(score)
     scores = scores[-5:]
-    slots["_interest_scores"] = scores
-    slots["_interest_score_last"] = score
-    slots["_escalation_signal_last"] = {
+    current["_interest_scores"] = scores
+    current["_interest_score_last"] = score
+    current["_escalation_signal_last"] = {
         "escalate": bool(signal.get("escalate")),
         "reason": signal.get("reason"),
         "interest_score": score,
         "confidence": float(signal.get("confidence", 0.0) or 0.0),
         "next_step": signal.get("next_step"),
     }
-    await set_slots(session_id, slots)
+    await set_slots(session_id, current)
 
     confidence = float(signal.get("confidence", 0.0) or 0.0)
     wants_handoff = bool(signal.get("escalate"))
@@ -477,9 +491,9 @@ async def maybe_escalate_by_llm_signal(
 
     if wants_handoff and next_step == "handoff_manager":
         if reason == "ready_to_open" and confidence >= 0.5 and score >= 60:
-            await maybe_escalate(session_id, slots, reason=f"{reason_hint}:{reason}")
+            await maybe_escalate(session_id, current, reason=f"{reason_hint}:{reason}")
             return
 
     if confidence >= 0.65 and _two_of_last_three(scores, 70):
-        await maybe_escalate(session_id, slots, reason=f"{reason_hint}:{reason}")
+        await maybe_escalate(session_id, current, reason=f"{reason_hint}:{reason}")
         return

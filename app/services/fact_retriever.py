@@ -373,6 +373,16 @@ async def retrieve_facts(
         candidates = _build_candidate_profiles(top_chunks, client_type=client_type, priority=priority)
         # Only explicitly ACTIVE banks pass; unknown/PAUSE/None are excluded
         active = [c for c in candidates if c.get("status") == "ACTIVE"]
+        # Filter by client_type: exclude banks not serving the requested type
+        if client_type:
+            active = [c for c in active if c.get("client_type") in (client_type, "ANY")]
+        # Deduplicate by bank name (keep highest rank_score per bank)
+        seen_banks: Dict[str, Dict] = {}
+        for c in active:
+            bank = c.get("bank", "")
+            if bank not in seen_banks or c.get("rank_score", 0) > seen_banks[bank].get("rank_score", 0):
+                seen_banks[bank] = c
+        active = list(seen_banks.values())
         facts: Dict[str, Any] = {
             "all_found_banks": active,
             "bank": active[0]["bank"] if active else None,
