@@ -10,10 +10,11 @@ from app.knowledge_base.service import get_kb, _kb_query_variants, _extract_bank
 from app.logging import logger
 
 QUERY_MODE_FILTER_MAP: Dict[str, List[str]] = {
-    "pricing":       ["pricing", "availability", "bonus"],
-    "docs":          ["docs"],
-    "specific_bank": ["pricing", "feature", "availability", "constraint", "docs", "bonus"],
-    "bank_selection":["selection", "availability", "feature", "pricing", "bonus"],
+    "pricing":       ["pricing", "availability", "bonus", "selection"],
+    "docs":          ["docs", "constraint"],
+    "specific_bank": ["pricing", "feature", "availability", "constraint", "docs", "bonus", "selection"],
+    "bank_selection":["selection", "availability", "feature", "pricing", "bonus", "constraint"],
+    "process":       ["constraint", "internal_ops"],
     "smalltalk":     [],
     "service":       [],
     "intro":         [],
@@ -101,10 +102,15 @@ def _build_bank_profile(chunks: list, *, client_type: Optional[str] = None) -> D
                 profile["bonus_rate"] = fact
 
         if ch_type == "docs" and fact and fact not in profile["docs"]:
-            profile["docs"].append(fact)
+            ct_list = getattr(ch, "client_type", None) or []
+            if not client_type or not ct_list or client_type in ct_list:
+                profile["docs"].append(fact)
 
         if ch_type == "constraint" and fact and fact not in profile["constraints"]:
-            profile["constraints"].append(fact)
+            # Only include constraints that match the requested client_type (or have no type restriction)
+            ct_list = getattr(ch, "client_type", None) or []
+            if not client_type or not ct_list or client_type in ct_list:
+                profile["constraints"].append(fact)
 
     return profile
 
@@ -383,10 +389,33 @@ async def retrieve_facts(
             if bank not in seen_banks or c.get("rank_score", 0) > seen_banks[bank].get("rank_score", 0):
                 seen_banks[bank] = c
         active = list(seen_banks.values())
+
+        # Collect constraint-type chunks whose aliases match the user query
+        # (alias-match required to avoid showing irrelevant constraints via semantic ranking)
+        q_lower = (question or "").lower()
+        constraints: List[str] = []
+        for ch in top_chunks:
+            if getattr(ch, "type", "") == "constraint":
+                fact = getattr(ch, "fact", None)
+                if not fact:
+                    continue
+                ct_list = getattr(ch, "client_type", None) or []
+                if client_type and ct_list and client_type not in ct_list:
+                    continue  # wrong client_type
+                aliases = getattr(ch, "aliases", None) or []
+                # Only match aliases with 3+ chars to avoid false positives from prepositions ("с", "и")
+                has_alias_match = any(
+                    len(alias) >= 3 and alias.lower() in q_lower
+                    for alias in aliases
+                )
+                if has_alias_match and fact not in constraints:
+                    constraints.append(fact)
+
         facts: Dict[str, Any] = {
             "all_found_banks": active,
             "bank": active[0]["bank"] if active else None,
             "client_type": client_type,
+            "constraints": constraints,
         }
         confidence = min(1.0, len(active) * 0.3 + (0.3 if max_score > 0.2 else 0.0))
         reason = "top_matches" if active else "empty"

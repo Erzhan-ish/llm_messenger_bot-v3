@@ -69,10 +69,34 @@ from app.storage.repositories.sessions_repo import (
     touch_session_activity,
 )
 from app.storage.repositories.jobs_repo import has_newer_queued_job
+from app.services.llm_enrichment import llm_extract_missing_slots, llm_objection_reply, llm_ack_reply
 
 from datetime import datetime
 
 scenario = "INBOUND_QUESTION"
+
+_FRUSTRATION_RE = re.compile(
+    r"\b(я\s+же\s+(уже\s+)?(объяснил|сказал|написал|говорил|описал)"
+    r"|так\s+я\s+же|уже\s+ж(е)?\s+(написал|говорил|сказал|объяснил)"
+    r"|я\s+уже\s+(говорил|сказал|написал|объяснил|писал))\b",
+    re.I | re.U,
+)
+
+# Consent / readiness signal — searchable anywhere in text (not anchored)
+_CONSENT_SEARCH_RE = re.compile(
+    r"(мне\s+подходит|это\s+подходит|подходит|устраивает|сойд[её]т"
+    r"|договорились|начинаем|оформляем|приступаем|по\s+рукам"
+    r"|готов\s+открыть|хочу\s+открыть|давайте\s+оформим|готов\s+к\s+оформлению)",
+    re.I | re.U,
+)
+
+# Short neutral follow-ups after consent that don't ask for new info
+_READY_FOLLOWUP_RE = re.compile(
+    r"^\s*(давайте|ок|окей|хорошо|отлично|договорились|начинаем|продолжаем"
+    r"|продолжим|что\s+дальше|как\s+дальше|дальше\s+что|и\s+что\s+теперь"
+    r"|и\s+что\s+дальше|принято|понял)\s*[.!?]?\s*$",
+    re.I | re.U,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +233,12 @@ async def process_message(message):
                 "Session {} | Debounce: skipping job {} — newer message from user {} is pending",
                 session.id, job_id, message.external_user_id,
             )
+            # Preserve consent signal so the next job can trigger handoff
+            if _CONSENT_SEARCH_RE.search(message.text or ""):
+                _dslots = await get_slots(session.id) or {}
+                _dslots["_had_consent"] = True
+                await set_slots(session.id, _dslots)
+                logger.info("Session {} | Debounce: consent signal saved to slots", session.id)
             return
 
     slots = await get_slots(session.id) or DEFAULT_SLOTS.copy()
@@ -307,8 +337,10 @@ async def process_message(message):
             slots["sales_stage"]    = "OBJECTION"
             slots["objection_type"] = OBJECTION_TYPE_MAP.get(objection, "other")
             await set_slots(session.id, slots)
-            reply = _objection_reply(objection, seed=user_text)
-            await send_bot(session, message.channel, message.external_user_id, reply, slots)
+            reply = await llm_objection_reply(objection, user_text, slots)
+            await send_bot(session, message.channel, message.external_user_id, reply, slots,
+                           query_mode="default", processing_start=processing_start,
+                           client_msg_len=len(user_text))
             return
 
         # --- STEP 2: Contextual Short reply handling ---
@@ -324,9 +356,53 @@ async def process_message(message):
             slots.pop("_pending_question_type", None)
             await set_slots(session.id, slots)
 
+        # --- STEP 2a: Prior-consent fast-path ---
+        # If a debounced message saved _had_consent, and the current message is a neutral
+        # follow-up ("давайте", "ок", etc.) or also contains consent → skip to handoff.
+        if slots.get("_had_consent"):
+            slots.pop("_had_consent", None)
+            if _CONSENT_SEARCH_RE.search(user_text) or _READY_FOLLOWUP_RE.match(user_text):
+                logger.info(f"Session {session.id} | Prior consent + neutral follow-up → handoff")
+                _bridge = _build_handoff_bridge(slots, "ready_to_open")
+                _invalidate_last_context(slots, reason="handoff")
+                await set_slots(session.id, slots)
+                await maybe_escalate(session.id, slots, reason="ready_to_open")
+                await send_bot(session, message.channel, message.external_user_id, _bridge, slots)
+                return
+            # User said something substantive after consent — proceed normally (consent consumed)
+            await set_slots(session.id, slots)
+
+        # --- STEP 2b: Frustration / repetition detection ---
+        # "так я же уже объяснил" — user is repeating themselves, use existing context
+        if _FRUSTRATION_RE.search(user_text) and slots.get("client_type"):
+            # If the frustration message itself contains consent ("я же сказал мне подходит")
+            # → handoff, not a repeat of the bank presentation
+            if _CONSENT_SEARCH_RE.search(user_text):
+                logger.info(f"Session {session.id} | Frustration with consent → handoff")
+                _bridge = _build_handoff_bridge(slots, "ready_to_open")
+                _invalidate_last_context(slots, reason="handoff")
+                await set_slots(session.id, slots)
+                await maybe_escalate(session.id, slots, reason="ready_to_open")
+                await send_bot(session, message.channel, message.external_user_id, _bridge, slots)
+                return
+            logger.info(
+                f"Session {session.id} | Frustration/repeat detected — routing to bank_selection with context"
+            )
+            decision = {
+                "stage": "PRESENTATION", "action": "ANSWER",
+                "query_mode": "bank_selection",
+                "needs_kb": True, "needs_handoff": False,
+                "confidence": 0.85, "handoff_reason": None,
+            }
+        else:
+            decision = None  # will be set in STEP 3
+
         # --- STEP 3: Narrow Classifier (with follow-up context check) ---
         last_mode = slots.get("_last_mode")
-        if (
+        if decision is not None:
+            # Decision already set in STEP 2b (frustration/repeat detection)
+            pass
+        elif (
             is_short
             and last_mode in ("specific_bank", "pricing", "bank_selection", "docs")
             and _FOLLOWUP_RE.match(user_text)
@@ -342,6 +418,15 @@ async def process_message(message):
         else:
             decision = await detect_stage_and_action(user_text)
         logger.info(f"Session {session.id} | Stage: {decision['stage']} | Action: {decision['action']} | Mode: {decision.get('query_mode')}")
+
+        # --- STEP 3b: LLM slot enrichment (only when KB is needed and client_type is missing) ---
+        if (
+            decision.get("needs_kb")
+            and not slots.get("client_type")
+            and len(user_text.split()) > 4
+        ):
+            await llm_extract_missing_slots(user_text, slots)
+            await set_slots(session.id, slots)
 
         # --- STEP 4: Early Handoff ---
         if decision["action"] == "HANDOFF":

@@ -287,6 +287,7 @@ def _plan_bank_selection(base: dict, facts: dict, slots: dict,
                           client_type, priority) -> dict:
     all_banks  = facts.get("all_found_banks") or []
     candidates = [c for c in all_banks if c.get("status") == "ACTIVE" and c.get("rank_score", 0) > 0]
+    constraints = facts.get("constraints") or []
 
     if not candidates:
         if not client_type:
@@ -306,6 +307,7 @@ def _plan_bank_selection(base: dict, facts: dict, slots: dict,
         base["bank"]        = c["bank"]
         base["client_type"] = c.get("client_type") or client_type
         base["candidates"]  = candidates
+        base["constraints"] = constraints
         base["allowed_points"] = _candidate_points([c])
         if not client_type:
             base["question_to_ask"] = "client_type"
@@ -319,12 +321,15 @@ def _plan_bank_selection(base: dict, facts: dict, slots: dict,
     top = candidates[:3]
 
     if is_first_selection:
-        return _plan_selection_opening(base, top, slots, client_type, priority)
+        plan = _plan_selection_opening(base, top, slots, client_type, priority)
+        plan["constraints"] = constraints
+        return plan
 
     # Repeat / explicit comparison request → compare
     base["action"]     = "compare"
     base["intent"]     = "bank_selection"
     base["candidates"] = top
+    base["constraints"] = constraints
     if not client_type:
         base["question_to_ask"] = "client_type"
         slots["_pending_question_type"] = "client_type"
@@ -338,12 +343,32 @@ def _plan_bank_selection(base: dict, facts: dict, slots: dict,
 
 def _plan_factual(base: dict, qmode: str, facts_result: dict, facts: dict,
                    slots: dict, decision: dict, client_type, confidence: float) -> dict:
-    """Plan for specific_bank / pricing / docs."""
+    """Plan for specific_bank / pricing / docs / process."""
     if facts_result.get("retrieval_reason") == "conflict":
         return _plan_handoff(base, qmode, "data_conflict")
 
     bank_profile = facts.get("bank_profile") or {}
     bank         = bank_profile.get("bank") or facts.get("bank")
+
+    # Process/constraint query: answer directly from constraints, no bank required
+    if qmode == "process":
+        constraints = bank_profile.get("constraints") or facts.get("constraints") or []
+        if constraints:
+            base["action"]      = "answer"
+            base["intent"]      = "process"
+            base["constraints"] = constraints
+            base["bank"]        = bank
+            base["client_type"] = bank_profile.get("client_type") or client_type
+            if not bank:
+                # Constraints found but no bank — ask which bank they prefer
+                q = "bank_name" if client_type else "client_type"
+                base["question_to_ask"] = q
+                slots["_pending_question_type"] = q
+            return base
+        # No constraints found → clarify based on what we know
+        if client_type:
+            return _plan_clarify(base, qmode, "bank_name", slots)
+        return _plan_clarify(base, qmode, "other", slots)
 
     # Generic pricing/docs query with no known client_type and no explicit bank → clarify first
     if not client_type and qmode in ("pricing", "docs") and not slots.get("bank_name"):
@@ -358,6 +383,7 @@ def _plan_factual(base: dict, qmode: str, facts_result: dict, facts: dict,
 
     if bank_profile.get("status") == "PAUSE":
         base["intent"] = "no_candidates"
+        base["bank"] = bank
         return base
 
     items: list = []

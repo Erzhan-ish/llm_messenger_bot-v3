@@ -7,6 +7,9 @@ from typing import Dict, Optional
 """Session slots — runtime extraction and normalization."""
 
 DEFAULT_SLOTS: Dict[str, Optional[object]] = {
+    # Debtor context
+    "procedure_type":         None,  # "restructuring" / "liquidation" / "external_management" / "competitive"
+    "debtor_status":          None,  # "deceased" / "non_resident" / "liquidated"
     # Internal tracking
     "_introduced":            False,
     "_escalation_sent":       False,
@@ -139,7 +142,12 @@ def extract_runtime_slots(text: str, slots: Dict) -> Dict:
     t = (text or "").strip().lower()
 
     # 1. Pending slot resolution — attempt to close before general extraction
+    # If user sends a substantive message (>6 words) that doesn't look like a direct answer,
+    # the pending question is stale — clear it to avoid misrouting.
     pending = slots.get("_pending_question_type")
+    if pending and len(t.split()) > 6:
+        slots.pop("_pending_question_type", None)
+        pending = None
     if pending == "client_type":
         if any(x in t for x in ["ооо", "юр лицо", "юр.", "юл", "юрлицо", "организация", "компания"]):
             slots["client_type"] = "ЮЛ"
@@ -168,7 +176,8 @@ def extract_runtime_slots(text: str, slots: Dict) -> Dict:
 
     # First pass: set if unknown
     if not slots.get("client_type"):
-        if any(x in t for x in ["физ лицо", "фл", "физлицо", "физическое лицо"]):
+        if any(x in t for x in ["физ лицо", "фл", "физлицо", "физическое лицо",
+                                  "должник", "банкрот", "списывают долги", "физик"]):
             slots["client_type"] = "ФЛ"
         elif any(x in t for x in ["ооо", "юр лицо", "юл", "юрлицо", "организаци"]):
             slots["client_type"] = "ЮЛ"
@@ -230,7 +239,25 @@ def extract_runtime_slots(text: str, slots: Dict) -> Dict:
     if email:
         slots["email"] = email
 
-    # 8. Client style (accumulated signals)
+    # 8. procedure_type (тип процедуры банкротства)
+    if not slots.get("procedure_type"):
+        if any(x in t for x in ["реструктуризаци", "реструктур"]):
+            slots["procedure_type"] = "restructuring"
+        elif any(x in t for x in ["реализаци имущества", "реализаци", "конкурсное производств"]):
+            slots["procedure_type"] = "liquidation"
+        elif any(x in t for x in ["внешнее управлени", "внешн управлени"]):
+            slots["procedure_type"] = "external_management"
+
+    # 9. debtor_status (особый статус должника)
+    if not slots.get("debtor_status"):
+        if any(x in t for x in ["умер", "покойн", "скончал", "посмертн"]):
+            slots["debtor_status"] = "deceased"
+        elif any(x in t for x in ["нерезидент", "иностранец", "иностранная компани", "иностранн организаци"]):
+            slots["debtor_status"] = "non_resident"
+        elif any(x in t for x in ["ликвидирован", "уже ликвидирован", "ликвидаци завершен"]):
+            slots["debtor_status"] = "liquidated"
+
+    # 10. Client style (accumulated signals)
     _update_client_style(text, slots)
 
     return slots

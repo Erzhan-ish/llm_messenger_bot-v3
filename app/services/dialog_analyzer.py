@@ -1,7 +1,9 @@
 """Dialog analyzer — determines routing (stage/action/query_mode).
 
-Rule-based paths cover the majority of cases.
-LLM fallback (OLLAMA_ANALYZER_MODEL) is used only when rules don't match.
+Variant C — LLM-first routing:
+  Rules handle only unambiguous trivial cases (greeting, ack, thanks, intro,
+  explicit operator request, explicit send-intent).
+  Everything substantive goes to LLM (OLLAMA_ANALYZER_MODEL).
 """
 from __future__ import annotations
 
@@ -18,7 +20,7 @@ DialogStage  = Literal[
     "OOD", "FOLLOW_UP", "SERVICE", "OTHER", "INTRO", "ACK", "THANKS", "BANK_SELECTION",
 ]
 DialogAction = Literal["ANSWER", "CLARIFY", "HANDOFF", "STOP"]
-QueryMode    = Literal["service", "smalltalk", "intro", "specific_bank", "bank_selection", "docs", "pricing"]
+QueryMode    = Literal["service", "smalltalk", "intro", "specific_bank", "bank_selection", "docs", "pricing", "process"]
 IntentType   = Literal["PRICING", "OPEN_SPECIAL_ACCOUNT", "OPEN_ACCOUNT", "DOCUMENTS",
                         "CONSULTATION", "END_DIALOG", "OTHER"]
 NextStep     = Literal["none", "ask_clarify", "handoff_manager"]
@@ -45,7 +47,7 @@ _GREETING_RE = re.compile(
 _THANKS_RE = re.compile(r"\b(спасибо|благодарю|спс|от\s+души|благодарен)\b", re.I)
 _ACK_RE    = re.compile(
     r"^\s*(ок|окей|понял|хорошо|ясно|ладно|оки|всё?\s+понял|ага|угу|ок|о[кк]ей"
-    r"|понятно|ясненько|ладненько)\b",
+    r"|понятно|ясненько|ладненько|живой|да\s*,?\s*живой|живой\s*,?\s*да)\b",
     re.I,
 )
 # Short «thinking» sounds — only when the ENTIRE message is just these characters
@@ -54,40 +56,6 @@ _INTRO_RE  = re.compile(
     r"\b(кто\s+вы|что\s+за\s+компания|чем\s+занимаетесь|вы\s+кто|откуда\s+пишете"
     r"|что\s+вы\s+делаете|расскажите\s+о\s+(себе|компании)"
     r"|ты\s+бот|вы\s+бот|это\s+бот|ты\s+робот|вы\s+робот|живой\s+ли|человек\s+ли)\b",
-    re.I,
-)
-_PARTNER_BANKS_DIRECT_RE = re.compile(
-    r"(с\s+кем\s+(вы\s+)?(работаете|сотрудничаете)|какие\s+банки\s+у\s+вас"
-    r"|с\s+какими\s+банками\s+(вы\s+)?работаете|ваши\s+банки"
-    r"|список\s+банков|с\s+какими\s+партнерами|банки\s*[?!]\s*$)",
-    re.I,
-)
-_BANK_SEL_RE = re.compile(
-    r"\b(подобрать|подберем|подберём|выбрать|какой\s+лучше|варианты|посоветуете|какой\s+подойдет"
-    r"|что\s+посоветуете|сравните|сравни|лучший\s+банк|подходящий\s+банк"
-    r"|какой\s+банк|какие\s+банки|какими\s+банками"
-    r"|какой\s+рекомендуете"
-    r"|для\s+(физ|юр|физических|юридических)\s+лиц"
-    r"|нужен\s+(банк|счет|счёт)|нужно\s+открыть|хочу\s+(открыть|счет|счёт)|открыть\s+счет|открыть\s+счёт"
-    r"|нужен\s+рко|нужно\s+рко)\b",
-    re.I,
-)
-# Signals that a greeting message contains a real account/bank need
-_BANK_NEED_RE = re.compile(
-    r"\b(банк|счет|счёт|рко|нужен|открыть|тариф|стоимост|для\s+(физ|юр|ип)\b)",
-    re.I,
-)
-_SPECIFIC_BANK_RE = re.compile(
-    r"\b(альфа|ткб|уралсиб|т-банк|тинькофф|мкб|росбанк|россельхоз)\b", re.I
-)
-_DOCS_RE = re.compile(
-    r"\b(документ|докум|паспорт|инн|огрн|устав|справк|выписк|что\s+нужно\s+принести"
-    r"|какие\s+документы|список\s+документ)",
-    re.I,
-)
-_PRICING_RE = re.compile(
-    r"\b(тариф|стоимост|цен|комисси|сколько\s+стоит|бесплатн|обслуживани"
-    r"|плата|ежемесячн|открыт|рко|ведение)",
     re.I,
 )
 _HANDOFF_RE = re.compile(
@@ -106,86 +74,57 @@ _ACTION_SEND_RE = re.compile(
     r"|буду\s+отправлять|сейчас\s+пришлю|сейчас\s+отправлю|уже\s+отправляю)\b",
     re.I | re.U,
 )
-_CONSENT_RE = re.compile(
-    r"\b(оформляем|оформить|открывайте|давайте\s+начнем|давайте\s+оформим"
-    r"|что\s+дальше|куда\s+оплатить|готов\s+начать|согласен|начнем|поехали"
-    r"|приступим|открыть\s+счет|хочу\s+открыть)\b",
-    re.I,
-)
-# Standalone client-type statement (answer to "для кого нужен счёт?")
-_CLIENT_TYPE_STMT_RE = re.compile(
-    r"(физ[\.\s]?лиц[ао]|физическое\s+лиц[ао]|физлицо|\bфл\b"
-    r"|юр[\.\s]?лиц[ао]|юридическое\s+лиц[ао]|юрлицо|\bюл\b"
-    r"|должник\s+(фл|юл|физ|юр))",
+
+# Согласие / готовность — прямые сигналы без дополнительного вопроса → HANDOFF
+_READY_RE = re.compile(
+    r"^\s*(да\s*,?\s*)?(мне\s+подходит|это\s+подходит|подходит|устраивает|устраивает\s+меня"
+    r"|сойд[её]т|по\s+рукам|оформляем|договорились|начинаем|хочу\s+открыть"
+    r"|готов\s+открыть|давайте\s+оформим|давайте\s+начнём|давайте\s+начнем"
+    r"|готов\s+к\s+оформлению|приступаем)\s*[.!?]?\s*$",
     re.I | re.U,
 )
 
-
 def _get_rule_based_decision(text: str) -> Optional[DecisionSignal]:
+    """
+    Handles only unambiguous trivial cases instantly — no false positives.
+    Everything substantive falls through to LLM.
+    """
     t = (text or "").strip()
 
+    # Pure greeting — no content after
     if _GREETING_RE.match(t):
-        # Strip greeting prefix and check if substantive intent follows
         stripped = _GREETING_RE.sub("", t).strip(" ,!.?—")
         if stripped and len(stripped.split()) >= 2:
-            substantive = _get_rule_based_decision(stripped)
-            if substantive and substantive.get("query_mode") not in ("service",):
-                return substantive
-            # Fallback: any signal of a bank/account need → route to bank_selection
-            if _BANK_NEED_RE.search(stripped):
-                return _d("BANK_SELECTION", "ANSWER", "bank_selection", needs_kb=True, conf=0.75)
-        return _d("GREETING",      "ANSWER", "service",       needs_kb=False, conf=1.0)
-    if _THANKS_RE.search(t) and len(t.split()) <= 5:
-        return _d("THANKS",        "ANSWER", "service",       needs_kb=False, conf=1.0)
-    if _ACK_RE.match(t) and len(t.split()) <= 4:
-        return _d("ACK",           "ANSWER", "service",       needs_kb=False, conf=1.0)
-    if _PONDER_RE.match(t):
-        return _d("ACK",           "ANSWER", "service",       needs_kb=False, conf=1.0)
-    if _INTRO_RE.search(t):
-        return _d("INTRO",         "ANSWER", "intro",         needs_kb=False, conf=1.0)
+            # Greeting + substantive content → let LLM handle the full message
+            return None
+        return _d("GREETING", "ANSWER", "service", needs_kb=False, conf=1.0)
 
-    # Намерение что-то отправить/прислать → сразу менеджеру
+    # Short social messages — always unambiguous
+    if _THANKS_RE.search(t) and len(t.split()) <= 5:
+        return _d("THANKS", "ANSWER", "service", needs_kb=False, conf=1.0)
+    if _ACK_RE.match(t) and len(t.split()) <= 4:
+        return _d("ACK",    "ANSWER", "service", needs_kb=False, conf=1.0)
+    if _PONDER_RE.match(t):
+        return _d("ACK",    "ANSWER", "service", needs_kb=False, conf=1.0)
+    if _INTRO_RE.search(t):
+        return _d("INTRO",  "ANSWER", "intro",   needs_kb=False, conf=1.0)
+
+    # Explicit document-sending intent — always HANDOFF, no context needed
     if _ACTION_SEND_RE.search(t):
-        return _d("DOC_TRANSFER",  "HANDOFF","service",       needs_kb=False,
+        return _d("DOC_TRANSFER", "HANDOFF", "service", needs_kb=False,
                   needs_handoff=True, handoff_reason="action_intent", conf=0.95)
 
-    # Explicit handoff / operator request
+    # Explicit operator/manager request — always HANDOFF
     if _HANDOFF_RE.search(t):
-        return _d("SERVICE",       "HANDOFF","service",       needs_kb=False,
+        return _d("SERVICE", "HANDOFF", "service", needs_kb=False,
                   needs_handoff=True, handoff_reason="human_request", conf=0.95)
 
-    # Consent signals -> handoff
-    if _CONSENT_RE.search(t):
-        return _d("DOC_TRANSFER",  "HANDOFF","service",       needs_kb=False,
-                  needs_handoff=True, handoff_reason="ready_to_open", conf=0.90)
+    # Agreement / ready-to-open signals — always HANDOFF
+    if _READY_RE.match(t):
+        return _d("DOC_TRANSFER", "HANDOFF", "service", needs_kb=False,
+                  needs_handoff=True, handoff_reason="ready_to_open", conf=0.95)
 
-    # Partner banks direct intent (before bank_selection to avoid wrong routing)
-    if _PARTNER_BANKS_DIRECT_RE.search(t):
-        return _d("PRESENTATION",  "ANSWER", "partner_banks", needs_kb=False, conf=0.95)
-
-    # Bank selection (generic)
-    if _BANK_SEL_RE.search(t) and not _SPECIFIC_BANK_RE.search(t):
-        return _d("BANK_SELECTION","ANSWER", "bank_selection",needs_kb=True,  conf=0.90)
-
-    # Docs only
-    if _DOCS_RE.search(t) and not _PRICING_RE.search(t):
-        return _d("PRESENTATION",  "ANSWER", "docs",          needs_kb=True,  conf=0.85)
-
-    # Specific bank mentioned + pricing keywords
-    if _SPECIFIC_BANK_RE.search(t):
-        if _PRICING_RE.search(t) or _DOCS_RE.search(t):
-            return _d("PRESENTATION","ANSWER","specific_bank", needs_kb=True,  conf=0.88)
-        # Bank mentioned without clear intent -> specific_bank to get profile
-        return _d("PRESENTATION",  "ANSWER", "specific_bank", needs_kb=True,  conf=0.75)
-
-    # Generic pricing query (no specific bank)
-    if _PRICING_RE.search(t):
-        return _d("PRESENTATION",  "ANSWER", "pricing",       needs_kb=True,  conf=0.80)
-
-    # Client-type statement ("физ лицо должник", "юр лицо", "фл" etc.) → bank selection
-    if _CLIENT_TYPE_STMT_RE.search(t):
-        return _d("BANK_SELECTION", "ANSWER", "bank_selection", needs_kb=True, conf=0.85)
-
+    # Everything else → LLM
     return None
 
 
@@ -219,35 +158,99 @@ def _d(
 # ---------------------------------------------------------------------------
 
 CLASSIFIER_PROMPT = """
-Ты — узкоспециализированный роутер диалогов. Проанализируй последнее сообщение клиента.
+Ты — роутер диалогов для бота «В плюсе». Компания помогает арбитражным управляющим (АУ) открывать счета для должников в банках-партнёрах: Альфа-Банк, ТКБ, Уралсиб, МКБ, Росбанк, Т-Банк.
+
+Проанализируй сообщение клиента и верни СТРОГО JSON без пояснений.
 
 ### QUERY_MODES:
-- service: приветствие, ACK, благодарность, короткие нейтральные реплики.
-- smalltalk: не по теме (OOD).
-- intro: клиент спрашивает, кто вы, что за компания.
-- specific_bank: вопрос про КОНКРЕТНЫЙ банк (Альфа, ТКБ и т.д.).
-- bank_selection: просит ПОДОБРАТЬ или СРАВНИТЬ банки.
-- docs: только про документы.
-- pricing: тарифы/цены без конкретного банка.
+- specific_bank: вопрос про конкретный банк (тарифы, документы, условия, статус). Банки: Альфа/Альфе/Альфы, ТКБ, Уралсиб/Уралсибе, Тинькофф/Т-Банк, МКБ, Росбанк.
+- bank_selection: сравнить банки, подобрать банк, спросить «где дешевле/лучше».
+- docs: документы для открытия счёта (без конкретного банка или с банком).
+- pricing: тарифы/цены/комиссии без конкретного банка.
+- process: вопрос о правилах/ограничениях/возможностях («можно ли», «как работает», «разрешено ли», «возможно ли» — без конкретного банка). Примеры: «можно карту оформить?», «можно подписать по доверенности?», «допускается ли открыть счёт умершему?».
+- partner_banks: спрашивает список банков-партнёров («с кем работаете», «какие банки»).
+- service: короткая нейтральная реплика, приветствие, благодарность, ACK.
+- smalltalk: совсем не по теме.
+- intro: кто вы, что за компания, бот или человек.
 
 ### ACTIONS:
-- ANSWER: содержательный ответ (только консультация).
-- CLARIFY: нужно уточнение от клиента.
-- HANDOFF: нужен живой менеджер — клиент готов открыть счёт, хочет позвонить/отправить документы/сделать что-то конкретное, просит оператора, конфликт.
-- STOP: агрессия / диалог завершён.
+- ANSWER: информационный вопрос — надо ответить по базе знаний.
+- CLARIFY: нужно уточнить тип клиента или другие детали.
+- HANDOFF: нужен живой менеджер. Признаки:
+    * клиент прямо говорит «оформляем», «давайте начнём», «готов открыть» (без вопроса)
+    * нестандартный/сложный случай: нерезидент, иностранная компания, умерший, банкрот-иностранец
+    * срочность + готовность: «торги через 5 дней, нужно срочно открыть»
+    * явный конфликт или жалоба
+- STOP: агрессия, угрозы.
 
-ВАЖНО: любое намерение совершить действие (открыть счёт, отправить документы, позвонить, получить реквизиты и т.д.) → всегда HANDOFF, не ANSWER.
+### ПРАВИЛА:
+1. Вопрос про документы конкретного банка → specific_bank (не docs).
+2. «Хочу открыть счёт в Альфе, какие документы?» → specific_bank / ANSWER (вопрос, не готовность).
+3. «Давайте оформляем» без вопроса → service / HANDOFF.
+4. Опечатки и падежные формы банков считаются: «Альфе», «Уралсибе», «тинькофф», «ткб».
+5. ИП — не юридическое лицо, routing как для ИП.
+6. Нестандартные случаи (нерезидент, умерший, арест счёта) → HANDOFF.
 
-Верни СТРОГО JSON без пояснений:
-{
-  "stage": "GREETING|PRESENTATION|BANK_SELECTION|OBJECTION|DOC_TRANSFER|OOD|FOLLOW_UP|SERVICE|OTHER|INTRO|ACK|THANKS",
-  "action": "ANSWER|CLARIFY|HANDOFF|STOP",
-  "query_mode": "service|smalltalk|intro|specific_bank|bank_selection|docs|pricing",
-  "needs_kb": true|false,
-  "needs_handoff": true|false,
-  "confidence": 0..1,
-  "handoff_reason": "human_request|ready_to_open|action_intent|complex_case|complaint|null"
-}
+### ПРИМЕРЫ:
+Сообщение: «Где дешевле открыть счет для ООО — в Альфе или в Уралсибе?»
+{"stage":"BANK_SELECTION","action":"ANSWER","query_mode":"bank_selection","needs_kb":true,"needs_handoff":false,"confidence":0.95,"handoff_reason":null}
+
+Сообщение: «Я ИП, мне Альфа-Банк откроет счет?»
+{"stage":"PRESENTATION","action":"ANSWER","query_mode":"specific_bank","needs_kb":true,"needs_handoff":false,"confidence":0.95,"handoff_reason":null}
+
+Сообщение: «Ххчу открыть счет в Тинькофф, какие документы нужны?»
+{"stage":"PRESENTATION","action":"ANSWER","query_mode":"specific_bank","needs_kb":true,"needs_handoff":false,"confidence":0.93,"handoff_reason":null}
+
+Сообщение: «У нас торги через 5 дней, нужно очень быстро открыть счет!»
+{"stage":"DOC_TRANSFER","action":"HANDOFF","query_mode":"service","needs_kb":false,"needs_handoff":true,"confidence":0.92,"handoff_reason":"ready_to_open"}
+
+Сообщение: «Нужно открыть счет на умершего человека для выплат»
+{"stage":"DOC_TRANSFER","action":"HANDOFF","query_mode":"service","needs_kb":false,"needs_handoff":true,"confidence":0.97,"handoff_reason":"complex_case"}
+
+Сообщение: «У меня клиент из Китая (компания), откроете счет?»
+{"stage":"DOC_TRANSFER","action":"HANDOFF","query_mode":"service","needs_kb":false,"needs_handoff":true,"confidence":0.95,"handoff_reason":"complex_case"}
+
+Сообщение: «Привет, хочу узнать про тарифы»
+{"stage":"PRESENTATION","action":"ANSWER","query_mode":"pricing","needs_kb":true,"needs_handoff":false,"confidence":0.90,"handoff_reason":null}
+
+Сообщение: «Сколько стоит перевод 200 000 руб. на физлицо в Альфа-Банке?»
+{"stage":"PRESENTATION","action":"ANSWER","query_mode":"specific_bank","needs_kb":true,"needs_handoff":false,"confidence":0.93,"handoff_reason":null}
+
+Сообщение: «Есть ли в Уралсибе дополнительные платежи за переводы?»
+{"stage":"PRESENTATION","action":"ANSWER","query_mode":"specific_bank","needs_kb":true,"needs_handoff":false,"confidence":0.95,"handoff_reason":null}
+
+Сообщение: «С какими банками вы работаете?»
+{"stage":"PRESENTATION","action":"ANSWER","query_mode":"partner_banks","needs_kb":false,"needs_handoff":false,"confidence":0.97,"handoff_reason":null}
+
+Сообщение: «хочу счет открыть, можно всё подписать по интернету, не выходя из дома?»
+{"stage":"PRESENTATION","action":"ANSWER","query_mode":"bank_selection","needs_kb":true,"needs_handoff":false,"confidence":0.91,"handoff_reason":null}
+
+Сообщение: «Сопровождаю человека, у которого списывают долги через суд. Можно ему карту сделать?»
+{"stage":"PRESENTATION","action":"ANSWER","query_mode":"bank_selection","needs_kb":true,"needs_handoff":false,"confidence":0.93,"handoff_reason":null}
+
+Сообщение: «Можно открыть счёт для физлица-должника?»
+{"stage":"PRESENTATION","action":"ANSWER","query_mode":"bank_selection","needs_kb":true,"needs_handoff":false,"confidence":0.95,"handoff_reason":null}
+
+Сообщение: «у моего должника физ лицо долги через суд списывают, мне нужно карту ему сделать»
+{"stage":"PRESENTATION","action":"ANSWER","query_mode":"bank_selection","needs_kb":true,"needs_handoff":false,"confidence":0.94,"handoff_reason":null}
+
+Сообщение: «Можно подписать документы по доверенности?»
+{"stage":"PRESENTATION","action":"ANSWER","query_mode":"process","needs_kb":true,"needs_handoff":false,"confidence":0.94,"handoff_reason":null}
+
+Сообщение: «Допускается ли открыть счёт для ликвидированной компании?»
+{"stage":"PRESENTATION","action":"ANSWER","query_mode":"process","needs_kb":true,"needs_handoff":false,"confidence":0.93,"handoff_reason":null}
+
+Сообщение: «это всё делается дистанционно или надо приезжать в банк?»
+{"stage":"PRESENTATION","action":"ANSWER","query_mode":"bank_selection","needs_kb":true,"needs_handoff":false,"confidence":0.90,"handoff_reason":null}
+
+Сообщение: «да мне подходит»
+{"stage":"DOC_TRANSFER","action":"HANDOFF","query_mode":"service","needs_kb":false,"needs_handoff":true,"confidence":0.93,"handoff_reason":"ready_to_open"}
+
+Сообщение: «устраивает, давайте оформим»
+{"stage":"DOC_TRANSFER","action":"HANDOFF","query_mode":"service","needs_kb":false,"needs_handoff":true,"confidence":0.95,"handoff_reason":"ready_to_open"}
+
+Верни JSON:
+{"stage":"...","action":"ANSWER|CLARIFY|HANDOFF|STOP","query_mode":"...","needs_kb":true|false,"needs_handoff":true|false,"confidence":0.0-1.0,"handoff_reason":"..."|null}
 """.strip()
 
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)

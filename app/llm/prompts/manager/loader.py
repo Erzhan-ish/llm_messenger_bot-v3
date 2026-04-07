@@ -100,29 +100,32 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
     data_text = "\n".join(data_lines) if data_lines else "Конкретных данных нет."
 
     # --- INSTRUCTIONS by action ---
-    if action == "answer":
+    if action == "answer" and intent == "process":
         instr = (
-            "Озвучь эти данные как менеджер — живо и коротко. "
+            "Ответь на вопрос клиента точно по ДАННЫЕ — только факты из раздела «Ограничения». "
+            "Передай смысл дословно, не смягчай и не опускай ключевые детали (кто именно выполняет действие, при каком условии). "
+            "Не добавляй ничего, чего нет в разделе ДАННЫЕ. "
+            "Максимум 2 предложения. В конце можно спросить один уточняющий вопрос."
+        )
+    elif action == "answer":
+        instr = (
+            "Озвучь эти данные как менеджер — живо, по-человечески, кратко. "
             "Не добавляй банков, сумм или условий, которых нет в разделе ДАННЫЕ. "
             "Максимум 2–3 предложения."
         )
         if question == "client_type":
-            instr += (
-                " В конце задай один вопрос: «Уточните, открываете счёт"
-                " как физическое лицо, ИП или ООО?»"
-            )
+            instr += " Уточни тип клиента — физлицо, ИП или ООО — своими словами, в конце."
         elif question:
             q_text = _Q_TEXTS.get(question, _Q_TEXTS["other"])
-            instr += f" В конце задай один вопрос: «{q_text}»"
+            instr += f" В конце задай один уточняющий вопрос: «{q_text}»"
         elif funnel_next == "docs":
-            instr += " В конце предложи: «Хотите узнать, какие документы понадобятся?»"
+            instr += " В конце предложи разобрать документы — своими словами, не шаблонно."
         elif funnel_next == "pricing":
-            instr += " В конце предложи: «Хотите разобрать условия по тарифам?»"
+            instr += " В конце предложи обсудить тарифы — своими словами, не шаблонно."
         else:
-            instr += " Если естественно — предложи один следующий шаг: документы, сравнение или детали тарифа."
+            instr += " Если есть логичный следующий шаг — предложи его одной фразой."
 
     elif action == "selection_opening":
-        # First-contact bank selection — warm framing, 1–2 options, one clear next step
         n_banks = len(candidates) or 1
         if n_banks == 1:
             instr = (
@@ -143,7 +146,7 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
             q_text = _Q_TEXTS.get(question, _Q_TEXTS["other"])
             instr += f" В конце задай один вопрос: «{q_text}»"
         else:
-            instr += " В конце предложи: «Разобрать подробнее — условия, документы или ограничения?»"
+            instr += " В конце задай один короткий вопрос — что клиенту интереснее разобрать дальше. Своими словами."
 
     elif action == "compare":
         n_banks = len(candidates)
@@ -158,7 +161,7 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
             q_text = _Q_TEXTS.get(question, _Q_TEXTS["other"])
             instr += f" Финальный вопрос: «{q_text}»"
         else:
-            instr += " В конце спроси: какой вариант разобрать подробнее?"
+            instr += " В конце предложи выбрать один вариант для детального разбора — своими словами."
 
     elif action == "clarify":
         q_text = _Q_TEXTS.get(question or "other", _Q_TEXTS["other"])
@@ -242,8 +245,12 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
     _ALL_TYPES = {"ФЛ", "ИП", "ЮЛ", "ООО"}
     if client_type and client_type in _ALL_TYPES:
         _forbidden_types = _ALL_TYPES - {client_type}
-        # Map synonyms
-        _syn = {"ЮЛ": ["ЮЛ", "ООО", "юрлицо"], "ФЛ": ["ФЛ", "физлицо", "физлицу"], "ИП": ["ИП"]}
+        # Map synonyms (include all grammatical forms to prevent LLM workarounds)
+        _syn = {
+            "ЮЛ": ["ЮЛ", "ООО", "юрлицо", "юридическое лицо", "юридических лиц", "юридическим лицом"],
+            "ФЛ": ["ФЛ", "физлицо", "физлицу", "физическое лицо", "физических лиц"],
+            "ИП": ["ИП"],
+        }
         _forbidden_words_set: list[str] = []
         _seen: set[str] = set()
         for ft in sorted(_forbidden_types):
@@ -252,9 +259,15 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
                     _forbidden_words_set.append(w)
                     _seen.add(w)
         _forbidden_words = _forbidden_words_set
-        client_type_restriction = (
-            f"Клиент — {client_type}. Не упоминай другие типы: {', '.join(_forbidden_words)}."
-        )
+        if client_type == "ИП":
+            client_type_restriction = (
+                "Клиент — ИП. ИП не является юридическим лицом. "
+                f"Не используй: {', '.join(_forbidden_words)}."
+            )
+        else:
+            client_type_restriction = (
+                f"Клиент — {client_type}. Не упоминай другие типы: {', '.join(_forbidden_words)}."
+            )
     else:
         client_type_restriction = ""
     num_restriction = (
@@ -308,7 +321,8 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
 - Максимум 1 вопрос в конце — только если он указан в задаче.
 - Не повторяй вопрос дважды.
 - Никогда не предлагай ссылки, прайс-листы, перезвонить, написать на почту, прислать файл или сделать что-либо вне этого чата — ты не можешь этого выполнить.
-- Пиши данные естественно: не «Открытие счёта — 1500 руб.», а «открытие 1500 руб.»; не ставь двоеточие между именем банка и данными.""".strip()
+- Пиши данные естественно: не «Открытие счёта — 1500 руб.», а «открытие 1500 руб.»; не ставь двоеточие между именем банка и данными.
+- Не используй шаблонные концовки: «Хотите разобрать подробнее?», «Что-то ещё уточнить?», «Если появятся вопросы — пишите», «Чем могу помочь?», «Разобрать подробнее — условия, документы или ограничения?». Завершай естественно, под контекст.""".strip()
 
 
 # ---------------------------------------------------------------------------

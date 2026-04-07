@@ -1,6 +1,7 @@
 """Response rendering: static templates, LLM render call, answer_with_plan pipeline."""
 from __future__ import annotations
 
+import re
 from typing import Tuple
 
 from app.llm.prompts.manager.loader import build_render_prompt
@@ -19,6 +20,7 @@ from app.processing.utils import (
 )
 from app.services.fact_retriever import retrieve_facts
 from app.services.fact_validator import validate_answer_against_facts, validate_plan
+from app.services.llm_enrichment import llm_ack_reply
 from app.services.sales_policy import update_sales_state
 from app.storage.repositories.messages_repo import get_messages_by_session
 from app.storage.repositories.sessions_repo import set_slots
@@ -163,6 +165,14 @@ def _plan_fallback_text(plan: dict) -> str:
     return _FALLBACK_TEXT
 
 
+# Commit-intent guard — if user text matches, skip all sales follow-up intercepts
+_COMMIT_GUARD_RE = re.compile(
+    r"(мне\s+подходит|это\s+подходит|подходит|устраивает|сойд[её]т"
+    r"|договорились|начинаем|оформляем|приступаем|по\s+рукам"
+    r"|готов\s+открыть|хочу\s+открыть|давайте\s+оформим|готов\s+к\s+оформлению)",
+    re.I | re.U,
+)
+
 _SELECTION_OPENING_ENDINGS = [
     "Разобрать подробнее — условия, документы или ограничения?",
     "Что интересует больше — документы для открытия или дополнительные условия?",
@@ -199,7 +209,7 @@ def _render_selection_opening_static(plan: dict) -> str:
     bank = c.get("bank", "")
     of   = c.get("opening_fee")
     mf   = c.get("monthly_fee")
-    bonus = c.get("bonus_rate") or c.get("main_feature") or ""
+    bonus = c.get("bonus_rate") or ""  # Never use main_feature as "бонус АУ" label
 
     parts = []
     if of is not None:
@@ -212,6 +222,11 @@ def _render_selection_opening_static(plan: dict) -> str:
     pricing = ", ".join(parts)
     # Use a comma instead of colon so it reads naturally: "рабочий вариант — ТКБ, открытие 1500 руб."
     body = f"{ct_prefix}рабочий вариант — {bank}" + (f", {pricing}" if pricing else "") + "."
+
+    # Prepend the first relevant constraint if present (e.g. "карта подписывается финансовым управляющим")
+    constraints = plan.get("constraints") or []
+    if constraints:
+        body = f"{constraints[0]} {body}"
 
     if question in _CLARIFY_VARIANTS:
         q_text = _CLARIFY_VARIANTS[question][0]
@@ -244,7 +259,11 @@ def _render_specific_bank_static(plan: dict) -> str:
         elif "Ведение" in label:
             fees.append(f"ведение {val}")
         elif "Бонус" in label:
-            fees.append(f"бонус АУ {val}")
+            # Avoid "бонус АУ Бонус в ТКБ..." duplication when value already starts with "Бонус"
+            if val.lower().startswith("бонус"):
+                fees.append(val)
+            else:
+                fees.append(f"бонус АУ {val}")
         else:
             fees.append(f"{label.lower()} {val}")
 
@@ -273,7 +292,13 @@ async def render_manager_text(plan: dict, *, user_text: str = "", dialog_ctx: st
     action = plan.get("action")
 
     if action == "service":
-        return _SERVICE_TEXTS.get(plan.get("intent", ""), _FALLBACK_TEXT)
+        intent = plan.get("intent", "")
+        if intent == "no_candidates" and plan.get("bank"):
+            return (
+                f"К сожалению, {plan['bank']} временно не принимает новые счета. "
+                f"Хотите рассмотреть другие банки-партнёры?"
+            )
+        return _SERVICE_TEXTS.get(intent, _FALLBACK_TEXT)
 
     if action == "handoff":
         return _HANDOFF_TEXT
@@ -283,14 +308,6 @@ async def render_manager_text(plan: dict, *, user_text: str = "", dialog_ctx: st
 
     if action == "partner_banks":
         return _render_partner_banks(plan)
-
-    # Single-bank selection_opening → static render, no LLM hallucinations
-    if action == "selection_opening" and len(plan.get("candidates") or []) <= 1:
-        return _render_selection_opening_static(plan)
-
-    # Single-bank answer with pricing items → static render prevents hallucinated values
-    if action == "answer" and plan.get("bank") and plan.get("items"):
-        return _render_specific_bank_static(plan)
 
     if action == "where_answer":
         bank = plan.get("bank")
@@ -340,6 +357,11 @@ async def render_manager_text(plan: dict, *, user_text: str = "", dialog_ctx: st
     val = validate_answer_against_facts(text, facts_for_val)
     if not val["is_valid"]:
         logger.warning("Render validation failed: {} — using safe fallback", val["reason"])
+        # Prefer type-specific static render over generic fallback
+        if action == "selection_opening":
+            return _render_selection_opening_static(plan)
+        if action == "answer" and plan.get("bank") and plan.get("items"):
+            return _render_specific_bank_static(plan)
         return _plan_fallback_text(plan)
 
     return text
@@ -362,7 +384,11 @@ async def answer_with_plan(
 
     update_sales_state(user_text, slots, decision)
 
-    followup_plan = try_build_followup_plan(user_text, slots)
+    # Skip sales follow-up intercepts when user has already committed — prevents
+    # pricing_expand / selection loops when "мне подходит" / "давайте" is in play.
+    followup_plan = None
+    if not _COMMIT_GUARD_RE.search(user_text) and not slots.get("_had_consent"):
+        followup_plan = try_build_followup_plan(user_text, slots)
     if followup_plan is not None:
         logger.info("Session {} | follow-up intercept | action={}", session_id, followup_plan.get("action"))
         followup_plan["_seed"] = user_text
@@ -417,6 +443,14 @@ async def answer_with_plan(
         else:
             slots.pop("_last_expected_followup", None)
             slots.pop("_last_expected_followup_turn", None)
+
+    # ACK intercept — generate a contextual reply when user says "хм" / "мм" with prior context
+    if plan.get("action") == "service" and plan.get("intent") == "ack":
+        ack_text = await llm_ack_reply(user_text, slots)
+        if ack_text:
+            logger.info("Session {} | LLM ack reply", session_id)
+            await set_slots(session_id, slots)
+            return ack_text, False
 
     pv = validate_plan(plan)
     if not pv["is_valid"]:

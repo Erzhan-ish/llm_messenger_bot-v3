@@ -27,8 +27,8 @@ def _get_known_banks() -> Set[str]:
         for ch in kb._chunks:
             if ch.bank:
                 known.add(ch.bank.lower())
-            for a in (ch.aliases or []):
-                known.add(a.lower())
+                for a in (ch.aliases or []):
+                    known.add(a.lower())
 
     # Safety: never treat generic verbs as banks
     known.discard("открытие")
@@ -70,9 +70,33 @@ def _extract_numbers(text: str) -> Set[str]:
 
 
 def _extract_client_types(text: str) -> Set[str]:
-    TYPES = ["ип", "ооо", "юрлицо", "физлицо", "фл", "юл", "самозанят"]
+    """
+    Extract client-type tokens from text, including all grammatical forms.
+    Returns canonical tokens: "ип", "юл", "фл", "самозанят".
+    """
     tl = text.lower()
-    return {t for t in TYPES if re.search(rf"\b{t}\b", tl)}
+    found: Set[str] = set()
+
+    # Short abbreviations
+    for short in ("фл", "юл", "ип", "ооо"):
+        if re.search(rf"\b{short}\b", tl):
+            found.add(short)
+
+    # Full forms — any declension
+    if re.search(r"\bюридич\w*", tl):          # юридического, юридическое, юридическим...
+        found.add("юл")
+    if re.search(r"\bюрлиц\w*", tl):           # юрлицо, юрлица
+        found.add("юл")
+    if re.search(r"\bфизич\w*\s+\w*лиц\w*", tl):  # физического лица, физическое лицо
+        found.add("фл")
+    if re.search(r"\bфизлиц\w*", tl):          # физлицо, физлицу
+        found.add("фл")
+    if re.search(r"\bиндивидуальн\w+\s+предприним\w+", tl):  # индивидуального предпринимателя
+        found.add("ип")
+    if re.search(r"\bсамозанят\w*", tl):
+        found.add("самозанят")
+
+    return found
 
 
 # ООО / юрлицо are synonyms of ЮЛ; физлицо is synonym of ФЛ.
@@ -134,6 +158,8 @@ def validate_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
         if action == "compare" and not candidates:
             return {"is_valid": False, "reason": "compare without candidates"}
         if action == "answer" and not bank and not candidates and not items:
+            if plan.get("constraints") or plan.get("docs"):
+                return {"is_valid": True, "reason": None}
             return {"is_valid": False, "reason": "answer with no data"}
         return {"is_valid": True, "reason": None}
 
