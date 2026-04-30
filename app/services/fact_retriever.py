@@ -16,6 +16,8 @@ QUERY_MODE_FILTER_MAP: Dict[str, List[str]] = {
     "specific_bank": ["pricing", "feature", "availability", "constraint", "docs", "bonus", "selection"],
     "bank_selection":["selection", "availability", "feature", "pricing", "bonus", "constraint"],
     "process":       ["constraint", "internal_ops"],
+    "timing":        ["internal_ops"],
+    "timing_docs":   ["internal_ops", "docs"],
     "smalltalk":     [],
     "service":       [],
     "intro":         [],
@@ -433,13 +435,32 @@ async def retrieve_facts(
         reason = "top_matches" if active else "empty"
     else:
         profile = _build_bank_profile(top_chunks, client_type=client_type)
+
+        # For timing queries: extract timing_text from internal_ops chunks
+        if query_mode in ("timing", "timing_docs"):
+            for ch in top_chunks:
+                if getattr(ch, "type", "") == "internal_ops":
+                    fact = getattr(ch, "fact", None)
+                    if fact:
+                        profile["timing_text"] = fact
+                        break
+            # timing_docs: also pull bank/docs from the same top_chunks
+            if query_mode == "timing_docs" and not profile.get("docs"):
+                for ch in top_chunks:
+                    if getattr(ch, "type", "") == "docs":
+                        fact = getattr(ch, "fact", None)
+                        ct_list = getattr(ch, "client_type", None) or []
+                        if fact and (not client_type or not ct_list or client_type in ct_list):
+                            if fact not in profile["docs"]:
+                                profile["docs"].append(fact)
+
         facts = {**profile}
         # Expose as bank_profile for build_response_plan
         facts["bank_profile"] = profile
         confidence = _calc_confidence(max_score, profile, query_mode)
         if confidence < 0.3:
             reason = "low_score"
-        elif not profile.get("bank"):
+        elif not profile.get("bank") and query_mode not in ("timing", "timing_docs"):
             reason = "bank_required_but_missing"
         else:
             reason = "top_matches"

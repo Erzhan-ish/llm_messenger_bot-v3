@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     SESSION_TTL_HOURS: int = 24
     CONTEXT_MESSAGES_LIMIT: int = 10
+    ENABLE_LLM_SUMMARY: bool = False
 
     # Timeouts
     LLM_TIMEOUT: int = 60

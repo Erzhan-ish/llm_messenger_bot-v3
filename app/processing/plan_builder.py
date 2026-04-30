@@ -321,6 +321,42 @@ def _plan_bank_selection(base: dict, facts: dict, slots: dict, decision: dict,
     return base
 
 
+def _plan_timing(base: dict, qmode: str, facts: dict, slots: dict, client_type) -> dict:
+    """Plan for timing / timing_docs queries — no pricing, no bonus."""
+    bank_profile = facts.get("bank_profile") or {}
+    bank = (
+        bank_profile.get("bank")
+        or facts.get("bank")
+        or slots.get("_last_bank")
+        or slots.get("bank_name")
+    )
+    timing_text = (
+        facts.get("timing_text")
+        or bank_profile.get("timing_text")
+        or facts.get("opening_time")
+    )
+    docs = bank_profile.get("docs") or facts.get("docs") or slots.get("_last_docs") or []
+
+    base["action"]      = "answer"
+    base["intent"]      = qmode
+    base["bank"]        = bank
+    base["client_type"] = bank_profile.get("client_type") or client_type
+    base["timing_text"] = timing_text
+    base["items"]       = []  # timing never shows pricing
+
+    if qmode == "timing_docs":
+        base["docs"] = docs
+        base["question_to_ask"] = None
+    else:
+        base["docs"]       = []
+        base["funnel_next"] = "docs"
+
+    if bank:
+        slots["last_offer_bank"] = bank
+        slots["last_offer_type"] = qmode
+    return base
+
+
 def _plan_factual(base: dict, qmode: str, facts_result: dict, facts: dict,
                    slots: dict, decision: dict, client_type, confidence: float) -> dict:
     """Plan for specific_bank / pricing / docs / process."""
@@ -368,13 +404,17 @@ def _plan_factual(base: dict, qmode: str, facts_result: dict, facts: dict,
     mf = bank_profile.get("monthly_fee")
     br = bank_profile.get("bonus_rate")
 
-    items: list = []
-    if of is not None:
-        items.append({"label": "Открытие счёта", "value": f"{int(of)} руб."})
-    if mf is not None:
-        items.append({"label": "Ведение счёта",  "value": f"{int(mf)} руб./мес."})
-    if br:
-        items.append({"label": "Бонус АУ", "value": str(br)})
+    # docs mode: don't include pricing items — keep the response focused
+    if qmode == "docs":
+        items: list = []
+    else:
+        items: list = []
+        if of is not None:
+            items.append({"label": "Открытие счёта", "value": f"{int(of)} руб."})
+        if mf is not None:
+            items.append({"label": "Ведение счёта",  "value": f"{int(mf)} руб./мес."})
+        if br:
+            items.append({"label": "Бонус АУ", "value": str(br)})
 
     if not items and bank and slots.get("_last_bank") == bank and slots.get("_last_items"):
         items = list(slots["_last_items"])
@@ -452,12 +492,14 @@ def build_response_plan(
         plan = _plan_bank_selection(base, facts, slots, decision, client_type, priority)
     elif qmode == "partner_banks":
         plan = _plan_partner_banks(base, slots)
+    elif qmode in ("timing", "timing_docs"):
+        plan = _plan_timing(base, qmode, facts, slots, client_type)
     else:
         plan = _plan_factual(base, qmode, facts_result, facts, slots, decision, client_type, confidence)
 
     intent = plan.get("intent")
     action = plan.get("action")
-    if intent in ("pricing", "docs", "specific_bank", "bonus"):
+    if intent in ("pricing", "docs", "specific_bank", "bonus", "timing", "timing_docs"):
         ref_key = intent
     elif action in ("compare", "selection_opening", "clarify"):
         ref_key = action

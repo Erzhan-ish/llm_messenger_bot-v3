@@ -81,6 +81,7 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
     status         = plan.get("status")
     allowed_points = plan.get("allowed_points") or []
     funnel_next    = plan.get("funnel_next")  # "docs" / "pricing" / None
+    timing_text    = plan.get("timing_text") or plan.get("opening_time") or ""
 
     # --- DATA SECTION ---
     data_lines: List[str] = []
@@ -88,6 +89,8 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
         data_lines.append(f"Банк: {bank}")
     if client_type:
         data_lines.append(f"Тип клиента: {client_type}")
+    if timing_text:
+        data_lines.append(f"Срок открытия: {timing_text}")
     if items:
         data_lines.append(_format_items(items))
     if docs:
@@ -103,7 +106,23 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
     data_text = "\n".join(data_lines) if data_lines else "Конкретных данных нет."
 
     # --- INSTRUCTIONS by action ---
-    if action == "clarify":
+    if intent == "timing":
+        instr = (
+            "Ответь про сроки открытия счёта — коротко, как менеджер. "
+            "Используй только данные из раздела ДАННЫЕ. "
+            "Не упоминай тарифы, стоимость открытия и бонусы. "
+            "Максимум 2 предложения. В конце спроси про документы своими словами."
+        )
+
+    elif intent == "timing_docs":
+        instr = (
+            "Ответь на два вопроса: срок открытия счёта и какие документы нужны. "
+            "Используй только данные из раздела ДАННЫЕ. "
+            "Не упоминай тарифы и стоимость. "
+            "Максимум 3 предложения. В конце уточни, готовы ли подготовить документы."
+        )
+
+    elif action == "clarify":
         q_text = _Q_TEXTS.get(question or "other", _Q_TEXTS["other"])
         instr = f"Задай клиенту один вопрос: «{q_text}» Больше ничего не добавляй."
 

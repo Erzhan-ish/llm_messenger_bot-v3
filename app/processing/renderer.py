@@ -227,6 +227,51 @@ def _render_selection_opening_static(plan: dict) -> str:
     return _FALLBACK_TEXT
 
 
+def _render_timing_static(plan: dict) -> str:
+    bank = plan.get("bank") or ""
+    timing = plan.get("timing_text") or plan.get("opening_time") or ""
+    if not timing:
+        timing = "полное открытие обычно занимает около недели с момента заявки, а после подписания документов в банке — до двух дней"
+    timing = timing.lower().rstrip(".")
+    prefix = f"по {bank.lower()} " if bank else ""
+    return f"{prefix}по срокам ориентир такой: {timing}. Документы подсказать?"
+
+
+def _render_timing_docs_static(plan: dict) -> str:
+    bank = plan.get("bank") or ""
+    timing = plan.get("timing_text") or plan.get("opening_time") or ""
+    if not timing:
+        timing = "около недели с момента заявки, после подписания — до двух дней"
+    timing = timing.lower().rstrip(".")
+    docs = plan.get("docs") or []
+    prefix = f"По {bank} " if bank else ""
+    if docs:
+        docs_text = "; ".join(docs[:3]).lower().rstrip(".")
+    else:
+        docs_text = "инн должника и список счетов"
+    return f"{prefix}срок открытия — {timing}. По документам нужно: {docs_text}. Готовы подготовить?"
+
+
+def _intent_fallback(plan: dict, slots: dict, user_text: str = "") -> str:
+    """Intent-aware fallback: routes to the right static renderer based on plan intent."""
+    intent = plan.get("intent") or plan.get("query_mode", "")
+    if intent == "timing":
+        return _render_timing_static(plan)
+    if intent == "timing_docs":
+        return _render_timing_docs_static(plan)
+    if intent == "docs":
+        bank = plan.get("bank") or ""
+        docs = plan.get("docs") or []
+        return _render_docs_natural(bank, docs)
+    if intent in ("pricing", "specific_bank"):
+        if plan.get("bank") and plan.get("items"):
+            return _render_specific_bank_static(plan)
+    if intent in ("bank_selection", "selection_opening") or plan.get("action") == "selection_opening":
+        if plan.get("candidates"):
+            return _render_selection_opening_static(plan)
+    return _plan_fallback_text(plan, slots)
+
+
 def _render_specific_bank_static(plan: dict) -> str:
     intent = plan.get("intent") or ""
     bank   = plan.get("bank") or ""
@@ -347,18 +392,14 @@ async def render_manager_text(plan: dict, *, user_text: str = "", dialog_ctx: st
         raw_text = await ask_llm(messages, max_tokens=300)
     except Exception:
         logger.exception("render_manager_text LLM failed")
-        return _plan_fallback_text(plan, slots)
+        return _intent_fallback(plan, slots)
 
     logger.info("LLM raw response (action={}, len={}): {!r}", action, len(raw_text or ""), (raw_text or "")[:300])
     text = cleanup_text(raw_text)
 
     if not text:
-        logger.warning("Render manager text is empty, using static fallback")
-        if action == "selection_opening":
-            return _render_selection_opening_static(plan)
-        if action in ("answer", "pricing_expand") and plan.get("bank") and plan.get("items"):
-            return _render_specific_bank_static(plan)
-        return _plan_fallback_text(plan, slots)
+        logger.warning("Render manager text is empty, using intent-aware fallback | intent={}", plan.get("intent"))
+        return _intent_fallback(plan, slots)
 
     facts_for_val = {
         "bank":        plan.get("bank"),
@@ -368,13 +409,8 @@ async def render_manager_text(plan: dict, *, user_text: str = "", dialog_ctx: st
     }
     val = validate_answer_against_facts(text, facts_for_val)
     if not val["is_valid"]:
-        logger.warning("Render validation failed: {} — using safe fallback", val["reason"])
-        # Prefer type-specific static render over generic fallback
-        if action == "selection_opening":
-            return _render_selection_opening_static(plan)
-        if action == "answer" and plan.get("bank") and plan.get("items"):
-            return _render_specific_bank_static(plan)
-        return _plan_fallback_text(plan, slots)
+        logger.warning("Render validation failed: {} — using intent-aware fallback", val["reason"])
+        return _intent_fallback(plan, slots)
 
     return text
 
@@ -464,13 +500,14 @@ async def answer_with_plan(
     msgs = await get_messages_by_session(session_id)
     dialog_ctx = _build_dialog_context(msgs, max_items=8, max_chars=1600)
 
-    if len([m for m in msgs if (m.get("text") or "").strip()]) > 12:
+    from app.config import settings as _settings
+    if _settings.ENABLE_LLM_SUMMARY and len([m for m in msgs if (m.get("text") or "").strip()]) > 12:
         try:
             from app.services.conversation_summary import summarize_dialog
             full_ctx = _build_dialog_context(msgs, max_items=20, max_chars=4000)
             dialog_ctx = await summarize_dialog(full_ctx, slots=slots)
         except Exception:
-            pass
+            pass  # keep structural context on summary failure
 
     text = await render_manager_text(plan, user_text=user_text, dialog_ctx=dialog_ctx, slots=slots)
     text = text if text else _plan_fallback_text(plan, slots)
@@ -481,20 +518,29 @@ async def answer_with_plan(
             text = "Здравствуйте! Я Алексей, менеджер «В плюсе». " + text
 
     # Self-check: если ответ похож на предыдущий — один авторетрай с анти-повтором
+    # Для timing не делаем LLM retry (пустой ответ вернётся снова), используем static.
     from app.processing.utils import _is_near_duplicate
     if plan.get("action") in ("answer", "compare", "selection_opening"):
         prev_text = slots.get("_last_bot_text") or ""
         if prev_text and _is_near_duplicate(text, prev_text):
-            logger.info("Session {} | Self-check: near-duplicate, retrying render", session_id)
-            retry_plan = {**plan, "_prev_bot_text": prev_text}
-            try:
-                retry_text = await render_manager_text(retry_plan, user_text=user_text, dialog_ctx=dialog_ctx, slots=slots)
-                retry_text = (retry_text or "").strip()
-                if retry_text and not _is_near_duplicate(retry_text, prev_text):
-                    text = retry_text
-                    logger.info("Session {} | Self-check: retry succeeded", session_id)
-            except Exception:
-                logger.exception("Self-check retry failed (ignored)")
+            intent = plan.get("intent", "")
+            if intent in ("timing", "timing_docs"):
+                # Don't retry LLM for timing — use static fallback directly
+                logger.info("Session {} | Self-check: timing near-duplicate → static fallback", session_id)
+                static = _intent_fallback(plan, slots)
+                if static and not _is_near_duplicate(static, prev_text):
+                    text = static
+            else:
+                logger.info("Session {} | Self-check: near-duplicate, retrying render", session_id)
+                retry_plan = {**plan, "_prev_bot_text": prev_text}
+                try:
+                    retry_text = await render_manager_text(retry_plan, user_text=user_text, dialog_ctx=dialog_ctx, slots=slots)
+                    retry_text = (retry_text or "").strip()
+                    if retry_text and not _is_near_duplicate(retry_text, prev_text):
+                        text = retry_text
+                        logger.info("Session {} | Self-check: retry succeeded", session_id)
+                except Exception:
+                    logger.exception("Self-check retry failed (ignored)")
 
     had_unknown = (
         facts_result.get("retrieval_reason") in {"empty", "low_score", "no_kb"}

@@ -116,11 +116,22 @@ _BANK_SELECTION_REQUEST_RE = re.compile(
     re.I | re.U,
 )
 _PRICE_QUERY_RE = re.compile(
-    r"\b(тариф|тарифы|сколько\s+стоит|стоимость|цена|ценник|ведение|открытие|платёжк|платежк|комисси)\b",
+    r"\b(тариф\w*|сколько\s+стоит|стоимост\w*|цена|ценник|ведени\w*|открыти\w*|платёжк|платежк|комисси\w*)\b",
     re.I | re.U,
 )
 _DOCS_QUERY_RE = re.compile(
     r"\b(документ\w*|что\s+нужно|что\s+понадобится|сканы|паспорт\w*|инн|решение\s+суда)\b",
+    re.I | re.U,
+)
+_TIMING_QUERY_RE = re.compile(
+    r"(срок|сроки|как\s+долго|долго\s+ли|за\s+сколько"
+    r"|сколько\s+по\s+времени|когда\s+откро|когда\s+будет\s+открыт"
+    r"|как\s+быстро|после\s+подачи\s+документ|сколько\s+ждать"
+    r"|откроется|открываться\s+будет|откроют)",
+    re.I | re.U,
+)
+_TIRED_ACK_RE = re.compile(
+    r"^(да\s+да|ладно|ну\s+ладно|ок\s+ладно|понял\s+ладно|да\s+ладно)",
     re.I | re.U,
 )
 
@@ -477,10 +488,26 @@ async def process_message(message):
             and not explicit_pricing and not explicit_docs
         )
 
+        has_timing = bool(_TIMING_QUERY_RE.search(user_text))
+        has_docs_flag = bool(_DOCS_QUERY_RE.search(user_text))
+        tired_ack = bool(_TIRED_ACK_RE.match(user_text) and slots.get("client_type"))
+
         last_mode = slots.get("_last_mode")
         if decision is not None:
             # Decision already set in STEP 2b (frustration/repeat detection)
             pass
+        elif has_timing and has_docs_flag:
+            logger.info("Session {} | timing_docs detected", session.id)
+            decision = {
+                "stage": "PRESENTATION", "action": "ANSWER", "query_mode": "timing_docs",
+                "needs_kb": True, "needs_handoff": False, "confidence": 0.97, "handoff_reason": None,
+            }
+        elif has_timing:
+            logger.info("Session {} | timing detected", session.id)
+            decision = {
+                "stage": "PRESENTATION", "action": "ANSWER", "query_mode": "timing",
+                "needs_kb": True, "needs_handoff": False, "confidence": 0.95, "handoff_reason": None,
+            }
         elif explicit_docs:
             logger.info(
                 "Session {} | explicit_docs_for_bank detected | bank={}",
@@ -518,9 +545,22 @@ async def process_message(message):
                 "stage": "PRESENTATION", "action": "ANSWER", "query_mode": "specific_bank",
                 "needs_kb": True, "needs_handoff": False, "confidence": 0.85, "handoff_reason": None,
             }
+        elif tired_ack:
+            _tired_last = last_mode
+            if _tired_last in ("timing", "timing_docs", "specific_bank", "pricing", "bank_selection", "docs"):
+                logger.info("Session {} | tired_ack → continuing mode={}", session.id, _tired_last)
+                decision = {
+                    "stage": "PRESENTATION", "action": "ANSWER", "query_mode": _tired_last,
+                    "needs_kb": True, "needs_handoff": False, "confidence": 0.70, "handoff_reason": None,
+                }
+            else:
+                decision = {
+                    "stage": "OTHER", "action": "ANSWER", "query_mode": "smalltalk",
+                    "needs_kb": False, "needs_handoff": False, "confidence": 0.60, "handoff_reason": None,
+                }
         elif (
             is_short
-            and last_mode in ("specific_bank", "pricing", "bank_selection", "docs")
+            and last_mode in ("specific_bank", "pricing", "bank_selection", "docs", "timing", "timing_docs")
             and _FOLLOWUP_RE.match(user_text)
         ):
             logger.info(f"Session {session.id} | Follow-up detected, continuing mode={last_mode}")
