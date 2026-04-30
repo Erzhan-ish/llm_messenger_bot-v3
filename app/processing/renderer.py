@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from typing import Tuple
 
-from app.config import settings as _cfg
+from app.config import settings as _cfg, llm_token_budget as _budget
 from app.llm.prompts.manager.loader import build_render_prompt
 from app.llm.providers import ask_llm
 from app.logging import logger
@@ -458,7 +458,7 @@ async def render_manager_text(plan: dict, *, user_text: str = "", dialog_ctx: st
     if user_text:
         messages.append({"role": "user", "content": user_text})
     try:
-        raw_text = await ask_llm(messages, max_tokens=_cfg.TIMEWEB_RENDER_MAX_TOKENS)
+        raw_text = await ask_llm(messages, max_tokens=_budget("RENDER"))
     except Exception:
         logger.exception("render_manager_text LLM failed")
         return _intent_fallback(plan, slots)

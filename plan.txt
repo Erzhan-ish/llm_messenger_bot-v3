@@ -1,102 +1,95 @@
-Ты работаешь с llm_messenger_bot-v3.
+Нужно пересмотреть архитектуру. Сейчас слишком много смысла зашито в системный код через regex и отдельные query_mode. Это стало хрупким: каждый новый кейс требует новый regex, а бот всё равно ошибается на формулировках.
 
-Текущие изменения уже запушены и частично работают:
-- explicit_bank_selection работает;
-- timing/timing_docs добавлены;
-- intent-aware fallback добавлен;
-- Timeweb provider уже использует max_completion_tokens для gpt-5*;
-- render.md содержит {ref_section};
-- ENABLE_LLM_SUMMARY=false по умолчанию.
+Новая цель:
+Перейти к архитектуре LLM-planner + guardrails.
 
-Но осталось 4 проблемы:
+Важно:
+- Не отдавать LLM действия/CRM/handoff полностью.
+- Но убрать из message_processor.py большую часть semantic-routing логики.
+- Код должен защищать границы и проверять результат.
+- LLM-planner должен определять intent/stage/focus на основе user_message + slots + KB_CONTEXT.
+- Renderer должен только формулировать ответ из готового плана.
 
-1. GPT-5-mini возвращает пустой content, потому что весь max_completion_tokens уходит в reasoning_tokens.
-В логах:
-finish_reason=length
-completion_tokens=300
-reasoning_tokens=300
-content=''
-и то же на 450 токенах.
+Сделать:
 
-Решение:
-- Добавить настройки:
-  TIMEWEB_RENDER_MAX_TOKENS=3000
-  TIMEWEB_ANALYZER_MAX_TOKENS=1500
-  TIMEWEB_ENRICHMENT_MAX_TOKENS=1000
-  TIMEWEB_SUMMARY_MAX_TOKENS=1500
-  TIMEWEB_ESCALATION_MAX_TOKENS=2000
-  TIMEWEB_REASONING_EFFORT=low
+1. Создать app/services/dialog_planner.py
+Функция:
+async def plan_dialog(user_text, slots, recent_dialog, kb_context, rule_hints=None) -> dict
 
-- В render_manager_text заменить ask_llm(..., max_tokens=300) на max_tokens=settings.TIMEWEB_RENDER_MAX_TOKENS.
-- В dialog_analyzer использовать settings.TIMEWEB_ANALYZER_MAX_TOKENS.
-- В llm_enrichment использовать settings.TIMEWEB_ENRICHMENT_MAX_TOKENS.
-- В escalation_detector использовать settings.TIMEWEB_ESCALATION_MAX_TOKENS.
-- Если model startswith gpt-5 и TIMEWEB_REASONING_EFFORT задан, попробовать добавить payload["reasoning_effort"] = "low".
-- Если Timeweb вернул 400 из-за reasoning_effort, повторить без reasoning_effort.
-
-2. Добавить query_mode="conditions".
-Проблема:
-"какие условия в ТКБ?"
-"я спрашиваю подробнее какие там условия"
-сейчас уходит в specific_bank и отвечает только opening_fee/monthly_fee.
-
-Добавить regex:
-_CONDITIONS_QUERY_RE = re.compile(
-    r"(услови\\w*|подробнее|поподробнее|что\\s+там|расскаж\\w*|что\\s+входит|нюанс\\w*)",
-    re.I | re.U,
-)
-
-Если есть bank_name/_last_bank и CONDITIONS_QUERY_RE:
-decision = {
-    "stage": "PRESENTATION",
-    "action": "ANSWER",
-    "query_mode": "conditions",
-    "needs_kb": True,
-    "needs_handoff": False,
-    "confidence": 0.95,
+Planner возвращает строго JSON:
+{
+  "domain": "in_scope|out_of_scope|unclear",
+  "stage": "...",
+  "intent": "...",
+  "client_type": "ФЛ|ЮЛ|ИП|null",
+  "bank_name": "...|null",
+  "answer_focus": "...",
+  "must_use_facts": [],
+  "missing_info": [],
+  "should_handoff": false,
+  "should_stop": false,
+  "next_question": "...",
+  "confidence": 0.0
 }
 
-Для fact_retriever:
-QUERY_MODE_FILTER_MAP["conditions"] = ["pricing", "bonus", "docs", "feature", "constraint", "selection", "availability"]
+2. В message_processor.py оставить только hard guards:
+- reset
+- debounce
+- save message
+- direct aggression
+- direct handoff phrases
+- already escalated
+- CRM
+Остальные regex перевести в rule_hints, не в финальное решение.
 
-Для plan_builder:
-qmode == "conditions" должен собрать:
-- bank
-- client_type
-- opening_fee
-- monthly_fee
-- transfer_fee
-- bonus_rate
-- docs/features/constraints кратко
-intent = "conditions"
+3. Retrieval делать до planner:
+- retrieve broad KB context по user_text + slots + last_bank + aliases.
+- Для constraint topics использовать lexical alias matching.
+- Передавать top facts в planner.
 
-Для renderer:
-добавить _render_conditions_static(plan).
+4. Добавить policy_validator.py
+Проверки:
+- if domain=out_of_scope → только redirect answer, без KB sales.
+- if should_handoff=true → не продолжать консультацию.
+- if intent=constraint → must_use_facts должен содержать KB constraint.
+- if confidence < 0.55 → clarify или handoff для сложного вопроса.
+- if answer mentions price not in facts → fallback.
+- if answer repeats last_bot_text → focused fallback.
 
-Пример fallback:
-"По ТКБ для юрлица условия такие: открытие 2800 рублей, ведение 2090 в месяц, платежи на юрлица — 33 рубля электронно. Плюс есть бонус на остаток. Что разобрать подробнее — платежи, документы или сроки?"
+5. Упростить renderer.py
+Renderer принимает только plan:
+- intent
+- must_use_facts
+- next_question
+- tone
+- slots
+И пишет 1–3 предложения.
+Убрать большую часть специальных static branches, оставить аварийные fallbacks:
+- out_of_scope
+- handoff
+- aggression_stop
+- no_kb_safe_clarify
 
-3. Улучшить fallback для ФЛ bank_selection.
-Сейчас:
-"сейчас хороший вариант — ткб. рассматриваем?"
+6. Обновить render prompt:
+- “Ты консультант для АУ по счетам должников.”
+- “Не отвечай на посторонние темы.”
+- “Используй только must_use_facts.”
+- “Если constraint — сначала объясни ограничение.”
+- “Не повторяй прошлый ответ.”
+- “1–3 предложения, один вопрос в конце.”
 
-Нужно:
-"Для физлица сейчас основной рабочий вариант — ТКБ: открытие 1500 рублей, ведение бесплатно. Важный нюанс — расходные операции лучше заранее согласовывать с юристами банка. Смотрим тарифы подробнее?"
+7. Уменьшить LLM calls:
+- выключить background analysis по умолчанию.
+- summary не вызывать в основном ответе.
+- максимум: planner + renderer.
+- для очевидного hard handoff — 0 LLM.
 
-4. Убрать из intro фразу "живой человек, не бот".
-Заменить intro на:
-"Я Алексей, менеджер компании «В плюсе». Помогаем арбитражным управляющим открывать счета для должников: подбираем банк, сверяем условия и документы. Для кого сейчас подбираем счёт?"
-
-Дополнительно:
-- Добавить CRM_ENABLED=false для локальных тестов.
-- Если CRM_ENABLED=false, maybe_escalate не должен вызывать Bitrix, но должен ставить slots["_escalation_sent"]=True.
-- Bitrix ACCESS_DENIED не должен валить worker.
-
-Acceptance criteria:
-1. Timeweb gpt-5-mini перестаёт массово возвращать пустой content за счёт max_completion_tokens=3000+.
-2. Если content всё равно пустой, intent-aware fallback отвечает по смыслу.
-3. "какие условия в ТКБ?" → conditions, не просто pricing.
-4. "я спрашиваю подробнее какие там условия" → conditions.
-5. ФЛ bank_selection отвечает не "ткб. рассматриваем?", а кратко раскрывает ТКБ.
-6. Intro не говорит "живой человек, не бот".
-7. Handoff работает, но локально Bitrix можно отключить через CRM_ENABLED=false.
+8. Тесты:
+- RTX 3060 → out_of_scope redirect.
+- спецсчёт без основного → constraint “нельзя”.
+- карта должника → constraint по реализации имущества.
+- юр лицо + подешевле → bank_selection/low_cost, но через planner.
+- скорость → timing/priority, не тарифы.
+- что дальше → handoff.
+- агрессия → stop/escalate.
+- повтор вопроса → не повторять прошлый ответ.

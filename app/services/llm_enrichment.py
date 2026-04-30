@@ -11,7 +11,7 @@ import json
 import re
 from typing import Optional
 
-from app.config import settings as _cfg
+from app.config import llm_token_budget as _budget
 from app.llm.providers import ask_llm
 from app.logging import logger
 
@@ -178,7 +178,7 @@ async def llm_objection_reply(
         raw = await ask_llm(
             [{"role": "system", "content": _OBJECTION_PROMPT},
              {"role": "user",   "content": "\n".join(ctx_lines)}],
-            max_tokens=_cfg.TIMEWEB_ENRICHMENT_MAX_TOKENS,
+            max_tokens=_budget("ENRICHMENT"),
         )
         from app.processing.utils import cleanup_text
         text = cleanup_text(raw or "").strip()
@@ -228,7 +228,7 @@ async def llm_ack_reply(user_text: str, slots: dict) -> Optional[str]:
         raw = await ask_llm(
             [{"role": "system", "content": _ACK_PROMPT},
              {"role": "user",   "content": "\n".join(ctx_lines)}],
-            max_tokens=_cfg.TIMEWEB_ENRICHMENT_MAX_TOKENS,
+            max_tokens=_budget("ENRICHMENT"),
         )
         from app.processing.utils import cleanup_text
         text = cleanup_text(raw or "").strip()

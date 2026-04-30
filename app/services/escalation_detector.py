@@ -6,7 +6,7 @@ import re
 from typing import Optional, TypedDict, Literal
 
 from app.llm.providers import ask_llm
-from app.config import settings
+from app.config import settings, llm_token_budget as _budget
 
 
 EscReason = Literal[
@@ -179,7 +179,7 @@ async def detect_escalation_signal(
     ]
 
     try:
-        raw = await ask_llm(messages, model=settings.OLLAMA_ANALYZER_MODEL, max_tokens=settings.TIMEWEB_ESCALATION_MAX_TOKENS)
+        raw = await ask_llm(messages, model=settings.OLLAMA_ANALYZER_MODEL, max_tokens=_budget("ESCALATION"))
         data = _extract_json(raw)
         if not isinstance(data, dict):
             raise ValueError("bad json")

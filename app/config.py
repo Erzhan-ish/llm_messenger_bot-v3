@@ -65,6 +65,13 @@ class Settings(BaseSettings):
     TIMEWEB_ESCALATION_MAX_TOKENS: int = 2000
     TIMEWEB_REASONING_EFFORT: str = "low"  # set "" to disable
 
+    # Per-call token budgets for Ollama (local models crash on large num_predict)
+    OLLAMA_RENDER_MAX_TOKENS: int = 600
+    OLLAMA_ANALYZER_MAX_TOKENS: int = 400
+    OLLAMA_ENRICHMENT_MAX_TOKENS: int = 400
+    OLLAMA_ESCALATION_MAX_TOKENS: int = 500
+    OLLAMA_NUM_CTX: int = 4096
+
     # CRM integration (set false for local testing — handoff sets slot but skips Bitrix)
     CRM_ENABLED: bool = False
 
@@ -99,3 +106,10 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def llm_token_budget(kind: str) -> int:
+    """Return the correct max_tokens budget for the active LLM provider."""
+    if settings.LLM_PROVIDER == "ollama":
+        return getattr(settings, f"OLLAMA_{kind}_MAX_TOKENS")
+    return getattr(settings, f"TIMEWEB_{kind}_MAX_TOKENS")

@@ -13,7 +13,7 @@ from typing import Literal, Optional, TypedDict
 
 from app.llm.providers import ask_llm
 from app.logging import logger
-from app.config import settings
+from app.config import settings, llm_token_budget as _budget
 
 DialogStage  = Literal[
     "GREETING", "PRESENTATION", "OBJECTION", "DOC_TRANSFER",
@@ -345,7 +345,7 @@ async def detect_stage_and_action(
             [{"role": "system", "content": CLASSIFIER_PROMPT},
              {"role": "user",   "content": user_content}],
             model=settings.OLLAMA_ANALYZER_MODEL,
-            max_tokens=settings.TIMEWEB_ANALYZER_MAX_TOKENS,
+            max_tokens=_budget("ANALYZER"),
         )
         m = _JSON_RE.search(raw)
         if not m:
