@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 
 from app.processing.utils import _FALLBACK_TEXT
+from app.processing.domain_guard import out_of_scope_reply, constraint_fallback
 from app.services.sales_policy import OBJECTION_TYPE_MAP, STAGE_NEXT_STEP
 
 # ---------------------------------------------------------------------------
@@ -62,6 +63,13 @@ _REFERENCE_EXAMPLES = {
         "ДАННЫЕ: ТКБ, ЮЛ, открытие 2800 руб., ведение 2090 руб./мес., платежи 33 руб., бонус на остаток.\n"
         "ПЛОХО: «Условия по ТКБ: открытие — 2 800, ведение — 2 090.»\n"
         "ХОРОШО: «по ткб для юрлица условия такие: открытие 2800 рублей, ведение 2090 в месяц, платежи на юрлица — 33 рубля электронно. плюс есть бонус на остаток. что разобрать подробнее — платежи, документы или сроки?»"
+    ],
+    "constraint": [
+        "ДАННЫЕ: Открыть только специальный счет без открытия основного счета нельзя.\n"
+        "ПЛОХО: «Можно, нужны документы.»\n"
+        "ХОРОШО: «нет, отдельно спецсчёт без основного открыть нельзя. сначала открывается основной, потом уже спецсчёт. счёт для юрлица?»",
+        "ДАННЫЕ: Карту при реализации имущества оформляет и подписывает финансовый управляющий.\n"
+        "ХОРОШО: «если введена реализация имущества, карту оформляет и подписывает финансовый управляющий. реализация уже введена?»"
     ],
 }
 
@@ -362,6 +370,42 @@ def _plan_timing(base: dict, qmode: str, facts: dict, slots: dict, client_type) 
     return base
 
 
+
+def _plan_out_of_scope(base: dict, slots: dict, decision: dict) -> dict:
+    base["action"] = "answer"
+    base["intent"] = "out_of_scope"
+    base["must_use_facts"] = []
+    base["answer_text"] = out_of_scope_reply()
+    base["question_to_ask"] = None
+    return base
+
+
+def _plan_constraint(base: dict, facts: dict, slots: dict, decision: dict, client_type) -> dict:
+    planner = decision.get("planner") or {}
+    topic = slots.get("_constraint_topic") or planner.get("answer_focus") or planner.get("constraint_topic")
+    bank_profile = facts.get("bank_profile") or {}
+    constraints = bank_profile.get("constraints") or facts.get("constraints") or []
+    bank = bank_profile.get("bank") or facts.get("bank") or slots.get("bank_name") or slots.get("_last_bank")
+
+    # High-risk constraints get deterministic wording even if KB retrieval is sparse.
+    must_use = list(constraints[:3])
+    fallback_text = constraint_fallback(topic, bank=bank)
+    if not must_use:
+        must_use = [fallback_text]
+
+    base["action"] = "answer"
+    base["intent"] = "constraint"
+    base["bank"] = bank
+    base["client_type"] = bank_profile.get("client_type") or facts.get("client_type") or client_type
+    base["constraints"] = constraints
+    base["must_use_facts"] = must_use
+    base["constraint_topic"] = topic
+    base["answer_text"] = fallback_text
+    base["items"] = []
+    base["docs"] = []
+    base["question_to_ask"] = None
+    return base
+
 def _plan_conditions(base: dict, facts: dict, slots: dict, client_type) -> dict:
     """Plan for 'conditions' queries — broad overview: pricing + bonus + docs + constraints."""
     bank_profile = facts.get("bank_profile") or {}
@@ -531,6 +575,12 @@ def build_response_plan(
     facts       = facts_result.get("facts", {})
     base        = _make_base(client_type)
 
+    if qmode == "out_of_scope":
+        return _plan_out_of_scope(base, slots, decision)
+    if qmode == "constraint":
+        plan = _plan_constraint(base, facts, slots, decision, client_type)
+        plan["reference_examples"] = _REFERENCE_EXAMPLES.get("constraint", [])
+        return plan
     if qmode == "service":
         return _plan_service(base, stage)
     if qmode in ("intro", "smalltalk"):

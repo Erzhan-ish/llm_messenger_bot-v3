@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     DUTY_MANAGER_ID: int | None = None
     BITRIX_DISK_FOLDER_ID: int | None = None
 
+    ENABLE_BACKGROUND_ANALYSIS: bool = False
+
     # WhatsApp inbound
     WHATSAPP_VERIFY_TOKEN: str = ""
     META_APP_SECRET: str = ""

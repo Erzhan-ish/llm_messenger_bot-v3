@@ -19,6 +19,8 @@ QUERY_MODE_FILTER_MAP: Dict[str, List[str]] = {
     "timing":        ["internal_ops"],
     "timing_docs":   ["internal_ops", "docs"],
     "conditions":    ["pricing", "bonus", "docs", "feature", "constraint", "selection", "availability"],
+    "constraint":    ["constraint", "docs", "selection", "internal_ops"],
+    "out_of_scope":  [],
     "smalltalk":     [],
     "service":       [],
     "intro":         [],
@@ -26,7 +28,7 @@ QUERY_MODE_FILTER_MAP: Dict[str, List[str]] = {
 }
 
 # Modes that skip KB entirely
-_BYPASS_MODES = {"service", "smalltalk", "intro"}
+_BYPASS_MODES = {"service", "smalltalk", "intro", "out_of_scope"}
 
 _EMPTY_RESULT: Dict[str, Any] = {
     "facts": {},
@@ -329,11 +331,13 @@ async def retrieve_facts(
     client_type = slots.get("client_type")
     priority    = slots.get("priority_criteria")
     allowed_types = QUERY_MODE_FILTER_MAP.get(query_mode, [])
-    
-    if query_mode in ("pricing", "specific_bank"):
+
+    if query_mode in ("pricing", "specific_bank", "conditions"):
         k = 12
     elif query_mode == "bank_selection":
         k = 15  # need pricing chunks for multiple banks simultaneously
+    elif query_mode == "constraint":
+        k = 10  # need enough room for exact constraint aliases
     else:
         k = 4
 
@@ -363,6 +367,16 @@ async def retrieve_facts(
                     boosted *= 2.5
                 elif any(h in chunk_text for h in bank_hints):
                     boosted *= 1.5
+
+            if query_mode == "constraint" and getattr(ch, "type", "") == "constraint":
+                q_lower = (question or "").lower()
+                aliases = getattr(ch, "aliases", None) or []
+                if any(len(a) >= 3 and a.lower() in q_lower for a in aliases):
+                    boosted *= 4.0
+                else:
+                    chunk_text = (getattr(ch, "text", "") or "").lower()
+                    if any(x in chunk_text and x in q_lower for x in ("спецсчет", "спецсчёт", "основной", "карта", "реализация")):
+                        boosted *= 2.0
 
             if key not in scored or boosted > scored[key][0]:
                 scored[key] = (boosted, ch)

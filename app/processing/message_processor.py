@@ -16,6 +16,13 @@ from app.context.session_manager import get_or_create_session, reset_session
 from app.logging import logger
 from app.outbound.dispatcher import OutboundDispatcher
 from app.processing.dedup import is_duplicate_message
+from app.processing.domain_guard import (
+    detect_constraint_topic,
+    detect_domain,
+    is_aggressive_stop,
+    out_of_scope_reply,
+    constraint_fallback,
+)
 from app.processing.plan_builder import (
     _detect_objection,
     _FOLLOWUP_RE,
@@ -44,6 +51,8 @@ from app.processing.utils import (
     send_bot,
 )
 from app.services.dialog_analyzer import detect_stage_and_action
+from app.services.dialog_planner import plan_dialog
+from app.services.policy_validator import planner_policy_check
 from app.services.escalation_detector import detect_escalation_signal
 from app.services.sales_policy import OBJECTION_TYPE_MAP
 from app.services.transcription_service import transcribe_audio
@@ -66,6 +75,36 @@ from app.processing.triggers import AGGRESSIVE_REPLIES
 from datetime import datetime
 
 scenario = "INBOUND_QUESTION"
+
+
+def _merge_trailing_user_messages(msgs: list, current_text: str, *, max_items: int = 3) -> str:
+    """Merge rapid consecutive user messages after debounce.
+
+    This lets "надо банк подобрать" + "есть подешевле?" be planned as one
+    request without losing separate message history.
+    """
+    collected: list[str] = []
+    for m in reversed(msgs or []):
+        role = m.get("role") if isinstance(m, dict) else getattr(m, "role", None)
+        text = (m.get("text") if isinstance(m, dict) else getattr(m, "text", None)) or ""
+        text = text.strip()
+        if not text:
+            continue
+        if role != "user":
+            break
+        collected.append(text)
+        if len(collected) >= max_items:
+            break
+    collected = list(reversed(collected))
+    if not collected:
+        return current_text
+    # Avoid duplicate current text if repository layer already returned it twice.
+    deduped: list[str] = []
+    for t in collected:
+        if not deduped or deduped[-1] != t:
+            deduped.append(t)
+    return "\n".join(deduped)
+
 
 _FRUSTRATION_RE = re.compile(
     r"\b(я\s+же\s+(уже\s+)?(объяснил|сказал|написал|говорил|описал)"
@@ -316,10 +355,54 @@ async def process_message(message):
     slots = await get_slots(session.id) or DEFAULT_SLOTS.copy()
     slots.pop("_mode", None)
 
+    # Merge consecutive user messages captured by debounce. Use this for routing/planning,
+    # while preserving individual saved messages in history.
+    try:
+        _msgs_for_merge = await get_messages_by_session(session.id)
+        effective_user_text = _merge_trailing_user_messages(_msgs_for_merge, user_text)
+        if effective_user_text != user_text:
+            logger.info("Session {} | merged recent user messages for planning", session.id)
+            user_text = effective_user_text
+            user_text_lower = re.sub(r"[^а-яёa-z\s]", "", user_text.lower()).strip()
+    except Exception:
+        logger.exception("merge recent user messages failed (ignored)")
+
     # --- STEP 1: Early Runtime Slot Extraction ---
     extract_runtime_slots(user_text, slots)
 
     await set_slots(session.id, slots)
+
+    # Hard domain/constraint guards. These are deterministic rails, not semantic routing.
+    domain_decision = detect_domain(user_text)
+    constraint_topic = detect_constraint_topic(user_text)
+    if domain_decision.domain == "out_of_scope":
+        logger.info("Session {} | out_of_scope domain guard | reason={}", session.id, domain_decision.reason)
+        decision = {
+            "stage": "OUT_OF_SCOPE", "action": "ANSWER", "query_mode": "out_of_scope",
+            "needs_kb": False, "needs_handoff": False, "confidence": 0.99,
+            "handoff_reason": None,
+            "planner": {"domain": "out_of_scope", "intent": "redirect_to_domain"},
+        }
+        a, had_unknown_any = await answer_with_plan(session.id, user_text, slots, decision)
+        await send_bot(session, message.channel, message.external_user_id, a, slots,
+                       query_mode="out_of_scope", processing_start=processing_start,
+                       client_msg_len=len(user_text))
+        return
+    if constraint_topic:
+        logger.info("Session {} | constraint guard detected | topic={}", session.id, constraint_topic)
+        slots["_constraint_topic"] = constraint_topic
+        await set_slots(session.id, slots)
+        decision = {
+            "stage": "CONSTRAINT", "action": "ANSWER", "query_mode": "constraint",
+            "needs_kb": True, "needs_handoff": False, "confidence": 0.99,
+            "handoff_reason": None,
+            "planner": {"domain": "in_scope", "intent": "constraint", "answer_focus": constraint_topic},
+        }
+        a, had_unknown_any = await answer_with_plan(session.id, user_text, slots, decision)
+        await send_bot(session, message.channel, message.external_user_id, a, slots,
+                       query_mode="constraint", processing_start=processing_start,
+                       client_msg_len=len(user_text))
+        return
 
     if _is_aggressive(user_text):
         logger.warning(f"Session {session.id} | Aggression detected, sending warning and escalating.")
@@ -592,7 +675,28 @@ async def process_message(message):
             if last_bank and last_mode == "specific_bank" and not slots.get("bank_name"):
                 slots["bank_name"] = last_bank
         else:
-            decision = await detect_stage_and_action(user_text, slots=slots)
+            # Soft semantic routing belongs to the planner. Regex above is kept only as
+            # high-confidence hints / legacy safety net.
+            try:
+                _msgs_for_planner = await get_messages_by_session(session.id)
+                _recent_dialog = _build_dialog_context(_msgs_for_planner, max_items=8, max_chars=1800)
+            except Exception:
+                _recent_dialog = ""
+            rule_hints = {
+                "explicit_bank_selection": explicit_bank_selection,
+                "explicit_pricing": explicit_pricing,
+                "explicit_docs": explicit_docs,
+                "has_timing": has_timing,
+                "has_conditions": has_conditions,
+                "last_mode": last_mode,
+                "known_bank": _rule_bank,
+            }
+            decision = await plan_dialog(user_text, slots=slots, recent_dialog=_recent_dialog, rule_hints=rule_hints)
+            # If planner is uncertain and old analyzer has a clearer non-smalltalk decision, keep compatibility.
+            if decision.get("query_mode") in ("smalltalk", "service") and domain_decision.domain == "in_scope":
+                legacy = await detect_stage_and_action(user_text, slots=slots)
+                if legacy and legacy.get("query_mode") not in ("smalltalk", "service"):
+                    decision = legacy
 
         # Normalize decision: ensure all expected keys exist with safe defaults
         decision = {
@@ -600,6 +704,8 @@ async def process_message(message):
             "needs_kb": False, "needs_handoff": False, "confidence": 0.0, "handoff_reason": None,
             **decision,
         }
+        decision = planner_policy_check(decision)
+
         # Keep action/needs_handoff in sync
         if decision["action"] == "HANDOFF":
             decision["needs_handoff"] = True
@@ -684,10 +790,12 @@ async def process_message(message):
         )
 
         qmode_final = qmode
+        from app.config import settings as _settings
         if (
-            user_text_lower not in SHORT_NEUTRAL
+            _settings.ENABLE_BACKGROUND_ANALYSIS
+            and user_text_lower not in SHORT_NEUTRAL
             and user_text_lower not in END_DIALOG_PHRASES
-            and qmode_final not in ("service", "intro", "smalltalk")
+            and qmode_final not in ("service", "intro", "smalltalk", "out_of_scope", "constraint")
         ):
             asyncio.create_task(run_business_analysis(
                 session_id=session.id,

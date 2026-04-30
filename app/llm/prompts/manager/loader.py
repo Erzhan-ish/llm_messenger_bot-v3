@@ -82,6 +82,8 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
     allowed_points = plan.get("allowed_points") or []
     funnel_next    = plan.get("funnel_next")  # "docs" / "pricing" / None
     timing_text    = plan.get("timing_text") or plan.get("opening_time") or ""
+    must_use_facts = plan.get("must_use_facts") or []
+    answer_text    = plan.get("answer_text") or ""
 
     # --- DATA SECTION ---
     data_lines: List[str] = []
@@ -91,6 +93,10 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
         data_lines.append(f"Тип клиента: {client_type}")
     if timing_text:
         data_lines.append(f"Срок открытия: {timing_text}")
+    if must_use_facts:
+        data_lines.append("Обязательные факты: " + "; ".join(str(x) for x in must_use_facts[:4]))
+    if answer_text:
+        data_lines.append(f"Безопасная формулировка: {answer_text}")
     if items:
         data_lines.append(_format_items(items))
     if docs:
@@ -106,7 +112,20 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
     data_text = "\n".join(data_lines) if data_lines else "Конкретных данных нет."
 
     # --- INSTRUCTIONS by action ---
-    if intent == "timing":
+    if intent == "out_of_scope":
+        instr = (
+            "Коротко и спокойно скажи, что мы занимаемся только счетами должников "
+            "для арбитражных/финансовых управляющих. Не отвечай по сути постороннего вопроса. "
+            "В конце мягко верни к рабочей теме."
+        )
+
+    elif intent == "constraint":
+        instr = (
+            "Ответь на вопрос как консультант по ограничению. Сначала объясни обязательный факт/ограничение "
+            "из раздела ДАННЫЕ. Не добавляй тарифы и не продавай банк. Максимум 2 предложения и один уточняющий вопрос."
+        )
+
+    elif intent == "timing":
         instr = (
             "Ответь про сроки открытия счёта — коротко, как менеджер. "
             "Используй только данные из раздела ДАННЫЕ. "

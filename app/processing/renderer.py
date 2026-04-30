@@ -9,6 +9,7 @@ from app.llm.prompts.manager.loader import build_render_prompt
 from app.llm.providers import ask_llm
 from app.logging import logger
 from app.processing.plan_builder import build_response_plan
+from app.processing.domain_guard import out_of_scope_reply, constraint_fallback
 from app.processing.utils import (
     _FALLBACK_TEXT,
     _build_dialog_context,
@@ -16,6 +17,7 @@ from app.processing.utils import (
 )
 from app.services.fact_retriever import retrieve_facts
 from app.services.fact_validator import validate_answer_against_facts, validate_plan
+from app.services.policy_validator import render_policy_check
 from app.services.llm_enrichment import llm_ack_reply
 from app.services.sales_policy import update_sales_state
 from app.storage.repositories.messages_repo import get_messages_by_session
@@ -124,6 +126,41 @@ _FALLBACK_QUESTIONS = {
 }
 
 
+
+def _render_out_of_scope_static(plan: dict | None = None) -> str:
+    return out_of_scope_reply()
+
+
+def _render_constraint_static(plan: dict, slots: dict | None = None) -> str:
+    slots = slots or {}
+    topic = plan.get("constraint_topic") or slots.get("_constraint_topic")
+    bank = plan.get("bank") or slots.get("bank_name") or slots.get("_last_bank")
+    # Prefer deterministic high-risk wording to avoid accidental sales copy.
+    return plan.get("answer_text") or constraint_fallback(topic, bank=bank)
+
+
+def _focused_fallback_for_current_intent(plan: dict, slots: dict | None = None) -> str:
+    intent = plan.get("intent") or plan.get("query_mode")
+    if intent == "out_of_scope":
+        return _render_out_of_scope_static(plan)
+    if intent == "constraint":
+        return _render_constraint_static(plan, slots)
+    if intent == "out_of_scope":
+        return _render_out_of_scope_static(plan)
+    if intent == "constraint":
+        return _render_constraint_static(plan, slots)
+    if intent == "timing":
+        return _render_timing_static(plan)
+    if intent == "timing_docs":
+        return _render_timing_docs_static(plan)
+    if intent == "docs":
+        return _render_docs_natural(plan.get("bank") or "этому банку", plan.get("docs") or [])
+    if intent in ("bank_selection", "selection_opening"):
+        return _render_selection_opening_static(plan)
+    if intent in ("pricing", "specific_bank", "conditions"):
+        return _render_specific_bank_static(plan)
+    return _plan_fallback_text(plan, slots)
+
 def _plan_fallback_text(plan: dict, slots: dict = None) -> str:
     """Fallback when LLM render fails — renders facts directly from plan data."""
     slots = slots or {}
@@ -171,14 +208,14 @@ def _render_docs_natural(bank: str, docs: list) -> str:
     """Natural renderer specifically for document intent."""
     if not docs:
         return f"по документам в {bank} всё просто. готовы прислать?"
-    
+
     docs_text = " ".join(docs).lower()
     needs_scans = "скан" in docs_text and "не нуж" not in docs_text
-    
+
     parts = []
     if not needs_scans:
         parts.append("тут всё просто: сканы собирать не придётся.")
-    
+
     req_docs = []
     if "инн" in docs_text:
         req_docs.append("инн должника")
@@ -186,12 +223,12 @@ def _render_docs_natural(bank: str, docs: list) -> str:
         req_docs.append("название должника")
     if "счет" in docs_text or "счёт" in docs_text:
         req_docs.append("список счетов")
-        
+
     if req_docs:
         parts.append("нужен только " + " и ".join(req_docs) + ".")
     else:
         parts.append("нужны: " + ", ".join(docs[:3]).lower() + ".")
-        
+
     return " ".join(parts) + " готовы прислать?"
 
 
@@ -202,12 +239,12 @@ def _render_selection_opening_static(plan: dict) -> str:
         b1, b2 = c1.get("bank", ""), c2.get("bank", "")
         of1, of2 = float(c1.get("opening_fee") or 0), float(c2.get("opening_fee") or 0)
         mf1, mf2 = float(c1.get("monthly_fee") or 0), float(c2.get("monthly_fee") or 0)
-        
+
         if of2 < of1:
             b1, b2 = b2, b1
             of1, of2 = of2, of1
             mf1, mf2 = mf2, mf1
-            
+
         if mf2 < mf1:
             return f"сейчас есть два хороших варианта. в {b1.lower()} дешевле открыть сам счет за {int(of1)}, зато в {b2.lower()} выгоднее его потом вести по {int(mf2)} в месяц. вам что важнее сэкономить на старте или на ведении?"
         else:
@@ -246,7 +283,7 @@ def _render_selection_opening_static(plan: dict) -> str:
             parts.append(f"ведение {int(mf)} в месяц")
         pricing = ", ".join(parts)
         return f"сейчас хороший вариант — {bank.lower()}" + (f". {pricing}" if pricing else "") + ". рассматриваем?"
-    
+
     return _FALLBACK_TEXT
 
 
@@ -322,6 +359,10 @@ def _render_conditions_static(plan: dict) -> str:
 def _intent_fallback(plan: dict, slots: dict, user_text: str = "") -> str:
     """Intent-aware fallback: routes to the right static renderer based on plan intent."""
     intent = plan.get("intent") or plan.get("query_mode", "")
+    if intent == "out_of_scope":
+        return _render_out_of_scope_static(plan)
+    if intent == "constraint":
+        return _render_constraint_static(plan, slots)
     if intent == "timing":
         return _render_timing_static(plan)
     if intent == "timing_docs":
@@ -346,7 +387,7 @@ def _render_specific_bank_static(plan: dict) -> str:
     bank   = plan.get("bank") or ""
     items  = plan.get("items") or []
     docs   = plan.get("docs") or []
-    
+
     if intent == "docs":
         return _render_docs_natural(bank, docs)
 
@@ -374,13 +415,13 @@ def _render_specific_bank_static(plan: dict) -> str:
             parts.append(f"дальше ведение {num} в месяц")
         elif mf in ("0 руб./мес.", "0 руб.", "0", "бесплатно"):
             parts.append("дальше ведение бесплатно")
-            
+
     body = f"по {bank.lower()} " + (" и ".join(parts)) if parts else f"по {bank.lower()} условия такие"
-    
+
     if bonus:
         sum_bonus = _summarize_bonus(bonus)
         body += f". ещё банк начисляет хороший процент на остаток, {sum_bonus}"
-        
+
     return body + ". рассматриваем этот вариант?"
 
 
@@ -424,22 +465,10 @@ async def render_manager_text(plan: dict, *, user_text: str = "", dialog_ctx: st
         if intent in ("greeting", "ack", "thanks"):
             return _SERVICE_TEXTS.get(intent, _FALLBACK_TEXT)
 
-        # smalltalk — try LLM render so response uses dialog context
+        # smalltalk/service must not become a universal assistant. Keep it static and domain-safe.
+        if intent == "out_of_scope":
+            return _render_out_of_scope_static(plan)
         if intent == "smalltalk":
-            logger.info("service LLM render used | intent=smalltalk")
-            prompt = build_render_prompt(plan, user_text=user_text, dialog_ctx=dialog_ctx)
-            messages = [{"role": "system", "content": prompt}]
-            if user_text:
-                messages.append({"role": "user", "content": user_text})
-            try:
-                raw = await ask_llm(messages, max_tokens=180)
-                logger.info("LLM raw response (action=service/smalltalk, len={}): {!r}", len(raw or ""), (raw or "")[:200])
-                text = cleanup_text(raw)
-                if text:
-                    return text
-            except Exception:
-                logger.exception("service render LLM failed")
-            logger.info("static fallback used | intent=smalltalk")
             return _service_fallback(plan, slots)
 
         return _SERVICE_TEXTS.get(intent, _FALLBACK_TEXT)
@@ -469,6 +498,11 @@ async def render_manager_text(plan: dict, *, user_text: str = "", dialog_ctx: st
     if not text:
         logger.warning("Render manager text is empty, using intent-aware fallback | intent={}", plan.get("intent"))
         return _intent_fallback(plan, slots)
+
+    ok_policy, policy_reason = render_policy_check(text, plan, slots)
+    if not ok_policy:
+        logger.warning("Render policy failed: {} — using focused fallback", policy_reason)
+        return _focused_fallback_for_current_intent(plan, slots)
 
     facts_for_val = {
         "bank":        plan.get("bank"),
@@ -580,10 +614,17 @@ async def answer_with_plan(
     text = await render_manager_text(plan, user_text=user_text, dialog_ctx=dialog_ctx, slots=slots)
     text = text if text else _plan_fallback_text(plan, slots)
 
-    # Dynamic Greeting Injection
-    if slots.get("_turn_count", 0) <= 1 and plan.get("action") != "service" and text:
+    # Dynamic greeting: only once per session, never in focused consultant answers.
+    if (
+        not slots.get("_introduced")
+        and slots.get("_turn_count", 0) <= 1
+        and plan.get("action") != "service"
+        and plan.get("intent") not in ("out_of_scope", "constraint")
+        and text
+    ):
         if "здравствуйте" not in text.lower() and "добрый" not in text.lower() and "привет" not in text.lower():
             text = "Здравствуйте! Я Алексей, менеджер «В плюсе». " + text
+        slots["_introduced"] = True
 
     # Self-check: если ответ похож на предыдущий — один авторетрай с анти-повтором
     # Для timing не делаем LLM retry (пустой ответ вернётся снова), используем static.
@@ -599,16 +640,10 @@ async def answer_with_plan(
                 if static and not _is_near_duplicate(static, prev_text):
                     text = static
             else:
-                logger.info("Session {} | Self-check: near-duplicate, retrying render", session_id)
-                retry_plan = {**plan, "_prev_bot_text": prev_text}
-                try:
-                    retry_text = await render_manager_text(retry_plan, user_text=user_text, dialog_ctx=dialog_ctx, slots=slots)
-                    retry_text = (retry_text or "").strip()
-                    if retry_text and not _is_near_duplicate(retry_text, prev_text):
-                        text = retry_text
-                        logger.info("Session {} | Self-check: retry succeeded", session_id)
-                except Exception:
-                    logger.exception("Self-check retry failed (ignored)")
+                logger.info("Session {} | Self-check: near-duplicate → focused fallback", session_id)
+                static = _focused_fallback_for_current_intent(plan, slots)
+                if static and not _is_near_duplicate(static, prev_text):
+                    text = static
 
     had_unknown = (
         facts_result.get("retrieval_reason") in {"empty", "low_score", "no_kb"}
