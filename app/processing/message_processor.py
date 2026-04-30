@@ -19,15 +19,6 @@ from app.processing.dedup import is_duplicate_message
 from app.processing.plan_builder import (
     _detect_objection,
     _FOLLOWUP_RE,
-    _make_base,
-    _objection_reply,
-    _plan_bank_selection,
-    _plan_clarify,
-    _plan_factual,
-    _plan_handoff,
-    _plan_service,
-    build_response_plan,
-    try_build_followup_plan,
 )
 from app.processing.rate_limit import check_rate_limit, RateLimitExceeded
 from app.processing.renderer import (
@@ -70,6 +61,7 @@ from app.storage.repositories.sessions_repo import (
 )
 from app.storage.repositories.jobs_repo import has_newer_queued_job
 from app.services.llm_enrichment import llm_extract_missing_slots, llm_objection_reply, llm_ack_reply
+from app.processing.triggers import AGGRESSIVE_REPLIES
 
 from datetime import datetime
 
@@ -82,11 +74,15 @@ _FRUSTRATION_RE = re.compile(
     re.I | re.U,
 )
 
-# Consent / readiness signal — searchable anywhere in text (not anchored)
+# Consent / readiness signal — searchable anywhere in text (not anchored).
+# Note: bare "подходит" is intentionally omitted — use contextual forms only to avoid matching "не подходит".
 _CONSENT_SEARCH_RE = re.compile(
-    r"(мне\s+подходит|это\s+подходит|подходит|устраивает|сойд[её]т"
+    r"(мне\s+подходит|это\s+подходит|(?:всё|все|вроде|как\s+раз)\s+подходит"
+    r"|устраивает(?:\s+меня)?|сойд[её]т"
     r"|договорились|начинаем|оформляем|приступаем|по\s+рукам"
-    r"|готов\s+открыть|хочу\s+открыть|давайте\s+оформим|готов\s+к\s+оформлению)",
+    r"|готов\s+открыть|хочу\s+открыть|давайте\s+оформим|готов\s+к\s+оформлению"
+    r"|куда\s+(?:оплатить|перевести)|что\s+дальше|готов\s+начать"
+    r"|выставляйте\s+счёт|выставляйте\s+счет|отправлю\s+документы|пришлю\s+документы)",
     re.I | re.U,
 )
 
@@ -95,6 +91,22 @@ _READY_FOLLOWUP_RE = re.compile(
     r"^\s*(давайте|ок|окей|хорошо|отлично|договорились|начинаем|продолжаем"
     r"|продолжим|что\s+дальше|как\s+дальше|дальше\s+что|и\s+что\s+теперь"
     r"|и\s+что\s+дальше|принято|понял)\s*[.!?]?\s*$",
+    re.I | re.U,
+)
+
+# Banking keyword safety net — used to detect mislabelled smalltalk with actual banking intent.
+# Uses stems (no trailing \b) so inflected forms like "тарифы", "условиях", "стоимости" match.
+_BANKING_KEYWORD_RE = re.compile(
+    r"(тариф|условия|стоимост|комисс|открыти|ведени|счёт|счет|платёж|платеж|бонус)",
+    re.I | re.U,
+)
+
+# Follow-up questions about bot/human identity — route back to INTRO if prior context was INTRO
+_IDENTITY_FOLLOWUP_RE = re.compile(
+    r"\b(ответь(\s+на\s+(мой\s+)?вопрос)?|скажи\s+(честно|прямо|мне)"
+    r"|давай\s+(прямо|честно|по.честному)|так\s+ты\s+(человек|живой|бот|ИИ)"
+    r"|ты\s+(всё.таки|всё\s+же|точно)\s+(человек|живой|бот)"
+    r"|прямо\s+скажи|не\s+уходи\s+от\s+вопроса|отвечай\s+на\s+вопрос)\b",
     re.I | re.U,
 )
 
@@ -115,7 +127,7 @@ async def run_business_analysis(session_id: int, user_text: str, had_unknown_any
             return
 
         msgs = await get_messages_by_session(session_id)
-        dialog_text = _build_dialog_context(msgs, max_items=12, max_chars=3000)
+        dialog_text = _build_dialog_context(msgs, max_items=8, max_chars=1600)
 
         if had_unknown_any:
             await maybe_escalate_by_llm_signal(
@@ -189,13 +201,6 @@ async def process_message(message):
         external_user_id=message.external_user_id,
     )
 
-    last_esc = await get_user_last_escalation(session.user_id)
-    if last_esc:
-        delta = datetime.utcnow() - last_esc
-        if delta.total_seconds() < 24 * 3600:
-            logger.info(f"User {session.user_id} | Suppressing bot response (escalated {delta.total_seconds()/3600:.1f}h ago)")
-            return
-
     try:
         await touch_session_activity(session.id)
     except Exception:
@@ -233,12 +238,22 @@ async def process_message(message):
                 "Session {} | Debounce: skipping job {} — newer message from user {} is pending",
                 session.id, job_id, message.external_user_id,
             )
-            # Preserve consent signal so the next job can trigger handoff
+            # Extract slots from this debounced message so the next job inherits context
+            # (e.g. "для физика" → client_type=ФЛ, bank name, INN, etc.)
+            _dslots = await get_slots(session.id) or {}
+            extract_runtime_slots(message.text or "", _dslots)
             if _CONSENT_SEARCH_RE.search(message.text or ""):
-                _dslots = await get_slots(session.id) or {}
                 _dslots["_had_consent"] = True
-                await set_slots(session.id, _dslots)
                 logger.info("Session {} | Debounce: consent signal saved to slots", session.id)
+            await set_slots(session.id, _dslots)
+            return
+
+    # 24-hour escalation suppression — checked AFTER save_message so no messages are lost
+    last_esc = await get_user_last_escalation(session.user_id)
+    if last_esc:
+        delta = datetime.utcnow() - last_esc
+        if delta.total_seconds() < 24 * 3600:
+            logger.info(f"User {session.user_id} | Suppressing bot response (escalated {delta.total_seconds()/3600:.1f}h ago)")
             return
 
     slots = await get_slots(session.id) or DEFAULT_SLOTS.copy()
@@ -269,14 +284,14 @@ async def process_message(message):
     await set_slots(session.id, slots)
 
     if _is_aggressive(user_text):
-        logger.warning(f"Session {session.id} | Aggression detected, escalating silently.")
+        logger.warning(f"Session {session.id} | Aggression detected, sending warning and escalating.")
+        await send_bot(session, message.channel, message.external_user_id, AGGRESSIVE_REPLIES[0], slots)
         await maybe_escalate(session.id, slots, reason="aggression_profanity")
         return
 
     async with _TypingScope(message.channel, message.external_user_id):
         from app.processing.state_detector import detect_state, DialogState
         from app.processing.triggers import (
-            AGGRESSIVE_REPLIES,
             END_DIALOG_PHRASES,
             NEGATIVE_REPLIES,
             NOT_INTERESTED_REPLIES,
@@ -285,26 +300,22 @@ async def process_message(message):
 
         user_text_lower = re.sub(r"[^а-яёa-z\s]", "", user_text.lower()).strip()
         dialog_state = detect_state(user_text)
-        if (
-            dialog_state in (DialogState.NOT_INTERESTED, DialogState.LATER)
-            and (
+        if dialog_state in (DialogState.NOT_INTERESTED, DialogState.LATER):
+            # Override: consent signal in same message means user is actually ready
+            if _CONSENT_SEARCH_RE.search(user_text):
+                dialog_state = DialogState.IN_PROGRESS
+            # Override: short reply to a pending question ("нет" to "ИП или ООО?") is context, not refusal
+            elif (
                 slots.get("_pending_question_type")
                 or (
                     len(user_text.split()) <= 2
                     and (slots.get("_last_bot_text") or "").rstrip().endswith("?")
                 )
-            )
-        ):
-            dialog_state = DialogState.IN_PROGRESS
+            ):
+                dialog_state = DialogState.IN_PROGRESS
 
         if dialog_state == DialogState.AGGRESSIVE:
-            await send_bot(
-                session,
-                message.channel,
-                message.external_user_id,
-                AGGRESSIVE_REPLIES[0],
-                slots,
-            )
+            await send_bot(session, message.channel, message.external_user_id, AGGRESSIVE_REPLIES[0], slots)
             await maybe_escalate(session.id, slots, reason="aggressive_state")
             return
 
@@ -331,6 +342,18 @@ async def process_message(message):
             await maybe_escalate(session.id, slots, reason="dialog_ended_by_user")
             return
 
+        # --- Consent fast-path (before objection) ---
+        # Consent wins over objection: "дорого, но мне подходит" → handoff, not objection reply.
+        if _CONSENT_SEARCH_RE.search(user_text):
+            logger.info(f"Session {session.id} | Consent signal → fast-path to handoff")
+            _bridge = _build_handoff_bridge(slots, "ready_to_open")
+            _invalidate_last_context(slots, reason="handoff")
+            await set_slots(session.id, slots)
+            await maybe_escalate(session.id, slots, reason="ready_to_open")
+            await send_bot(session, message.channel, message.external_user_id, _bridge, slots,
+                           processing_start=processing_start)
+            return
+
         # --- Objection handling ---
         objection = _detect_objection(user_text)
         if objection:
@@ -349,11 +372,18 @@ async def process_message(message):
 
         if pending and is_short:
             logger.info(f"Session {session.id} | Handling short reply for pending: {pending}")
+            _slot_recognized = False
             if pending == "client_type":
-                if any(x in user_text_lower for x in ["ооо", "юл", "юр"]): slots["client_type"] = "ЮЛ"
-                elif any(x in user_text_lower for x in ["ип", "бизнес"]): slots["client_type"] = "ИП"
-                elif any(x in user_text_lower for x in ["физ", "фл"]): slots["client_type"] = "ФЛ"
-            slots.pop("_pending_question_type", None)
+                if any(x in user_text_lower for x in ["ооо", "юл", "юр"]):
+                    slots["client_type"] = "ЮЛ"; _slot_recognized = True
+                elif any(x in user_text_lower for x in ["ип", "бизнес"]):
+                    slots["client_type"] = "ИП"; _slot_recognized = True
+                elif any(x in user_text_lower for x in ["физ", "фл"]):
+                    slots["client_type"] = "ФЛ"; _slot_recognized = True
+            else:
+                _slot_recognized = True  # other pending types are cleared unconditionally
+            if _slot_recognized:
+                slots.pop("_pending_question_type", None)
             await set_slots(session.id, slots)
 
         # --- STEP 2a: Prior-consent fast-path ---
@@ -372,9 +402,21 @@ async def process_message(message):
             # User said something substantive after consent — proceed normally (consent consumed)
             await set_slots(session.id, slots)
 
+        # --- STEP 2a-identity: Re-route identity follow-ups to INTRO ---
+        # "так ты человек?", "ответь на вопрос" after an intro response → INTRO again
+        decision = None
+        if slots.get("_last_intent") == "intro" and _IDENTITY_FOLLOWUP_RE.search(user_text):
+            logger.info(f"Session {session.id} | Identity follow-up → re-routing to intro")
+            decision = {
+                "stage": "INTRO", "action": "ANSWER", "query_mode": "intro",
+                "needs_kb": False, "needs_handoff": False,
+                "confidence": 0.95, "handoff_reason": None,
+            }
+
         # --- STEP 2b: Frustration / repetition detection ---
         # "так я же уже объяснил" — user is repeating themselves, use existing context
-        if _FRUSTRATION_RE.search(user_text) and slots.get("client_type"):
+        # Only runs if no earlier step already set a decision (e.g. identity re-route)
+        if decision is None and _FRUSTRATION_RE.search(user_text) and slots.get("client_type"):
             # If the frustration message itself contains consent ("я же сказал мне подходит")
             # → handoff, not a repeat of the bank presentation
             if _CONSENT_SEARCH_RE.search(user_text):
@@ -390,12 +432,11 @@ async def process_message(message):
             )
             decision = {
                 "stage": "PRESENTATION", "action": "ANSWER",
-                "query_mode": "bank_selection",
+                "query_mode": slots.get("_last_mode", "bank_selection"),
                 "needs_kb": True, "needs_handoff": False,
                 "confidence": 0.85, "handoff_reason": None,
             }
-        else:
-            decision = None  # will be set in STEP 3
+        # decision remains None if not set → will be resolved in STEP 3
 
         # --- STEP 3: Narrow Classifier (with follow-up context check) ---
         last_mode = slots.get("_last_mode")
@@ -416,7 +457,59 @@ async def process_message(message):
             if last_bank and last_mode == "specific_bank" and not slots.get("bank_name"):
                 slots["bank_name"] = last_bank
         else:
-            decision = await detect_stage_and_action(user_text)
+            decision = await detect_stage_and_action(user_text, slots=slots)
+
+        # Normalize decision: ensure all expected keys exist with safe defaults
+        decision = {
+            "stage": "OTHER", "action": "ANSWER", "query_mode": "smalltalk",
+            "needs_kb": False, "needs_handoff": False, "confidence": 0.0, "handoff_reason": None,
+            **decision,
+        }
+        # Keep action/needs_handoff in sync
+        if decision["action"] == "HANDOFF":
+            decision["needs_handoff"] = True
+        if decision["needs_handoff"]:
+            decision["action"] = "HANDOFF"
+
+        # Short vague message (≤3 words) classified as smalltalk/OTHER but client context is known
+        # → re-route to specific_bank if bank known, otherwise bank_selection
+        if (
+            is_short
+            and len(user_text.split()) <= 3
+            and decision.get("query_mode") in ("smalltalk", "service")
+            and decision.get("stage") in ("OTHER", "SERVICE")
+            and slots.get("client_type")
+        ):
+            known_bank = slots.get("bank_name") or slots.get("_last_bank")
+            target_mode = "specific_bank" if known_bank else "bank_selection"
+            logger.info(f"Session {session.id} | Short+ctx re-route: smalltalk → {target_mode}")
+            decision = {
+                "stage": "PRESENTATION", "action": "ANSWER", "query_mode": target_mode,
+                "needs_kb": True, "needs_handoff": False, "confidence": 0.70, "handoff_reason": None,
+            }
+
+        # Smalltalk post-override: fires only when message has a question mark or explicit
+        # banking keyword, which means the LLM likely misrouted a compound/follow-up message.
+        if (
+            decision.get("query_mode") in ("smalltalk", "service")
+            and decision.get("stage") in ("OTHER", "SERVICE")
+            and slots.get("client_type")
+            and slots.get("_last_mode") in ("bank_selection", "specific_bank", "pricing")
+            and ("?" in user_text or _BANKING_KEYWORD_RE.search(user_text))
+        ):
+            last_q = slots.get("_last_mode", "bank_selection")
+            # Upgrade to specific_bank if a bank is now known in context
+            known_bank = slots.get("bank_name") or slots.get("_last_bank")
+            if known_bank and last_q == "bank_selection":
+                last_q = "specific_bank"
+            logger.info(f"Session {session.id} | Smalltalk+banking post-override → {last_q}")
+            decision = {
+                "stage": "PRESENTATION", "action": "ANSWER", "query_mode": last_q,
+                "needs_kb": True, "needs_handoff": False, "confidence": 0.65, "handoff_reason": None,
+            }
+            if last_q == "specific_bank" and slots.get("_last_bank") and not slots.get("bank_name"):
+                slots["bank_name"] = slots["_last_bank"]
+
         logger.info(f"Session {session.id} | Stage: {decision['stage']} | Action: {decision['action']} | Mode: {decision.get('query_mode')}")
 
         # --- STEP 3b: LLM slot enrichment (only when KB is needed and client_type is missing) ---
@@ -429,7 +522,7 @@ async def process_message(message):
             await set_slots(session.id, slots)
 
         # --- STEP 4: Early Handoff ---
-        if decision["action"] == "HANDOFF":
+        if decision.get("action") == "HANDOFF" or decision.get("needs_handoff"):
             handoff_reason = decision.get("handoff_reason") or "early_handoff"
             bridge_text = _build_handoff_bridge(slots, handoff_reason)
             _invalidate_last_context(slots, reason="handoff")
@@ -437,7 +530,7 @@ async def process_message(message):
             await send_bot(session, message.channel, message.external_user_id, bridge_text, slots)
             return
 
-        if decision["action"] == "STOP":
+        if decision.get("action") == "STOP":
             return
 
         # --- New pipeline: retrieve → plan → validate → render ---

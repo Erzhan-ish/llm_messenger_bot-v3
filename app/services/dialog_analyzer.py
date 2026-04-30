@@ -34,6 +34,8 @@ class DecisionSignal(TypedDict):
     needs_handoff: bool
     confidence: float
     handoff_reason: Optional[str]
+    is_first_turn: bool
+    multi_intent: bool
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +43,7 @@ class DecisionSignal(TypedDict):
 # ---------------------------------------------------------------------------
 
 _GREETING_RE = re.compile(
-    r"^\s*(привет|здравствуй|добрый\s+(день|вечер|утро)|ку|хай|салам|доброго|хелло)\b",
+    r"^\s*(привет|здравствуй(те)?|добрый\s+(день|вечер|утро)|доброе\s+утро|ку|хай|салам|доброго|хелло|hello|hi)\b",
     re.I,
 )
 _THANKS_RE = re.compile(r"\b(спасибо|благодарю|спс|от\s+души|благодарен)\b", re.I)
@@ -55,8 +57,11 @@ _PONDER_RE = re.compile(r"^\s*(хм+|мм+|нуу*)\s*[.!?]?\s*$", re.I)
 _INTRO_RE  = re.compile(
     r"\b(кто\s+вы|что\s+за\s+компания|чем\s+занимаетесь|вы\s+кто|откуда\s+пишете"
     r"|что\s+вы\s+делаете|расскажите\s+о\s+(себе|компании)"
-    r"|ты\s+бот|вы\s+бот|это\s+бот|ты\s+робот|вы\s+робот|живой\s+ли|человек\s+ли)\b",
-    re.I,
+    r"|ты\s+бот|вы\s+бот|это\s+бот|ты\s+робот|вы\s+робот|живой\s+ли|человек\s+ли"
+    r"|ты\s+человек|вы\s+человек|ты\s+живой|вы\s+живой|ты\s+реальн\w+"
+    r"|ты\s+настоящ\w+|вы\s+настоящ\w+|реальный\s+(человек|менеджер)"
+    r"|это\s+ИИ|это\s+нейросеть|ты\s+ИИ|ты\s+нейросеть|вы\s+ИИ|это\s+чат.?бот)\b",
+    re.I | re.U,
 )
 _HANDOFF_RE = re.compile(
     r"\b(позовите|позвоните|позвони|перезвоните|перезвони|наберите|набери"
@@ -64,6 +69,16 @@ _HANDOFF_RE = re.compile(
     r"|соедините|подключите\s+человека"
     r"|ваш\s+номер|дайте\s+номер|напишите\s+номер|оставьте\s+контакт"
     r"|как\s+с\s+вами\s+связаться|как\s+вам\s+позвонить)\b",
+    re.I | re.U,
+)
+
+# Compound-message safety net: "X, а какие тарифы у Уралсиба?" — bank name + pricing keyword
+# in same message. LLM classifiers often fail on these because the first clause sounds social.
+_SPECIFIC_BANK_KEYWORD_RE = re.compile(
+    r"(тариф|условия|стоимость|комисс|открыти|ведени|сколько\s+стоит|платёж|платеж|плата)"
+    r".{0,50}(уралсиб|альфа|ткб|т-банк|тинькофф|мкб|росбанк)"
+    r"|(уралсиб|альфа|ткб|т-банк|тинькофф|мкб|росбанк)"
+    r".{0,50}(тариф|условия|стоимость|комисс|открыти|ведени|сколько\s+стоит|платёж|платеж|плата)",
     re.I | re.U,
 )
 
@@ -124,6 +139,11 @@ def _get_rule_based_decision(text: str) -> Optional[DecisionSignal]:
         return _d("DOC_TRANSFER", "HANDOFF", "service", needs_kb=False,
                   needs_handoff=True, handoff_reason="ready_to_open", conf=0.95)
 
+    # Compound message with bank name + pricing keyword → specific_bank
+    # Catches "скорость важнее конечно, а какие тарифы у Уралсиба?" before LLM misroutes it.
+    if _SPECIFIC_BANK_KEYWORD_RE.search(t):
+        return _d("PRESENTATION", "ANSWER", "specific_bank", needs_kb=True, conf=0.88)
+
     # Everything else → LLM
     return None
 
@@ -150,6 +170,8 @@ def _d(
         "needs_handoff": needs_handoff,
         "confidence": conf,
         "handoff_reason": handoff_reason,
+        "is_first_turn": False,
+        "multi_intent": False,
     }
 
 
@@ -190,6 +212,7 @@ CLASSIFIER_PROMPT = """
 4. Опечатки и падежные формы банков считаются: «Альфе», «Уралсибе», «тинькофф», «ткб».
 5. ИП — не юридическое лицо, routing как для ИП.
 6. Нестандартные случаи (нерезидент, умерший, арест счёта) → HANDOFF.
+7. МУЛЬТИ-ИНТЕНТ: Если есть приветствие и сразу вопрос или запрос (например, «Добрый день, мне нужен банк для физика»), игнорируй приветствие для определения stage/action/query_mode, но обязательно установи флаги `is_first_turn: true` и `multi_intent: true`. Главный интент — запрос (в данном случае bank_selection).
 
 ### ПРИМЕРЫ:
 Сообщение: «Где дешевле открыть счет для ООО — в Альфе или в Уралсибе?»
@@ -249,8 +272,20 @@ CLASSIFIER_PROMPT = """
 Сообщение: «устраивает, давайте оформим»
 {"stage":"DOC_TRANSFER","action":"HANDOFF","query_mode":"service","needs_kb":false,"needs_handoff":true,"confidence":0.95,"handoff_reason":"ready_to_open"}
 
+Сообщение: «так ты человек?»
+{"stage":"INTRO","action":"ANSWER","query_mode":"intro","needs_kb":false,"needs_handoff":false,"confidence":0.97,"handoff_reason":null}
+
+Сообщение: «ты реальный человек или бот?»
+{"stage":"INTRO","action":"ANSWER","query_mode":"intro","needs_kb":false,"needs_handoff":false,"confidence":0.97,"handoff_reason":null}
+
+Сообщение: «ответь на вопрос»
+{"stage":"INTRO","action":"ANSWER","query_mode":"intro","needs_kb":false,"needs_handoff":false,"confidence":0.85,"handoff_reason":null,"is_first_turn":false,"multi_intent":false}
+
+Сообщение: «Добрый день, нужен банк для ИП»
+{"stage":"PRESENTATION","action":"ANSWER","query_mode":"bank_selection","needs_kb":true,"needs_handoff":false,"confidence":0.95,"handoff_reason":null,"is_first_turn":true,"multi_intent":true}
+
 Верни JSON:
-{"stage":"...","action":"ANSWER|CLARIFY|HANDOFF|STOP","query_mode":"...","needs_kb":true|false,"needs_handoff":true|false,"confidence":0.0-1.0,"handoff_reason":"..."|null}
+{"stage":"...","action":"ANSWER|CLARIFY|HANDOFF|STOP","query_mode":"...","needs_kb":true|false,"needs_handoff":true|false,"confidence":0.0-1.0,"handoff_reason":"..."|null,"is_first_turn":true|false,"multi_intent":true|false}
 """.strip()
 
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
@@ -264,7 +299,11 @@ def _clamp_f(v, lo, hi, default):
         return default
 
 
-async def detect_stage_and_action(dialog_text: str) -> DecisionSignal:
+async def detect_stage_and_action(
+    dialog_text: str,
+    *,
+    slots: dict | None = None,
+) -> DecisionSignal:
     """Route the message. Rule-based first, LLM fallback for complex cases."""
     rule = _get_rule_based_decision(dialog_text)
     if rule:
@@ -279,12 +318,32 @@ async def detect_stage_and_action(dialog_text: str) -> DecisionSignal:
         "needs_handoff": False,
         "confidence": 0.0,
         "handoff_reason": None,
+        "is_first_turn": False,
+        "multi_intent": False,
     }
 
+    # Build context block from known slots so LLM can route correctly
+    # (e.g. "что есть?" → bank_selection when client_type=ФЛ is already known)
+    context_block = ""
+    if slots:
+        parts = []
+        ct = slots.get("client_type")
+        bank = slots.get("bank_name") or slots.get("_last_bank")
+        last_mode = slots.get("_last_mode")
+        if ct:
+            parts.append(f"тип клиента: {ct}")
+        if bank:
+            parts.append(f"банк в обсуждении: {bank}")
+        if last_mode and last_mode not in ("service", "intro", "smalltalk"):
+            parts.append(f"предыдущая тема: {last_mode}")
+        if parts:
+            context_block = "[Контекст: " + "; ".join(parts) + "]\n"
+
     try:
+        user_content = f"{context_block}{dialog_text}" if context_block else (dialog_text or "")
         raw  = await ask_llm(
             [{"role": "system", "content": CLASSIFIER_PROMPT},
-             {"role": "user",   "content": dialog_text or ""}],
+             {"role": "user",   "content": user_content}],
             model=settings.OLLAMA_ANALYZER_MODEL,
         )
         m = _JSON_RE.search(raw)
@@ -299,6 +358,8 @@ async def detect_stage_and_action(dialog_text: str) -> DecisionSignal:
             "needs_handoff": bool(data.get("needs_handoff", False)),
             "confidence":    _clamp_f(data.get("confidence"), 0.0, 1.0, 0.0),
             "handoff_reason":data.get("handoff_reason"),
+            "is_first_turn": bool(data.get("is_first_turn", False)),
+            "multi_intent":  bool(data.get("multi_intent", False)),
         }
         if res["action"] == "HANDOFF":
             res["needs_handoff"] = True

@@ -7,8 +7,11 @@ breaking any lingering imports.
 from __future__ import annotations
 
 import json
-import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+_PROMPT_DIR = Path(__file__).parent
+_RENDER_MD = _PROMPT_DIR / "render.md"
 
 
 # ---------------------------------------------------------------------------
@@ -100,140 +103,40 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
     data_text = "\n".join(data_lines) if data_lines else "Конкретных данных нет."
 
     # --- INSTRUCTIONS by action ---
-    if action == "answer" and intent == "process":
-        instr = (
-            "Ответь на вопрос клиента точно по ДАННЫЕ — только факты из раздела «Ограничения». "
-            "Передай смысл дословно, не смягчай и не опускай ключевые детали (кто именно выполняет действие, при каком условии). "
-            "Не добавляй ничего, чего нет в разделе ДАННЫЕ. "
-            "Максимум 2 предложения. В конце можно спросить один уточняющий вопрос."
-        )
-    elif action == "answer":
-        instr = (
-            "Озвучь эти данные как менеджер — живо, по-человечески, кратко. "
-            "Не добавляй банков, сумм или условий, которых нет в разделе ДАННЫЕ. "
-            "Максимум 2–3 предложения."
-        )
-        if question == "client_type":
-            instr += " Уточни тип клиента — физлицо, ИП или ООО — своими словами, в конце."
-        elif question:
-            q_text = _Q_TEXTS.get(question, _Q_TEXTS["other"])
-            instr += f" В конце задай один уточняющий вопрос: «{q_text}»"
-        elif funnel_next == "docs":
-            instr += " В конце предложи разобрать документы — своими словами, не шаблонно."
-        elif funnel_next == "pricing":
-            instr += " В конце предложи обсудить тарифы — своими словами, не шаблонно."
-        else:
-            instr += " Если есть логичный следующий шаг — предложи его одной фразой."
+    if action == "clarify":
+        q_text = _Q_TEXTS.get(question or "other", _Q_TEXTS["other"])
+        instr = f"Задай клиенту один вопрос: «{q_text}» Больше ничего не добавляй."
 
-    elif action == "selection_opening":
+    elif action in ("selection_opening", "compare"):
         n_banks = len(candidates) or 1
-        if n_banks == 1:
-            instr = (
-                "Представь рабочий вариант из ДАННЫЕ живо и по-человечески. "
-                "Один ключевой факт (цена открытия или бонус АУ). "
-                "Не добавляй банков и сумм, которых нет в разделе ДАННЫЕ. "
-                "Максимум 2 предложения."
-            )
+        instr = (
+            f"Покажи {'вариант' if n_banks == 1 else str(n_banks) + ' варианта'} из ДАННЫЕ как менеджер — "
+            "живо, без канцеляритов, только факты из раздела ДАННЫЕ. "
+            f"Максимум {n_banks + 1} предложений. "
+        )
+        if question:
+            q_text = _Q_TEXTS.get(question, _Q_TEXTS["other"])
+            instr += f"В конце задай один вопрос: «{q_text}»"
         else:
-            instr = (
-                f"Покажи {n_banks} рабочих варианта из ДАННЫЕ. "
-                "По каждому — один ключевой факт (цена или бонус АУ). "
-                "Тон живой, как у менеджера, а не справочника. "
-                "Не добавляй оценочных слов. "
-                f"Максимум {n_banks + 1} предложений."
-            )
+            instr += "В конце спроси, что клиент хочет разобрать дальше — своими словами."
+
+    else:
+        instr = (
+            "Ответь на вопрос клиента как менеджер — живо, по-человечески, "
+            "используй только данные из раздела ДАННЫЕ. Максимум 3 предложения."
+        )
         if question:
             q_text = _Q_TEXTS.get(question, _Q_TEXTS["other"])
             instr += f" В конце задай один вопрос: «{q_text}»"
+        elif funnel_next in ("docs", "pricing"):
+            instr += f" В конце предложи разобрать {'документы' if funnel_next == 'docs' else 'тарифы'} — своими словами."
         else:
-            instr += " В конце задай один короткий вопрос — что клиенту интереснее разобрать дальше. Своими словами."
-
-    elif action == "compare":
-        n_banks = len(candidates)
-        instr = (
-            f"Сравни {n_banks} варианта из ДАННЫЕ. "
-            "По каждому банку — ровно 1 факт (цена или ключевая особенность). "
-            "Не делай выводов о 'лучшем' варианте — это решает клиент. "
-            "Не добавляй оценочных слов: 'самый', 'лучший', 'выгоднее всех', 'рекомендую'. "
-            f"Максимум {n_banks + 1} предложений — одно на банк плюс один вопрос в конце."
-        )
-        if question:
-            q_text = _Q_TEXTS.get(question, _Q_TEXTS["other"])
-            instr += f" Финальный вопрос: «{q_text}»"
-        else:
-            instr += " В конце предложи выбрать один вариант для детального разбора — своими словами."
-
-    elif action == "clarify":
-        q_text = _Q_TEXTS.get(question or "other", _Q_TEXTS["other"])
-        instr = (
-            f"Задай клиенту один вежливый вопрос: «{q_text}» "
-            "Не добавляй лишних фраз и не используй данные из раздела ДАННЫЕ если их нет."
-        )
-
-    elif action == "selection_explain":
-        n = len(candidates)
-        points_str = ""
-        if allowed_points:
-            points_str = "\nДопустимые тезисы:\n" + "\n".join(f"- {p}" for p in allowed_points)
-        if n == 1:
-            instr = (
-                "Клиент спрашивает, есть ли другие варианты кроме того, что ты уже назвал. "
-                "Объясни: для данного типа клиента сейчас доступен именно этот банк, "
-                "и кратко поясни почему (цена, доступность, статус). Максимум 2 предложения."
-                + points_str
-            )
-        else:
-            instr = (
-                f"Клиент спрашивает, только ли эти {n} банков есть. "
-                "Подтверди, что это текущий рабочий список, и предложи выбрать один для детального разбора. "
-                "Максимум 2 предложения."
-                + points_str
-            )
-
-    elif action == "pricing_expand":
-        points_str = ""
-        if allowed_points:
-            points_str = "\nДопустимые тезисы (только их озвучь):\n" + "\n".join(f"- {p}" for p in allowed_points)
-        instr = (
-            "Клиент просит больше деталей по тарифам банка из предыдущего ответа. "
-            "Используй ТОЛЬКО тезисы ниже — не добавляй данных которых там нет. "
-            "Максимум 3 предложения."
-            + points_str
-        )
-
-    elif action == "params_explain":
-        points_str = ""
-        if allowed_points:
-            points_str = "\nДопустимые параметры (только их используй):\n" + "\n".join(f"- {p}" for p in allowed_points)
-        instr = (
-            "Клиент спрашивает, по каким параметрам подходит этот банк. "
-            "Используй ТОЛЬКО параметры из списка ниже — не придумывай других. "
-            "Максимум 3 предложения."
-            + points_str
-        )
-
-    else:
-        instr = "Ответь кратко и по делу, используя только данные из раздела ДАННЫЕ."
+            instr += " Если есть логичный следующий шаг — предложи его одной фразой."
 
     # Build explicit whitelists for the LLM
     allowed_banks = sorted({
         c["bank"] for c in candidates if c.get("bank")
     } | ({bank} if bank else set()))
-
-    # Collect raw numbers only (no suffixes) — LLM can use any grammatical form
-    # e.g. "800" → allows "800 руб.", "800 рублей", "800 р.", "800 р/мес"
-    raw_nums: set[str] = set()
-    for i in items:
-        v = i.get("value") or ""
-        for n in re.findall(r"\d+", v):
-            raw_nums.add(n)
-    for c in candidates:
-        for field in ("opening_fee", "monthly_fee"):
-            val = c.get(field)
-            if val is not None:
-                raw_nums.add(str(int(val)))
-
-    allowed_nums_str = ", ".join(sorted(raw_nums, key=int)) if raw_nums else ""
 
     bank_restriction = (
         f"Упоминай ТОЛЬКО эти банки: {', '.join(allowed_banks)}."
@@ -270,13 +173,10 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
             )
     else:
         client_type_restriction = ""
-    num_restriction = (
-        f"Используй ТОЛЬКО эти числа: {allowed_nums_str} (в любом падеже: руб., рублей, р/мес и т.д.)."
-        if allowed_nums_str else
-        "Не называй никаких цифр и сумм — данных нет."
-    )
-
-    client_type_line = f"\n- {client_type_restriction}" if client_type_restriction else ""
+    # Restriction lines (bank + client_type, one per line)
+    restriction_lines = f"- {bank_restriction}"
+    if client_type_restriction:
+        restriction_lines += f"\n- {client_type_restriction}"
 
     # Style adaptation section
     style_section = (
@@ -299,30 +199,26 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
         ctx_parts.append(f"### ПОСЛЕДНИЙ ВОПРОС КЛИЕНТА:\n{user_text}")
     ctx_section = "\n\n".join(ctx_parts)
 
-    return f"""### ROLE
-Ты — Алексей, менеджер ООО «В плюсе». Пишешь живо, как человек, без канцеляритов.
-{style_section}
+    # Load template from render.md (hot-reload: read on every call for dev convenience)
+    try:
+        template = _RENDER_MD.read_text(encoding="utf-8")
+    except Exception:
+        template = (
+            "### РОЛЬ\nТы — Алексей, менеджер ООО «В плюсе». Пишешь живо, как человек.\n"
+            "{style_section}\n{ctx_section}\n\n### ДАННЫЕ ДЛЯ ОТВЕТА (используй только их):\n"
+            "{data_text}\n\n### ЗАДАЧА:\n{instr}{anti_repeat_section}\n\n### ЗАПРЕТЫ:\n"
+            "{restriction_lines}\n- Не добавляй данных, которых нет в разделе ДАННЫЕ.\n"
+            "- Максимум 1 вопрос в конце, только если он указан в задаче."
+        )
 
-{ctx_section}
-
-### ДАННЫЕ ДЛЯ ОТВЕТА (используй только их):
-{data_text}
-
-### ЗАДАЧА:
-{instr}{anti_repeat_section}
-
-### ЖЁСТКИЕ ЗАПРЕТЫ:
-- {bank_restriction}
-- {num_restriction}{client_type_line}
-- Не добавляй документы, условия, ограничения, которых нет в разделе ДАННЫЕ.
-- Не используй оценочные слова: «самый лучший», «выгоднее всех», «рекомендую» (если этого нет в данных).
-- Не пиши слова: «черновик», «база данных», «система», «бот», «ИИ», «алгоритм».
-- Не начинай ответ с «Я» или с «Алексей».
-- Максимум 1 вопрос в конце — только если он указан в задаче.
-- Не повторяй вопрос дважды.
-- Никогда не предлагай ссылки, прайс-листы, перезвонить, написать на почту, прислать файл или сделать что-либо вне этого чата — ты не можешь этого выполнить.
-- Пиши данные естественно: не «Открытие счёта — 1500 руб.», а «открытие 1500 руб.»; не ставь двоеточие между именем банка и данными.
-- Не используй шаблонные концовки: «Хотите разобрать подробнее?», «Что-то ещё уточнить?», «Если появятся вопросы — пишите», «Чем могу помочь?», «Разобрать подробнее — условия, документы или ограничения?». Завершай естественно, под контекст.""".strip()
+    return template.format(
+        style_section=style_section,
+        ctx_section=ctx_section,
+        data_text=data_text,
+        instr=instr,
+        anti_repeat_section=anti_repeat_section,
+        restriction_lines=restriction_lines,
+    ).strip()
 
 
 # ---------------------------------------------------------------------------

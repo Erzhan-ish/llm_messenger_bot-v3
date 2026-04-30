@@ -36,10 +36,16 @@ class Settings(BaseSettings):
     DATABASE_URL: str
 
     # LLM
-    LLM_PROVIDER: str = Field(default="stub")  # stub | ollama
+    LLM_PROVIDER: str = Field(default="stub")  # stub | ollama | timeweb
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "qwen2.5:7b-instruct"
     OLLAMA_ANALYZER_MODEL: str = "qwen2.5:7b-instruct"
+
+    # Timeweb Cloud AI (OpenAI-compatible)
+    TIMEWEB_AI_TOKEN: str = ""
+    TIMEWEB_AI_BASE_URL: str = ""
+    TIMEWEB_AI_MODEL: str = "deepseek-v3"
+    TIMEWEB_AI_ANALYZER_MODEL: str = ""  # falls back to TIMEWEB_AI_MODEL if empty
 
     # Application
     LOG_LEVEL: str = "INFO"

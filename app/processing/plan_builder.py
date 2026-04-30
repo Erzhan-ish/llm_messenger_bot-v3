@@ -7,7 +7,7 @@ from app.processing.utils import _FALLBACK_TEXT
 from app.services.sales_policy import OBJECTION_TYPE_MAP, STAGE_NEXT_STEP
 
 # ---------------------------------------------------------------------------
-# Follow-up detection regexes
+# Follow-up detection regex (used by message_processor for short-reply routing)
 # ---------------------------------------------------------------------------
 _FOLLOWUP_RE = re.compile(
     r"^\s*(ещё|еще|что\s+(ещё|еще)|ну|и|дальше|далее|подробнее|поподробнее"
@@ -15,79 +15,11 @@ _FOLLOWUP_RE = re.compile(
     r")\s*[?!\.]?\s*$",
     re.I | re.U,
 )
-_FOLLOWUP_WHERE_RE = re.compile(
-    r"^\s*(где|где\s+(это|открыть|находится|у\s+вас)|в\s+каком\s+банке)\s*[?!]?\s*$",
-    re.I | re.U,
-)
-_FOLLOWUP_ONLY_RE = re.compile(
-    # "только что" исключаем — это про время, не про единственность варианта
-    r"(только\s+(?!что\b)\w+(\s+(есть|доступ\w+))?|других\s+нет|больше\s+нет|других\s+вариантов\s+нет"
-    r"|один\s+вариант|нет\s+других|всего\s+один"
-    r"|какие\s+еще\s+(есть|варианты|банки)\b|что\s+еще\s+есть|еще\s+варианты\s+есть"
-    r"|есть\s+еще\s+(варианты|банки)|другие\s+варианты\s+есть|а\s+другие\s+\w+\s+есть)",
-    re.I | re.U,
-)
-_FOLLOWUP_CONDITIONS_RE = re.compile(
-    r"(какие\s+условия|ещ[её]\s+условия|подробнее\s+(об?\s+)?условия|условия\s+счет"
-    r"|условия\s+тариф|расскажи\s+условия|что\s+за\s+условия|а\s+условия|а\s+тариф)",
-    re.I | re.U,
-)
-_FOLLOWUP_PARAMS_RE = re.compile(
-    r"(по\s+каким\s+(еще\s+)?параметрам|какие\s+параметры|каким\s+параметрам"
-    r"|что\s+за\s+параметры|объясни\s+подробнее|почему\s+(именно\s+)?этот)",
-    re.I | re.U,
-)
-_YES_RE = re.compile(
-    r"^\s*(да|да\s*,?\s*(хочу|давайте|конечно|пожалуйста|интересно|расскажи|можно|подробнее|поподробнее)"
-    r"|ок\s+давайте|хочу\s+узнать|да\s+пожалуйста|ну\s+да|конечно\s+да"
-    r"|да\s+поподробнее|да\s+подробнее|подробнее\s+пожалуйста|хочу\s+подробнее"
-    r"|давайте\s+(подробнее|поподробнее|расскажите?|детальнее|разберём|разберем)"
-    r"|расскажите?\s+(подробнее|поподробнее|детальнее)"
-    r"|расскажите?|давайте|можно|интересно|хм+|мм+)\s*[.!?]?\s*$",
-    re.I | re.U,
-)
-_EXPAND_BANKS_RE = re.compile(
-    r"^(а\s+(в\s+|у\s+)?(уралсиб|альфа|ткб|т-банк|мкб|росбанк|россельхоз)\w*"
-    r"|а\s+(другие|остальные|ещ[её])\s+(банки|варианты)"
-    r"|а\s+в\s+других\s+банках"
-    r"|что\s+по\s+(уралсибу|альфе|ткб|т-банку|мкб|росбанку))",
-    re.I | re.U,
-)
-_TIMING_RE = re.compile(
-    r"\b(как\s+долго|сколько\s+(времени|дней?|ждать)|срок\s+открыт|за\s+сколько\s+(откр|дн)|"
-    r"когда\s+(будет\s+)?готов|долго\s+ли|быстро\s+ли\s+откр|время\s+открыт)",
-    re.I | re.U,
-)
+
 _TIMING_REPLY = (
     "Счёт обычно открывают за 1–3 рабочих дня с момента подачи документов. "
     "В некоторых банках — быстрее, если все документы в порядке. "
     "Хотите узнать, что нужно подготовить?"
-)
-_PARTNER_BANKS_RE = re.compile(
-    r"(с\s+кем\s+(вы\s+)?(работаете|сотрудничаете)|какие\s+банки\s+у\s+вас"
-    r"|с\s+какими\s+банками|какие\s+(у\s+вас\s+)?партнеры|банки\s*[?!]$"
-    r"|список\s+банков|ваши\s+банки|какие\s+есть\s+банки)",
-    re.I | re.U,
-)
-
-# Follow-up: "а открытие сколько?", "ведение стоит?", "а в месяц?" — компонент цены по тому же банку
-_PRICE_COMPONENT_RE = re.compile(
-    r"(открытие\s+(сколько|стоит|цена)|а\s+открытие|сколько\s+(стоит\s+)?открыт"
-    r"|ведение\s+(сколько|стоит)|а\s+ведение|в\s+месяц\s+сколько|сколько\s+в\s+месяц"
-    r"|платёж[а-я]*\s+сколько|переводы?\s+сколько|комисси[а-я]+\s+за"
-    r"|а\s+ежемесячн|ежемесячное?\s+(плат|стоит|сколько))",
-    re.I | re.U,
-)
-
-# Follow-up: "вы же сказали 1600", "только что было другое" — противоречие в цифрах
-_CONTRADICTION_RE = re.compile(
-    r"(вы\s+же\s+(сказали|говорили)|ты\s+(же\s+)?(сказал|говорил)"
-    r"|только\s+что\s+(было|сказал|написал|говорил|сказали)"
-    r"|сначала\s+(одно|другое|было|сказал|сказали)"
-    r"|раньше\s+(было|сказал|написал|сказали)|недавно\s+(сказал|написал|сказали)"
-    r"|теперь\s+(говоришь|пишешь|говорите|пишете)\s+(другое|иначе)"
-    r"|противоречи|сначала\s+\w+\s+а\s+теперь|сначала\s+написал)",
-    re.I | re.U,
 )
 
 # ---------------------------------------------------------------------------
@@ -216,6 +148,14 @@ def _plan_clarify(base: dict, qmode: str, question: str, slots: dict) -> dict:
     return base
 
 
+def _plan_partner_banks(base: dict, slots: dict) -> dict:
+    client_type = slots.get("client_type") or slots.get("_last_client_type")
+    base["action"]      = "partner_banks"
+    base["intent"]      = "partner_banks"
+    base["client_type"] = client_type
+    return base
+
+
 def _plan_selection_opening(base: dict, candidates: list, slots: dict,
                              client_type, priority) -> dict:
     """
@@ -283,7 +223,7 @@ def _candidate_points(candidates: list) -> list[str]:
     return points
 
 
-def _plan_bank_selection(base: dict, facts: dict, slots: dict,
+def _plan_bank_selection(base: dict, facts: dict, slots: dict, decision: dict,
                           client_type, priority) -> dict:
     all_banks  = facts.get("all_found_banks") or []
     candidates = [c for c in all_banks if c.get("status") == "ACTIVE" and c.get("rank_score", 0) > 0]
@@ -299,6 +239,8 @@ def _plan_bank_selection(base: dict, facts: dict, slots: dict,
 
     sales_stage = slots.get("sales_stage")
     is_first_selection = sales_stage in (None, "QUALIFY", "SELECT") and not slots.get("_last_candidates")
+    if decision.get("multi_intent") and decision.get("is_first_turn"):
+        is_first_selection = True
 
     if len(candidates) == 1:
         c = candidates[0]
@@ -360,12 +302,10 @@ def _plan_factual(base: dict, qmode: str, facts_result: dict, facts: dict,
             base["bank"]        = bank
             base["client_type"] = bank_profile.get("client_type") or client_type
             if not bank:
-                # Constraints found but no bank — ask which bank they prefer
                 q = "bank_name" if client_type else "client_type"
                 base["question_to_ask"] = q
                 slots["_pending_question_type"] = q
             return base
-        # No constraints found → clarify based on what we know
         if client_type:
             return _plan_clarify(base, qmode, "bank_name", slots)
         return _plan_clarify(base, qmode, "other", slots)
@@ -441,219 +381,6 @@ def _plan_factual(base: dict, qmode: str, facts_result: dict, facts: dict,
 
 
 # ---------------------------------------------------------------------------
-# Follow-up plan builders
-# ---------------------------------------------------------------------------
-def _plan_selection_explain(base: dict, slots: dict) -> dict:
-    """'только ТКБ?' / 'других нет?' — объяснить границы выбора."""
-    candidates  = slots.get("_last_candidates") or []
-    client_type = slots.get("client_type") or slots.get("_last_client_type")
-    base["action"]      = "selection_explain"
-    base["intent"]      = "availability_scope"
-    base["candidates"]  = candidates
-    base["client_type"] = client_type
-
-    n = len(candidates)
-    ct_label = client_type or "данного типа клиента"
-    if n == 1:
-        bank_name = candidates[0].get("bank", "") if candidates else ""
-        base["allowed_points"] = [
-            f"для {ct_label} сейчас доступен именно {bank_name}",
-            "список актуальный — другие варианты либо на паузе, либо недоступны",
-            "готов разобрать этот вариант подробнее",
-        ]
-    else:
-        names = ", ".join(c.get("bank", "") for c in candidates if c.get("bank"))
-        base["allowed_points"] = [
-            f"для {ct_label} сейчас доступны: {names}",
-            "это текущий рабочий список — другие варианты временно недоступны",
-            "предложу выбрать один для детального разбора",
-        ]
-    return base
-
-
-def _plan_pricing_expand(base: dict, slots: dict) -> dict:
-    """'еще?' / 'тарифы условия' после ответа по цене — раскрыть детали."""
-    base["action"]   = "pricing_expand"
-    base["intent"]   = "pricing"
-    base["bank"]     = slots.get("_last_bank") or slots.get("bank_name")
-    items = slots.get("_last_items") or []
-    base["items"]    = items
-    base["client_type"] = slots.get("client_type") or slots.get("_last_client_type")
-    base["allowed_points"] = [
-        f"{i['label']}: {i['value']}" for i in items if i.get("label") and i.get("value")
-    ]
-    return base
-
-
-def _plan_where_answer(base: dict, slots: dict) -> dict:
-    """'где?' после ответа с банком — уточнить банк из контекста."""
-    bank = slots.get("_last_bank") or slots.get("bank_name")
-    base["action"] = "where_answer"
-    base["intent"] = "location"
-    base["bank"]   = bank
-    return base
-
-
-def _plan_partner_banks(base: dict, slots: dict) -> dict:
-    """'с кем работаете?' — прямой список банков-партнёров."""
-    client_type = slots.get("client_type") or slots.get("_last_client_type")
-    base["action"]      = "partner_banks"
-    base["intent"]      = "partner_banks"
-    base["client_type"] = client_type
-    return base
-
-
-def _plan_params_explain(base: dict, slots: dict) -> dict:
-    """'по каким параметрам?' / 'почему этот банк?' — объяснение критериев выбора."""
-    base["action"]     = "params_explain"
-    base["intent"]     = "selection_explain"
-    base["bank"]       = slots.get("_last_bank") or slots.get("bank_name")
-    candidates = slots.get("_last_candidates") or []
-    items      = slots.get("_last_items") or []
-    base["candidates"] = candidates
-    base["items"]      = items
-    base["client_type"] = slots.get("client_type") or slots.get("_last_client_type")
-    points: list[str] = []
-    for i in items[:3]:
-        if i.get("label") and i.get("value"):
-            points.append(f"{i['label']}: {i['value']}")
-    for c in candidates[:2]:
-        if c.get("main_feature"):
-            points.append(c["main_feature"])
-    base["allowed_points"] = points
-    return base
-
-
-def _plan_pricing_same_bank(base: dict, slots: dict) -> dict:
-    """'а открытие сколько?' — раскрыть недостающий компонент цены по тому же банку.
-
-    Не идёт в retriever — использует только сохранённые _last_items/_last_bank_anchor.
-    """
-    bank  = slots.get("_last_bank_anchor") or slots.get("_last_bank") or slots.get("bank_name")
-    items = slots.get("_last_items") or []
-    base["action"]        = "pricing_expand"
-    base["intent"]        = "pricing"
-    base["bank"]          = bank
-    base["items"]         = items
-    base["client_type"]   = slots.get("client_type") or slots.get("_last_client_type")
-    base["allowed_points"] = [
-        f"{i['label']}: {i['value']}" for i in items if i.get("label") and i.get("value")
-    ]
-    return base
-
-
-def _plan_contradiction_repair(base: dict, slots: dict) -> dict:
-    """'вы же сказали 1600' — признать расхождение, дать только подтверждённые факты.
-
-    Статический ответ — LLM не вызывается, чтобы не добавить новых галлюцинаций.
-    """
-    bank  = slots.get("_last_bank_anchor") or slots.get("_last_bank") or slots.get("bank_name")
-    items = slots.get("_last_items") or []
-    base["action"]        = "contradiction_repair"
-    base["intent"]        = "pricing"
-    base["bank"]          = bank
-    base["items"]         = items
-    base["client_type"]   = slots.get("client_type") or slots.get("_last_client_type")
-    base["allowed_points"] = [
-        f"{i['label']}: {i['value']}" for i in items if i.get("label") and i.get("value")
-    ]
-    return base
-
-
-# ---------------------------------------------------------------------------
-# Semantic follow-up interpreter
-# ---------------------------------------------------------------------------
-def try_build_followup_plan(user_text: str, slots: dict) -> dict | None:
-    """
-    Перехватывает короткие follow-up реплики, опираясь на _last_* из slots.
-    Возвращает готовый plan или None (→ обычный pipeline).
-    """
-    last_mode   = slots.get("_last_mode")
-    last_action = slots.get("_last_action")
-    has_history = bool(last_mode or slots.get("_last_bank") or slots.get("_last_candidates"))
-
-    base = _make_base(slots.get("client_type") or slots.get("_last_client_type"))
-
-    if _TIMING_RE.search(user_text):
-        base["action"] = "timing"
-        base["intent"] = "timing"
-        return base
-
-    if not has_history:
-        return None
-
-    # "вы же сказали 1600" — клиент указывает на противоречие в цифрах
-    # Перехватываем ПЕРВЫМ — до _FOLLOWUP_ONLY_RE, чтобы "только что" не попало в selection_explain
-    if _CONTRADICTION_RE.search(user_text):
-        if slots.get("_last_bank") or slots.get("_last_items"):
-            return _plan_contradiction_repair(base, slots)
-
-    # "а открытие сколько?", "ведение стоит?" — компонент цены по тому же банку
-    if _PRICE_COMPONENT_RE.search(user_text) and (
-        slots.get("_last_bank_anchor") or slots.get("_last_bank")
-    ):
-        return _plan_pricing_same_bank(base, slots)
-
-    if _YES_RE.match(user_text):
-        expected     = slots.get("_last_expected_followup")
-        offered_turn = slots.get("_last_expected_followup_turn", 0)
-        current_turn = slots.get("_turn_count", 0)
-        followup_fresh = (current_turn - offered_turn) <= 1
-
-        if expected and followup_fresh:
-            slots.pop("_last_expected_followup", None)
-            slots.pop("_last_expected_followup_turn", None)
-
-            if expected == "docs" and slots.get("_last_bank"):
-                base["action"] = "answer"
-                base["intent"] = "docs"
-                base["bank"]   = slots.get("_last_bank")
-                base["client_type"] = slots.get("client_type") or slots.get("_last_client_type")
-                base["docs"] = slots.get("_last_docs") or []
-                base["allowed_points"] = [f"документ: {d}" for d in (base["docs"] or [])]
-                return base
-
-            if expected == "pricing" and slots.get("_last_bank") and slots.get("_last_items"):
-                return _plan_pricing_expand(base, slots)
-
-    if _EXPAND_BANKS_RE.match(user_text):
-        had_shortlist = bool(slots.get("_last_candidates")) or slots.get("_last_plan_type") in (
-            "partner_banks", "selection_opening", "compare"
-        )
-        if had_shortlist:
-            return _plan_partner_banks(base, slots)
-
-    if _PARTNER_BANKS_RE.search(user_text):
-        return _plan_partner_banks(base, slots)
-
-    if _FOLLOWUP_WHERE_RE.match(user_text) and slots.get("_last_bank"):
-        return _plan_where_answer(base, slots)
-
-    if _FOLLOWUP_ONLY_RE.search(user_text):
-        return _plan_selection_explain(base, slots)
-
-    if _FOLLOWUP_PARAMS_RE.search(user_text):
-        return _plan_params_explain(base, slots)
-
-    if _FOLLOWUP_CONDITIONS_RE.search(user_text) and slots.get("_last_bank"):
-        if slots.get("_last_items"):
-            return _plan_pricing_expand(base, slots)
-
-    last_plan_type = slots.get("_last_plan_type")
-    if _FOLLOWUP_RE.match(user_text) and (
-        last_mode in ("pricing", "specific_bank")
-        or last_plan_type in ("selection_opening", "answer")
-    ):
-        if slots.get("_last_items"):
-            return _plan_pricing_expand(base, slots)
-
-    if last_plan_type == "selection_opening" and _FOLLOWUP_ONLY_RE.search(user_text):
-        return _plan_selection_explain(base, slots)
-
-    return None
-
-
-# ---------------------------------------------------------------------------
 # Response plan builder
 # ---------------------------------------------------------------------------
 def build_response_plan(
@@ -679,7 +406,10 @@ def build_response_plan(
     if decision.get("action") == "HANDOFF":
         return _plan_handoff(base, qmode, decision.get("handoff_reason") or "early_handoff")
     if qmode == "bank_selection":
-        return _plan_bank_selection(base, facts, slots, client_type, priority)
-    if qmode == "partner_banks":
-        return _plan_partner_banks(base, slots)
-    return _plan_factual(base, qmode, facts_result, facts, slots, decision, client_type, confidence)
+        plan = _plan_bank_selection(base, facts, slots, decision, client_type, priority)
+    elif qmode == "partner_banks":
+        plan = _plan_partner_banks(base, slots)
+    else:
+        plan = _plan_factual(base, qmode, facts_result, facts, slots, decision, client_type, confidence)
+
+    return plan

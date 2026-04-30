@@ -174,10 +174,22 @@ def extract_runtime_slots(text: str, slots: Dict) -> Dict:
     # 2. client_type normalization
     _prev_client_type = slots.get("client_type")
 
+    # Priority correction check (Entity Stickiness purge)
+    correction_match = re.search(r"(?:нет|не)\s*(?:ип|фл|физ[\.\s]*лиц\w*|юл|ооо|юр[\.\s]*лиц\w*|физик).*(?:а\s+)?(ооо|ип|юл|фл|физ[\.\s]*лиц\w*|юр[\.\s]*лиц\w*|физик)", t)
+    if correction_match:
+        corrected = correction_match.group(1)
+        if any(x in corrected for x in ["ооо", "юр", "юл"]):
+            slots["client_type"] = "ЮЛ"
+        elif any(x in corrected for x in ["ип"]):
+            slots["client_type"] = "ИП"
+        elif any(x in corrected for x in ["физ", "фл", "физик"]):
+            slots["client_type"] = "ФЛ"
+
     # First pass: set if unknown
     if not slots.get("client_type"):
-        if any(x in t for x in ["физ лицо", "фл", "физлицо", "физическое лицо",
-                                  "должник", "банкрот", "списывают долги", "физик"]):
+        if any(x in t for x in ["физ лицо", "фл", "физлицо", "физическое", 
+                                "физ.", "физику", "физики",
+                                "должник", "банкрот", "списывают долги", "физик"]):
             slots["client_type"] = "ФЛ"
         elif any(x in t for x in ["ооо", "юр лицо", "юл", "юрлицо", "организаци"]):
             slots["client_type"] = "ЮЛ"

@@ -7,12 +7,7 @@ from typing import Tuple
 from app.llm.prompts.manager.loader import build_render_prompt
 from app.llm.providers import ask_llm
 from app.logging import logger
-from app.processing.plan_builder import (
-    _make_base,
-    build_response_plan,
-    try_build_followup_plan,
-    _TIMING_REPLY,
-)
+from app.processing.plan_builder import build_response_plan
 from app.processing.utils import (
     _FALLBACK_TEXT,
     _build_dialog_context,
@@ -32,7 +27,7 @@ _SERVICE_TEXTS = {
     "greeting":      "Здравствуйте! Я Алексей, менеджер компании «В плюсе». Помогаю арбитражным управляющим открывать расчётные счета для должников — быстро и без посещения банка. Для кого нужен счёт?",
     "ack":           "Понял вас, продолжаем.",
     "thanks":        "Пожалуйста! Если появятся вопросы — пишите.",
-    "intro":         "Живой — Алексей, менеджер в «В плюсе». Помогаю АУ открывать счета для должников дистанционно, подбираю банк и собираю документы. Что интересует?",
+    "intro":         "Алексей, менеджер «В плюсе» — живой человек, не бот. Помогаю АУ открывать счета для должников дистанционно: подбираю банк, собираю документы. Что интересует?",
     "smalltalk":     "Я здесь, чтобы помочь с открытием счёта. Что вас интересует?",
     "no_candidates": "По вашему запросу сейчас нет подходящих активных вариантов. "
                      "Уточните тип клиента и приоритеты — помогу подобрать.",
@@ -55,11 +50,11 @@ _PARTNER_BANKS_ALL = (
 )
 
 _HANDOFF_BRIDGE_TEMPLATES = {
-    "ready_with_bank":  "Отлично, {bank} — фиксируем. Подключаю старшего менеджера, он свяжется с вами и возьмёт всё необходимое.",
-    "ready_nobank":     "Хорошо, двигаемся! Подключаю старшего менеджера — он свяжется с вами и поможет с оформлением.",
-    "human_request":    "Конечно, подключаю старшего менеджера. Он ответит вам в ближайшее время.",
-    "action_intent":    "Минутку, подключаю старшего менеджера — он примет всё напрямую.",
-    "default":          "Подключаю старшего менеджера — он разберёт ситуацию подробнее.",
+    "ready_with_bank":  "Отлично, {bank} — фиксируем. Минутку, подключу старшего менеджера, чтобы помочь вам дальше.",
+    "ready_nobank":     "Хорошо, двигаемся! Минутку, подключу старшего менеджера, чтобы помочь вам дальше.",
+    "human_request":    "Конечно. Минутку, подключу старшего менеджера, чтобы помочь вам дальше.",
+    "action_intent":    "Минутку, подключу старшего менеджера, чтобы помочь вам дальше.",
+    "default":          "Минутку, подключу старшего менеджера, чтобы помочь вам дальше.",
 }
 
 _CLARIFY_VARIANTS: dict[str, list[str]] = {
@@ -128,33 +123,26 @@ _FALLBACK_QUESTIONS = {
 }
 
 
-def _plan_fallback_text(plan: dict) -> str:
-    """
-    Safe client-facing fallback when LLM render fails validation.
-    Never leaks internal system phrases. Renders facts directly from plan.
-    """
+def _plan_fallback_text(plan: dict, slots: dict = None) -> str:
+    """Fallback when LLM render fails — renders facts directly from plan data."""
+    slots = slots or {}
     bank        = plan.get("bank")
     items       = plan.get("items") or []
-    docs        = plan.get("docs") or []
     candidates  = plan.get("candidates") or []
     client_type = plan.get("client_type") or ""
     question    = plan.get("question_to_ask")
     q_suffix    = f" {_FALLBACK_QUESTIONS[question]}" if question in _FALLBACK_QUESTIONS else ""
 
+    if bank and items:
+        facts = ", ".join(
+            f"{i['label']} — {i['value']}" for i in items if i.get("label") and i.get("value")
+        )
+        return f"{bank}: {facts}.{q_suffix}" if facts else f"По {bank} уточняю данные.{q_suffix}"
+
     if candidates:
         names = ", ".join(c["bank"] for c in candidates if c.get("bank"))
         ct = f" для {client_type}" if client_type else ""
         return f"Рабочие варианты{ct}: {names}. Что важнее — цена открытия или дальнейшие условия?"
-
-    if bank and docs:
-        docs_str = ", ".join(docs[:6])
-        return f"Для {bank} нужны: {docs_str}. Что-то ещё уточнить?"
-
-    if bank and items:
-        parts = [f"По {bank}:"]
-        parts += [f"{i['label']} — {i['value']}" for i in items if i.get("label") and i.get("value")]
-        tail = " Что хотите уточнить — документы или условия работы?" if not q_suffix else q_suffix
-        return " ".join(parts) + tail
 
     if bank:
         return f"По {bank} — уточните, что именно хотите разобрать: тарифы, документы или условия?"
@@ -164,14 +152,6 @@ def _plan_fallback_text(plan: dict) -> str:
 
     return _FALLBACK_TEXT
 
-
-# Commit-intent guard — if user text matches, skip all sales follow-up intercepts
-_COMMIT_GUARD_RE = re.compile(
-    r"(мне\s+подходит|это\s+подходит|подходит|устраивает|сойд[её]т"
-    r"|договорились|начинаем|оформляем|приступаем|по\s+рукам"
-    r"|готов\s+открыть|хочу\s+открыть|давайте\s+оформим|готов\s+к\s+оформлению)",
-    re.I | re.U,
-)
 
 _SELECTION_OPENING_ENDINGS = [
     "Разобрать подробнее — условия, документы или ограничения?",
@@ -194,7 +174,7 @@ def _fmt_fee(value, suffix: str = " руб./мес.") -> str:
 
 
 def _render_selection_opening_static(plan: dict) -> str:
-    """Static render for single-bank selection_opening — no LLM, no hallucinations."""
+    """Static render for selection_opening — no LLM, no hallucinations. Handles 1+ candidates."""
     candidates  = plan.get("candidates") or []
     client_type = plan.get("client_type") or ""
     question    = plan.get("question_to_ask")
@@ -205,25 +185,34 @@ def _render_selection_opening_static(plan: dict) -> str:
     if not candidates:
         return _FALLBACK_TEXT
 
-    c    = candidates[0]
-    bank = c.get("bank", "")
-    of   = c.get("opening_fee")
-    mf   = c.get("monthly_fee")
-    bonus = c.get("bonus_rate") or ""  # Never use main_feature as "бонус АУ" label
+    if len(candidates) == 1:
+        c    = candidates[0]
+        bank = c.get("bank", "")
+        of   = c.get("opening_fee")
+        mf   = c.get("monthly_fee")
+        parts = []
+        if of is not None:
+            parts.append(f"открытие {_fmt_fee(of, ' руб.')}")
+        if mf is not None:
+            parts.append(f"ведение {_fmt_fee(mf, ' руб./мес.')}")
+        pricing = ", ".join(parts)
+        body = f"{ct_prefix}рабочий вариант — {bank}" + (f", {pricing}" if pricing else "") + "."
+    else:
+        bank_parts = []
+        for c in candidates:
+            bank = c.get("bank", "")
+            of   = c.get("opening_fee")
+            mf   = c.get("monthly_fee")
+            details = []
+            if of is not None:
+                details.append(f"открытие {int(of)} руб.")
+            if mf is not None:
+                details.append(f"ведение {int(mf)} руб./мес.")
+            info = bank + (f" ({', '.join(details)})" if details else "")
+            bank_parts.append(info)
+        names_str = ", ".join(bank_parts)
+        body = f"{ct_prefix}рабочие варианты: {names_str}."
 
-    parts = []
-    if of is not None:
-        parts.append(f"открытие {_fmt_fee(of, ' руб.')}")
-    if mf is not None:
-        parts.append(f"ведение {_fmt_fee(mf, ' руб./мес.')}")
-    if bonus:
-        parts.append(f"бонус АУ {bonus}")
-
-    pricing = ", ".join(parts)
-    # Use a comma instead of colon so it reads naturally: "рабочий вариант — ТКБ, открытие 1500 руб."
-    body = f"{ct_prefix}рабочий вариант — {bank}" + (f", {pricing}" if pricing else "") + "."
-
-    # Prepend the first relevant constraint if present (e.g. "карта подписывается финансовым управляющим")
     constraints = plan.get("constraints") or []
     if constraints:
         body = f"{constraints[0]} {body}"
@@ -232,7 +221,8 @@ def _render_selection_opening_static(plan: dict) -> str:
         q_text = _CLARIFY_VARIANTS[question][0]
         return f"{body} {q_text}"
 
-    idx = abs(hash(bank + client_type)) % len(_SELECTION_OPENING_ENDINGS)
+    key = "".join(c.get("bank", "") for c in candidates) + client_type
+    idx = abs(hash(key)) % len(_SELECTION_OPENING_ENDINGS)
     return f"{body} {_SELECTION_OPENING_ENDINGS[idx]}"
 
 
@@ -285,10 +275,9 @@ def _render_specific_bank_static(plan: dict) -> str:
 
 # ---------------------------------------------------------------------------
 # Render manager text
-# service / handoff / clarify → static templates (NO LLM)
-# answer / compare / selection_* → single LLM call
 # ---------------------------------------------------------------------------
-async def render_manager_text(plan: dict, *, user_text: str = "", dialog_ctx: str = "") -> str:
+async def render_manager_text(plan: dict, *, user_text: str = "", dialog_ctx: str = "", slots: dict = None) -> str:
+    slots = slots or {}
     action = plan.get("action")
 
     if action == "service":
@@ -298,6 +287,10 @@ async def render_manager_text(plan: dict, *, user_text: str = "", dialog_ctx: st
                 f"К сожалению, {plan['bank']} временно не принимает новые счета. "
                 f"Хотите рассмотреть другие банки-партнёры?"
             )
+        if intent == "intro":
+            last_bot = slots.get("_last_bot_text", "")
+            if last_bot and ("плюсе" in last_bot.lower() or "алексей" in last_bot.lower()):
+                return "Да, уже представился. Что именно интересует — условия, банки или документы?"
         return _SERVICE_TEXTS.get(intent, _FALLBACK_TEXT)
 
     if action == "handoff":
@@ -309,44 +302,26 @@ async def render_manager_text(plan: dict, *, user_text: str = "", dialog_ctx: st
     if action == "partner_banks":
         return _render_partner_banks(plan)
 
-    if action == "where_answer":
-        bank = plan.get("bank")
-        if bank:
-            return f"Счёт в {bank} — открываем через наш офис, всё дистанционно. Нужна помощь с документами?"
-        return "Уточните банк — подскажу где и как открываем."
-
-    if action == "timing":
-        return _TIMING_REPLY
-
-    if action == "contradiction_repair":
-        bank  = plan.get("bank")
-        items = plan.get("items") or []
-        if bank and items:
-            facts_str = ", ".join(
-                f"{i['label']} — {i['value']}" for i in items if i.get("label") and i.get("value")
-            )
-            return (
-                f"Понял, здесь я ответил неточно. Подтверждённые данные по {bank}: {facts_str}. "
-                f"Хотите сравнить с другим вариантом или разобрать условия подробнее?"
-            )
-        if bank:
-            return (
-                f"Понял. Давайте уточним: по {bank} что именно хотите разобрать — "
-                f"открытие или ведение счёта?"
-            )
-        return "Понял. Скажите, по какому банку и какие именно цифры хотите уточнить."
-
     prompt = build_render_prompt(plan, user_text=user_text, dialog_ctx=dialog_ctx)
     messages = [{"role": "system", "content": prompt}]
     if user_text:
         messages.append({"role": "user", "content": user_text})
     try:
-        text = await ask_llm(messages, max_tokens=180)
+        raw_text = await ask_llm(messages, max_tokens=300)
     except Exception:
         logger.exception("render_manager_text LLM failed")
-        return _plan_fallback_text(plan)
+        return _plan_fallback_text(plan, slots)
 
-    text = cleanup_text(text)
+    logger.info("LLM raw response (action={}, len={}): {!r}", action, len(raw_text or ""), (raw_text or "")[:300])
+    text = cleanup_text(raw_text)
+
+    if not text:
+        logger.warning("Render manager text is empty, using static fallback")
+        if action == "selection_opening":
+            return _render_selection_opening_static(plan)
+        if action in ("answer", "pricing_expand") and plan.get("bank") and plan.get("items"):
+            return _render_specific_bank_static(plan)
+        return _plan_fallback_text(plan, slots)
 
     facts_for_val = {
         "bank":        plan.get("bank"),
@@ -362,7 +337,7 @@ async def render_manager_text(plan: dict, *, user_text: str = "", dialog_ctx: st
             return _render_selection_opening_static(plan)
         if action == "answer" and plan.get("bank") and plan.get("items"):
             return _render_specific_bank_static(plan)
-        return _plan_fallback_text(plan)
+        return _plan_fallback_text(plan, slots)
 
     return text
 
@@ -384,20 +359,6 @@ async def answer_with_plan(
 
     update_sales_state(user_text, slots, decision)
 
-    # Skip sales follow-up intercepts when user has already committed — prevents
-    # pricing_expand / selection loops when "мне подходит" / "давайте" is in play.
-    followup_plan = None
-    if not _COMMIT_GUARD_RE.search(user_text) and not slots.get("_had_consent"):
-        followup_plan = try_build_followup_plan(user_text, slots)
-    if followup_plan is not None:
-        logger.info("Session {} | follow-up intercept | action={}", session_id, followup_plan.get("action"))
-        followup_plan["_seed"] = user_text
-        msgs = await get_messages_by_session(session_id)
-        dialog_ctx = _build_dialog_context(msgs, max_items=6, max_chars=1200)
-        text = await render_manager_text(followup_plan, user_text=user_text, dialog_ctx=dialog_ctx)
-        text = (text or "").strip() or _FALLBACK_TEXT
-        return text, False
-
     facts_result: dict = {"facts": {}, "confidence": 0.0, "retrieval_reason": "bypass_by_mode",
                           "matched_fields": [], "missing_fields": [], "source_chunks": []}
     if qmode not in ("service", "intro", "smalltalk"):
@@ -417,6 +378,10 @@ async def answer_with_plan(
     # Greeting asks "Для кого нужен счёт?" — set pending so short replies are routed correctly
     if plan.get("action") == "service" and plan.get("intent") == "greeting":
         slots["_pending_question_type"] = "client_type"
+
+    # Track intro context so follow-up "ты человек?" type messages route correctly
+    if plan.get("action") == "service" and plan.get("intent") == "intro":
+        slots["_last_intent"] = "intro"
 
     if plan.get("action") in ("answer", "compare", "selection_opening"):
         slots["_last_mode"]      = qmode
@@ -460,7 +425,7 @@ async def answer_with_plan(
     await set_slots(session_id, slots)
 
     msgs = await get_messages_by_session(session_id)
-    dialog_ctx = _build_dialog_context(msgs, max_items=6, max_chars=1200)
+    dialog_ctx = _build_dialog_context(msgs, max_items=8, max_chars=1600)
 
     if len([m for m in msgs if (m.get("text") or "").strip()]) > 12:
         try:
@@ -470,8 +435,13 @@ async def answer_with_plan(
         except Exception:
             pass
 
-    text = await render_manager_text(plan, user_text=user_text, dialog_ctx=dialog_ctx)
-    text = (text or "").strip() or _FALLBACK_TEXT
+    text = await render_manager_text(plan, user_text=user_text, dialog_ctx=dialog_ctx, slots=slots)
+    text = text if text else _plan_fallback_text(plan, slots)
+
+    # Dynamic Greeting Injection
+    if slots.get("_turn_count", 0) <= 1 and plan.get("action") != "service" and text:
+        if "здравствуйте" not in text.lower() and "добрый" not in text.lower() and "привет" not in text.lower():
+            text = "Здравствуйте! Я Алексей, менеджер «В плюсе». " + text
 
     # Self-check: если ответ похож на предыдущий — один авторетрай с анти-повтором
     from app.processing.utils import _is_near_duplicate
@@ -481,7 +451,7 @@ async def answer_with_plan(
             logger.info("Session {} | Self-check: near-duplicate, retrying render", session_id)
             retry_plan = {**plan, "_prev_bot_text": prev_text}
             try:
-                retry_text = await render_manager_text(retry_plan, user_text=user_text, dialog_ctx=dialog_ctx)
+                retry_text = await render_manager_text(retry_plan, user_text=user_text, dialog_ctx=dialog_ctx, slots=slots)
                 retry_text = (retry_text or "").strip()
                 if retry_text and not _is_near_duplicate(retry_text, prev_text):
                     text = retry_text

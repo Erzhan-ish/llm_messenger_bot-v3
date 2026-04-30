@@ -4,6 +4,7 @@ Builds bank profiles and candidate lists directly from KBChunk fields.
 """
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.knowledge_base.service import get_kb, _kb_query_variants, _extract_bank_hints
@@ -68,9 +69,14 @@ def _build_bank_profile(chunks: list, *, client_type: Optional[str] = None) -> D
     ordered = sorted(chunks, key=lambda c: (0 if _ct_match(c) else 1))
 
     for ch in ordered:
-        bank = getattr(ch, "bank", None)
-        if bank and not profile["bank"]:
-            profile["bank"] = bank
+        ch_bank = getattr(ch, "bank", None)
+        if ch_bank and not profile["bank"]:
+            profile["bank"] = ch_bank
+
+        # Skip bank-specific data (pricing/bonus/docs/availability) from a different bank
+        # to prevent cross-bank contamination of the profile
+        if ch_bank and profile["bank"] and ch_bank != profile["bank"]:
+            continue
 
         ct_list = getattr(ch, "client_type", None) or []
         if ct_list and not profile["client_type"]:
@@ -320,7 +326,13 @@ async def retrieve_facts(
     client_type = slots.get("client_type")
     priority    = slots.get("priority_criteria")
     allowed_types = QUERY_MODE_FILTER_MAP.get(query_mode, [])
-    k = 6 if query_mode == "bank_selection" else 4
+    
+    if query_mode in ("pricing", "specific_bank"):
+        k = 12
+    elif query_mode == "bank_selection":
+        k = 15  # need pricing chunks for multiple banks simultaneously
+    else:
+        k = 4
 
     bank_hints = _extract_bank_hints(question)
 
@@ -442,6 +454,7 @@ async def retrieve_facts(
         "RetrieveFacts | mode={} | conf={} | reason={} | matched={}",
         query_mode, confidence, reason, matched,
     )
+    logger.info("RetrieveFacts final JSON: {}", json.dumps(facts, ensure_ascii=False))
 
     return {
         "facts": facts,
