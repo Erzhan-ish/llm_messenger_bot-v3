@@ -33,6 +33,9 @@ class TimewebProvider:
         }
         if is_gpt5:
             payload["max_completion_tokens"] = limit
+            reasoning_effort = (settings.TIMEWEB_REASONING_EFFORT or "").strip()
+            if reasoning_effort:
+                payload["reasoning_effort"] = reasoning_effort
         else:
             payload["max_tokens"] = limit
             payload["temperature"] = 0.55
@@ -61,6 +64,16 @@ class TimewebProvider:
                     await asyncio.sleep(0.8)
                     continue
                 raise
+
+            # reasoning_effort not supported by this endpoint — strip and inline-retry
+            if response.status_code == 400 and payload.pop("reasoning_effort", None):
+                logger.warning("Timeweb 400 — retrying without reasoning_effort | model={}", self.model)
+                try:
+                    async with httpx.AsyncClient(timeout=settings.LLM_TIMEOUT) as _c:
+                        response = await _c.post(url, json=payload, headers=headers)
+                except Exception:
+                    logger.error("Timeweb reasoning_effort retry failed", exc_info=True)
+                    return ""
 
             if response.status_code in (502, 503, 504):
                 if attempt == 0:

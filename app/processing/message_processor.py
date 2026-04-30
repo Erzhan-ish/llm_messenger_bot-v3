@@ -134,6 +134,10 @@ _TIRED_ACK_RE = re.compile(
     r"^(да\s+да|ладно|ну\s+ладно|ок\s+ладно|понял\s+ладно|да\s+ладно)",
     re.I | re.U,
 )
+_CONDITIONS_QUERY_RE = re.compile(
+    r"(услови\w*|подробнее|поподробнее|что\s+там|расскаж\w*|что\s+входит|нюанс\w*)",
+    re.I | re.U,
+)
 
 # Follow-up questions about bot/human identity — route back to INTRO if prior context was INTRO
 _IDENTITY_FOLLOWUP_RE = re.compile(
@@ -491,6 +495,13 @@ async def process_message(message):
         has_timing = bool(_TIMING_QUERY_RE.search(user_text))
         has_docs_flag = bool(_DOCS_QUERY_RE.search(user_text))
         tired_ack = bool(_TIRED_ACK_RE.match(user_text) and slots.get("client_type"))
+        has_conditions = bool(
+            (_rule_bank or slots.get("_last_bank"))
+            and _CONDITIONS_QUERY_RE.search(user_text)
+            and not _PRICE_QUERY_RE.search(user_text)
+            and not _DOCS_QUERY_RE.search(user_text)
+            and not has_timing
+        )
 
         last_mode = slots.get("_last_mode")
         if decision is not None:
@@ -516,6 +527,15 @@ async def process_message(message):
             decision = {
                 "stage": "PRESENTATION", "action": "ANSWER", "query_mode": "docs",
                 "needs_kb": True, "needs_handoff": False, "confidence": 0.90, "handoff_reason": None,
+            }
+        elif has_conditions:
+            logger.info(
+                "Session {} | conditions query detected | bank={}",
+                session.id, _rule_bank or slots.get("_last_bank"),
+            )
+            decision = {
+                "stage": "PRESENTATION", "action": "ANSWER", "query_mode": "conditions",
+                "needs_kb": True, "needs_handoff": False, "confidence": 0.95, "handoff_reason": None,
             }
         elif explicit_pricing:
             logger.info(

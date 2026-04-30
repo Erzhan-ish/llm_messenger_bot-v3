@@ -57,7 +57,12 @@ _REFERENCE_EXAMPLES = {
         "ДАННЫЕ: Нужно узнать тип клиента (ИП, ООО, ФЛ).\n"
         "ПЛОХО: «Уточните: ИП, ООО, ФЛ.»\n"
         "ХОРОШО: «подскажите, счет нужен для ип, ооо или физлица?»"
-    ]
+    ],
+    "conditions": [
+        "ДАННЫЕ: ТКБ, ЮЛ, открытие 2800 руб., ведение 2090 руб./мес., платежи 33 руб., бонус на остаток.\n"
+        "ПЛОХО: «Условия по ТКБ: открытие — 2 800, ведение — 2 090.»\n"
+        "ХОРОШО: «по ткб для юрлица условия такие: открытие 2800 рублей, ведение 2090 в месяц, платежи на юрлица — 33 рубля электронно. плюс есть бонус на остаток. что разобрать подробнее — платежи, документы или сроки?»"
+    ],
 }
 
 # ---------------------------------------------------------------------------
@@ -357,6 +362,51 @@ def _plan_timing(base: dict, qmode: str, facts: dict, slots: dict, client_type) 
     return base
 
 
+def _plan_conditions(base: dict, facts: dict, slots: dict, client_type) -> dict:
+    """Plan for 'conditions' queries — broad overview: pricing + bonus + docs + constraints."""
+    bank_profile = facts.get("bank_profile") or {}
+    bank = (
+        bank_profile.get("bank")
+        or facts.get("bank")
+        or slots.get("_last_bank")
+        or slots.get("bank_name")
+    )
+
+    of = bank_profile.get("opening_fee")
+    mf = bank_profile.get("monthly_fee")
+    tf = bank_profile.get("transfer_fee")
+    br = bank_profile.get("bonus_rate")
+    docs        = bank_profile.get("docs")        or facts.get("docs")        or []
+    constraints = bank_profile.get("constraints") or facts.get("constraints") or []
+
+    items: list = []
+    if of is not None:
+        items.append({"label": "Открытие счёта", "value": f"{int(of)} руб."})
+    if mf is not None:
+        items.append({"label": "Ведение счёта",  "value": f"{int(mf)} руб./мес."})
+    if tf is not None:
+        items.append({"label": "Платежи",        "value": f"{int(tf)} руб."})
+    if br:
+        items.append({"label": "Бонус АУ",       "value": str(br)})
+
+    base["action"]      = "answer"
+    base["intent"]      = "conditions"
+    base["bank"]        = bank
+    base["client_type"] = bank_profile.get("client_type") or client_type
+    base["items"]       = items
+    base["docs"]        = docs[:3]
+    base["constraints"] = constraints[:2]
+    base["bonus_rate"]  = br
+    base["opening_fee"] = of
+    base["monthly_fee"] = mf
+    base["transfer_fee"] = tf
+
+    if bank:
+        slots["last_offer_bank"] = bank
+        slots["last_offer_type"] = "conditions"
+    return base
+
+
 def _plan_factual(base: dict, qmode: str, facts_result: dict, facts: dict,
                    slots: dict, decision: dict, client_type, confidence: float) -> dict:
     """Plan for specific_bank / pricing / docs / process."""
@@ -494,12 +544,14 @@ def build_response_plan(
         plan = _plan_partner_banks(base, slots)
     elif qmode in ("timing", "timing_docs"):
         plan = _plan_timing(base, qmode, facts, slots, client_type)
+    elif qmode == "conditions":
+        plan = _plan_conditions(base, facts, slots, client_type)
     else:
         plan = _plan_factual(base, qmode, facts_result, facts, slots, decision, client_type, confidence)
 
     intent = plan.get("intent")
     action = plan.get("action")
-    if intent in ("pricing", "docs", "specific_bank", "bonus", "timing", "timing_docs"):
+    if intent in ("pricing", "docs", "specific_bank", "bonus", "timing", "timing_docs", "conditions"):
         ref_key = intent
     elif action in ("compare", "selection_opening", "clarify"):
         ref_key = action

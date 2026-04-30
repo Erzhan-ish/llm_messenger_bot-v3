@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from typing import Tuple
 
+from app.config import settings as _cfg
 from app.llm.prompts.manager.loader import build_render_prompt
 from app.llm.providers import ask_llm
 from app.logging import logger
@@ -27,7 +28,7 @@ _SERVICE_TEXTS = {
     "greeting":      "Здравствуйте! Я Алексей, менеджер компании «В плюсе». Помогаю арбитражным управляющим открывать расчётные счета для должников — быстро и без посещения банка. Для кого нужен счёт?",
     "ack":           "Понял вас, продолжаем.",
     "thanks":        "Пожалуйста! Если появятся вопросы — пишите.",
-    "intro":         "Алексей, менеджер «В плюсе» — живой человек, не бот. Помогаю АУ открывать счета для должников дистанционно: подбираю банк, собираю документы. Что интересует?",
+    "intro":         "Я Алексей, менеджер компании «В плюсе». Помогаем арбитражным управляющим открывать счета для должников: подбираем банк, сверяем условия и документы. Для кого сейчас подбираем счёт?",
     "smalltalk":     "Я здесь, чтобы помочь с открытием счёта. Что вас интересует?",
     "no_candidates": "По вашему запросу сейчас нет подходящих активных вариантов. "
                      "Уточните тип клиента и приоритеты — помогу подобрать.",
@@ -214,11 +215,33 @@ def _render_selection_opening_static(plan: dict) -> str:
     elif len(candidates) == 1:
         c = candidates[0]
         bank = c.get("bank", "")
+        client_type = plan.get("client_type", "")
         of = c.get("opening_fee")
+        mf = c.get("monthly_fee")
+
+        if client_type == "ФЛ":
+            parts = []
+            if of is not None:
+                parts.append(f"открытие {int(of)} рублей")
+            if mf == 0 or mf == 0.0:
+                parts.append("ведение бесплатно")
+            elif mf is not None:
+                parts.append(f"ведение {int(mf)} в месяц")
+            pricing = ", ".join(parts)
+            constraints = plan.get("constraints") or []
+            nuance = ""
+            for ct in constraints:
+                if "расход" in ct.lower() or "операц" in ct.lower():
+                    nuance = f" Важный нюанс — {ct.lower().rstrip('.')}."
+                    break
+            if not nuance:
+                nuance = " Важный нюанс — расходные операции лучше заранее согласовывать с юристами банка."
+            prefix = f"Для физлица сейчас основной рабочий вариант — {bank}"
+            return prefix + (f": {pricing}" if pricing else "") + "." + nuance + " Смотрим тарифы подробнее?"
+
         parts = []
         if of is not None:
             parts.append(f"открытие {int(of)} рублей")
-        mf = c.get("monthly_fee")
         if mf is not None:
             parts.append(f"ведение {int(mf)} в месяц")
         pricing = ", ".join(parts)
@@ -252,6 +275,50 @@ def _render_timing_docs_static(plan: dict) -> str:
     return f"{prefix}срок открытия — {timing}. По документам нужно: {docs_text}. Готовы подготовить?"
 
 
+def _render_conditions_static(plan: dict) -> str:
+    bank        = plan.get("bank") or ""
+    client_type = plan.get("client_type") or ""
+    items       = plan.get("items") or []
+    bonus_rate  = plan.get("bonus_rate") or ""
+    docs        = plan.get("docs") or []
+    constraints = plan.get("constraints") or []
+
+    of = mf = tf = None
+    for item in items:
+        label = (item.get("label") or "").lower()
+        val   = item.get("value") or ""
+        if "открыти" in label:
+            of = val
+        elif "ведени" in label or "обслужив" in label:
+            mf = val
+        elif "перевод" in label or "платёж" in label or "платеж" in label:
+            tf = val
+
+    parts: list[str] = []
+    if of:
+        num = re.sub(r"[^\d]", "", of)
+        parts.append(f"открытие {num} рублей" if num else f"открытие {of}")
+    if mf:
+        num = re.sub(r"[^\d]", "", mf)
+        parts.append(f"ведение {num} в месяц" if num else f"ведение {mf}")
+    if tf:
+        parts.append(f"платежи — {tf.lower()}")
+
+    prefix = f"По {bank}" if bank else ""
+    ct_label = f" для {client_type.lower()}ица" if client_type == "ФЛ" else (f" для {client_type.lower()}" if client_type else "")
+    body = (prefix + ct_label + " условия такие: " + ", ".join(parts)) if parts else (prefix + " условия уточняю")
+
+    if bonus_rate:
+        body += f". Плюс есть бонус на остаток: {bonus_rate.lower()}"
+    elif docs:
+        body += ". По документам — минимальный пакет"
+    if constraints:
+        note = constraints[0].lower().rstrip(".")
+        body += f". Нюанс: {note}"
+
+    return body + ". Что разобрать подробнее — платежи, документы или сроки?"
+
+
 def _intent_fallback(plan: dict, slots: dict, user_text: str = "") -> str:
     """Intent-aware fallback: routes to the right static renderer based on plan intent."""
     intent = plan.get("intent") or plan.get("query_mode", "")
@@ -259,6 +326,8 @@ def _intent_fallback(plan: dict, slots: dict, user_text: str = "") -> str:
         return _render_timing_static(plan)
     if intent == "timing_docs":
         return _render_timing_docs_static(plan)
+    if intent == "conditions":
+        return _render_conditions_static(plan)
     if intent == "docs":
         bank = plan.get("bank") or ""
         docs = plan.get("docs") or []
@@ -389,7 +458,7 @@ async def render_manager_text(plan: dict, *, user_text: str = "", dialog_ctx: st
     if user_text:
         messages.append({"role": "user", "content": user_text})
     try:
-        raw_text = await ask_llm(messages, max_tokens=300)
+        raw_text = await ask_llm(messages, max_tokens=_cfg.TIMEWEB_RENDER_MAX_TOKENS)
     except Exception:
         logger.exception("render_manager_text LLM failed")
         return _intent_fallback(plan, slots)
@@ -500,8 +569,7 @@ async def answer_with_plan(
     msgs = await get_messages_by_session(session_id)
     dialog_ctx = _build_dialog_context(msgs, max_items=8, max_chars=1600)
 
-    from app.config import settings as _settings
-    if _settings.ENABLE_LLM_SUMMARY and len([m for m in msgs if (m.get("text") or "").strip()]) > 12:
+    if _cfg.ENABLE_LLM_SUMMARY and len([m for m in msgs if (m.get("text") or "").strip()]) > 12:
         try:
             from app.services.conversation_summary import summarize_dialog
             full_ctx = _build_dialog_context(msgs, max_items=20, max_chars=4000)

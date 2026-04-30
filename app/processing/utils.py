@@ -379,13 +379,22 @@ async def maybe_escalate(session_id: int, slots: dict, reason: str) -> None:
     current["_escalation_reason"] = reason
     await set_slots(session_id, current)
 
+    from app.config import settings as _cfg
+    if not _cfg.CRM_ENABLED:
+        logger.info("CRM_ENABLED=False — skipping Bitrix escalation | session_id={}", session_id)
+        return
+
     if not ENABLE_ESCALATION_CALL or escalate_to_manager is None:
         return
 
     try:
         await escalate_to_manager(session_id)
-    except Exception:
-        logger.exception("escalate_to_manager failed (ignored)")
+    except Exception as exc:
+        exc_str = str(exc)
+        if "ACCESS_DENIED" in exc_str or "access_denied" in exc_str.lower():
+            logger.warning("Bitrix ACCESS_DENIED on escalation (ignored) | session_id={}", session_id)
+        else:
+            logger.exception("escalate_to_manager failed (ignored)")
 
 
 def _two_of_last_three(scores: list[int], threshold: int) -> bool:

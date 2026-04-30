@@ -57,6 +57,17 @@ class Settings(BaseSettings):
     LLM_TIMEOUT: int = 60
     HTTP_TIMEOUT: int = 30
 
+    # Per-call token budgets (gpt-5 reasoning eats completion_tokens fast)
+    TIMEWEB_RENDER_MAX_TOKENS: int = 3000
+    TIMEWEB_ANALYZER_MAX_TOKENS: int = 1500
+    TIMEWEB_ENRICHMENT_MAX_TOKENS: int = 1000
+    TIMEWEB_SUMMARY_MAX_TOKENS: int = 1500
+    TIMEWEB_ESCALATION_MAX_TOKENS: int = 2000
+    TIMEWEB_REASONING_EFFORT: str = "low"  # set "" to disable
+
+    # CRM integration (set false for local testing — handoff sets slot but skips Bitrix)
+    CRM_ENABLED: bool = False
+
     # STT (optional)
     STT_ENGINE: str = Field(default="faster-whisper")
     STT_MODEL_NAME: str = Field(default="small")

@@ -179,7 +179,7 @@ async def detect_escalation_signal(
     ]
 
     try:
-        raw = await ask_llm(messages, model=settings.OLLAMA_ANALYZER_MODEL)
+        raw = await ask_llm(messages, model=settings.OLLAMA_ANALYZER_MODEL, max_tokens=settings.TIMEWEB_ESCALATION_MAX_TOKENS)
         data = _extract_json(raw)
         if not isinstance(data, dict):
             raise ValueError("bad json")

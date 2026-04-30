@@ -1,571 +1,102 @@
-Ты работаешь с проектом llm_messenger_bot-v3.
+Ты работаешь с llm_messenger_bot-v3.
 
-Цель: стабилизировать текущую архитектуру controlled generation на Timeweb. Не переводить проект на локальную Llama/Ollama. Timeweb пока остаётся основным LLM-провайдером.
+Текущие изменения уже запушены и частично работают:
+- explicit_bank_selection работает;
+- timing/timing_docs добавлены;
+- intent-aware fallback добавлен;
+- Timeweb provider уже использует max_completion_tokens для gpt-5*;
+- render.md содержит {ref_section};
+- ENABLE_LLM_SUMMARY=false по умолчанию.
 
-Главная архитектурная идея:
-- Правила, slots и router решают, ЧТО делать.
-- KB/RAG даёт факты, ЧТО можно говорить.
-- LLM свободен только в формулировке текста.
-- Validator проверяет, что LLM не придумал факты.
-- Handoff/CRM/escalation остаются в коде, не в LLM.
+Но осталось 4 проблемы:
 
-Не переписывай проект полностью. Исправь точечно текущие слабые места:
-1. Timeweb возвращает пустой ответ.
-2. Вопросы про сроки открытия уходят в тарифы.
-3. Multi-intent “сроки + документы” обрабатывается неполно.
-4. Fallback отвечает не по intent.
-5. Бот повторяется и снова пишет тарифы вместо ответа на вопрос клиента.
+1. GPT-5-mini возвращает пустой content, потому что весь max_completion_tokens уходит в reasoning_tokens.
+В логах:
+finish_reason=length
+completion_tokens=300
+reasoning_tokens=300
+content=''
+и то же на 450 токенах.
 
-Контрольный проблемный диалог:
-User: привет
-Bot: нормальное приветствие
+Решение:
+- Добавить настройки:
+  TIMEWEB_RENDER_MAX_TOKENS=3000
+  TIMEWEB_ANALYZER_MAX_TOKENS=1500
+  TIMEWEB_ENRICHMENT_MAX_TOKENS=1000
+  TIMEWEB_SUMMARY_MAX_TOKENS=1500
+  TIMEWEB_ESCALATION_MAX_TOKENS=2000
+  TIMEWEB_REASONING_EFFORT=low
 
-User: у меня должник физ лицо, надо банк подобрать
-Expected:
-client_type = ФЛ
-query_mode = bank_selection
-needs_kb = True
-НЕ smalltalk
+- В render_manager_text заменить ask_llm(..., max_tokens=300) на max_tokens=settings.TIMEWEB_RENDER_MAX_TOKENS.
+- В dialog_analyzer использовать settings.TIMEWEB_ANALYZER_MAX_TOKENS.
+- В llm_enrichment использовать settings.TIMEWEB_ENRICHMENT_MAX_TOKENS.
+- В escalation_detector использовать settings.TIMEWEB_ESCALATION_MAX_TOKENS.
+- Если model startswith gpt-5 и TIMEWEB_REASONING_EFFORT задан, попробовать добавить payload["reasoning_effort"] = "low".
+- Если Timeweb вернул 400 из-за reasoning_effort, повторить без reasoning_effort.
 
-User: ну давайте, а что там по тарифам?
-Expected:
-bank_name = ТКБ
-query_mode = specific_bank или pricing
-Ответ про тарифы ТКБ/ФЛ
-
-User: неплохо, а по срокам как?
-Expected:
-query_mode = timing
-Ответ про срок открытия, НЕ про бонусы и НЕ про стоимость открытия
-
-User: нее я спрашивал как долго счет открыватся будет, после подачи документов. а кстати какие документы нужны будут?
-Expected:
-query_mode = timing_docs
-Ответ на оба вопроса: срок + документы
-
-User: а по счету то что, как долго откроется
-Expected:
-query_mode = timing
-Ответ про срок, НЕ “открытие обойдётся в 1500 рублей”
-
-User: ну а счет как долго открыватся будет ?
-Expected:
-query_mode = timing
-Не повторять тарифы
-
-User: да да ладно
-Expected:
-Не повторять тарифы. Либо мягко закрыть открытый вопрос, либо уточнить следующий шаг. Если есть явное согласие “мне подходит / оформляем / что дальше” — handoff.
-
-------------------------------------------------------------
-ЗАДАЧА 1. Починить Timeweb provider
-Файл: app/llm/providers/timeweb.py
-
+2. Добавить query_mode="conditions".
 Проблема:
-В логах LLM часто возвращает:
-LLM raw response (len=0): ''
-Также бывает:
-502 Bad Gateway
+"какие условия в ТКБ?"
+"я спрашиваю подробнее какие там условия"
+сейчас уходит в specific_bank и отвечает только opening_fee/monthly_fee.
 
-Сейчас provider почти не диагностирует пустой content. Нужно понять, что реально возвращает Timeweb, и сделать запрос совместимым с gpt-5/gpt-5-mini.
-
-Что сделать:
-
-1. Добавить условную сборку payload для gpt-5 моделей.
-
-Если model начинается с "gpt-5":
-- использовать max_completion_tokens
-- НЕ отправлять temperature
-- НЕ отправлять top_p
-
-Для остальных моделей:
-- использовать max_tokens
-- можно оставить temperature/top_p
-
-Пример:
-
-def _is_gpt5_model(model: str | None) -> bool:
-    return bool(model and model.lower().startswith("gpt-5"))
-
-limit = max_tokens if max_tokens is not None else 450
-
-payload = {
-    "model": self.model,
-    "messages": normalized,
-    "stream": False,
-}
-
-if _is_gpt5_model(self.model):
-    payload["max_completion_tokens"] = limit
-else:
-    payload["max_tokens"] = limit
-    payload["temperature"] = 0.55
-    payload["top_p"] = 0.90
-
-2. Добавить безопасный парсер ответа.
-
-После response.json():
-
-- достать choices[0]
-- достать message.content
-- если content — list, собрать text parts
-- trim
-- если content пустой, залогировать:
-  - status_code
-  - finish_reason
-  - usage
-  - message
-  - raw JSON целиком, но аккуратно без секретов
-
-Пример:
-
-choice = (data.get("choices") or [{}])[0]
-message = choice.get("message") or {}
-content = message.get("content")
-
-if isinstance(content, list):
-    content = "\n".join(
-        part.get("text", "") if isinstance(part, dict) else str(part)
-        for part in content
-    )
-
-content = (content or "").strip()
-
-if not content:
-    logger.warning(
-        "Timeweb returned empty content | status={} | finish_reason={} | usage={} | message={} | raw={}",
-        response.status_code,
-        choice.get("finish_reason"),
-        data.get("usage"),
-        message,
-        data,
-    )
-    return ""
-
-return content
-
-3. Добавить 1 retry для временных ошибок 502/503/504.
-
-Если Timeweb вернул 502/503/504:
-- подождать 0.5–1 сек
-- попробовать ещё один раз
-- если снова ошибка, не валить весь worker, а вернуть "" или controlled exception, чтобы renderer ушёл в fallback.
-
-4. Логировать краткую информацию о запросе:
-- model
-- number of messages
-- max token field used: max_tokens или max_completion_tokens
-- response status
-
-Не логировать токены авторизации.
-
-Acceptance:
-- При пустом ответе Timeweb в логах видно raw JSON и finish_reason.
-- При 502 один раз делается retry.
-- gpt-5-mini не получает temperature/top_p/max_tokens.
-- Worker не падает от 502, а уходит в безопасный fallback.
-
-------------------------------------------------------------
-ЗАДАЧА 2. Отключить LLM-summary в основном ответе или сделать его безопасным
-Файл: app/processing/renderer.py
-Файл: app/services/conversation_summary.py
-Файл: settings/env, если есть
-
-Проблема:
-В активном ответе вызывается summarize_dialog, он тоже бьёт в Timeweb и может получить 502. Это лишний LLM-вызов в момент ответа клиенту.
-
-Что сделать:
-- Добавить настройку ENABLE_LLM_SUMMARY=false по умолчанию.
-- В answer_with_plan не вызывать summarize_dialog, если настройка выключена.
-- Использовать обычный _build_dialog_context(msgs, max_items=8, max_chars=1600).
-- Если summary включён и падает — fallback уже должен быть структурный контекст + хвост диалога, без падения worker.
-
-Acceptance:
-- По умолчанию на один ответ не вызывается лишний LLM для summary.
-- 502 в summary не ломает основной ответ.
-- Диалоговый контекст всё равно передаётся через последние 8 сообщений.
-
-------------------------------------------------------------
-ЗАДАЧА 3. Добавить intent/query_mode для сроков открытия
-Файл: app/processing/message_processor.py
-Файл: app/processing/plan_builder.py
-Файл: app/services/fact_retriever.py
-Файл: app/processing/renderer.py
-
-Проблема:
-Клиент спрашивает:
-"а по срокам как?"
-"как долго счет открывается?"
-"после подачи документов сколько ждать?"
-
-Сейчас бот отвечает тарифами:
-"открытие обойдётся в 1500 рублей"
-
-Это ошибка: слово “открытие” в таком контексте означает срок открытия, а не opening_fee.
-
-Что сделать:
-
-1. В message_processor.py добавить regex:
-
-_TIMING_QUERY_RE = re.compile(
-    r"(срок|сроки|как\s+долго|долго\s+ли|за\s+сколько"
-    r"|сколько\s+по\s+времени|когда\s+откро|когда\s+будет\s+открыт"
-    r"|как\s+быстро|после\s+подачи\s+документ|сколько\s+ждать"
-    r"|откроется|открываться\s+будет|откроют)",
+Добавить regex:
+_CONDITIONS_QUERY_RE = re.compile(
+    r"(услови\\w*|подробнее|поподробнее|что\\s+там|расскаж\\w*|что\\s+входит|нюанс\\w*)",
     re.I | re.U,
 )
 
-2. До detect_stage_and_action добавить rule:
-
-has_timing = bool(_TIMING_QUERY_RE.search(user_text))
-has_docs = bool(_DOCS_QUERY_RE.search(user_text))
-
-if has_timing and has_docs:
-    decision = {
-        "stage": "PRESENTATION",
-        "action": "ANSWER",
-        "query_mode": "timing_docs",
-        "needs_kb": True,
-        "needs_handoff": False,
-        "confidence": 0.97,
-        "handoff_reason": None,
-    }
-
-elif has_timing:
-    decision = {
-        "stage": "PRESENTATION",
-        "action": "ANSWER",
-        "query_mode": "timing",
-        "needs_kb": True,
-        "needs_handoff": False,
-        "confidence": 0.95,
-        "handoff_reason": None,
-    }
-
-Важно:
-- timing должен иметь приоритет выше generic specific_bank/pricing.
-- timing_docs должен иметь приоритет выше docs-only.
-
-3. В plan_builder.py добавить обработку:
-- qmode == "timing"
-- qmode == "timing_docs"
-
-В KB уже есть факт:
-TYPE: internal_ops
-TOPIC: timelines
-FACT: Полное открытие счета обычно занимает около недели с момента заявки; после подписания документов в банке открытие занимает до двух дней.
-
-Для timing:
-plan должен содержать:
-{
-  "action": "answer",
-  "intent": "timing",
-  "bank": текущий банк, если есть,
-  "client_type": текущий client_type,
-  "timing_text": факт из KB или безопасный fallback,
-  "question_to_ask": "docs"
+Если есть bank_name/_last_bank и CONDITIONS_QUERY_RE:
+decision = {
+    "stage": "PRESENTATION",
+    "action": "ANSWER",
+    "query_mode": "conditions",
+    "needs_kb": True,
+    "needs_handoff": False,
+    "confidence": 0.95,
 }
 
-Для timing_docs:
-plan должен содержать:
-{
-  "action": "answer",
-  "intent": "timing_docs",
-  "bank": текущий банк,
-  "client_type": текущий client_type,
-  "timing_text": "...",
-  "docs": [...],
-  "question_to_ask": "ready_or_docs"
-}
+Для fact_retriever:
+QUERY_MODE_FILTER_MAP["conditions"] = ["pricing", "bonus", "docs", "feature", "constraint", "selection", "availability"]
 
-Acceptance:
-- “а по срокам как?” → query_mode=timing.
-- “как долго откроется и какие документы нужны?” → query_mode=timing_docs.
-- Эти вопросы больше не уходят в pricing/specific_bank fallback.
+Для plan_builder:
+qmode == "conditions" должен собрать:
+- bank
+- client_type
+- opening_fee
+- monthly_fee
+- transfer_fee
+- bonus_rate
+- docs/features/constraints кратко
+intent = "conditions"
 
-------------------------------------------------------------
-ЗАДАЧА 4. Настроить retrieval для timing/timing_docs
-Файл: app/services/fact_retriever.py
+Для renderer:
+добавить _render_conditions_static(plan).
 
-Проблема:
-Для вопроса про сроки retrieval сейчас достаёт pricing/bonus/constraints и потом renderer отвечает бонусной формулой или тарифом.
+Пример fallback:
+"По ТКБ для юрлица условия такие: открытие 2800 рублей, ведение 2090 в месяц, платежи на юрлица — 33 рубля электронно. Плюс есть бонус на остаток. Что разобрать подробнее — платежи, документы или сроки?"
 
-Что сделать:
-- Для query_mode == "timing" искать chunks:
-  - TYPE internal_ops, TOPIC timelines
-  - TAGS timing/timelines/opening
-  - constraints, если они реально про процесс/сроки
-- Не включать bonus_rate как основной факт для timing.
-- Не включать opening_fee/monthly_fee как основной факт для timing.
-- Для timing_docs дополнительно доставать docs по bank/client_type.
+3. Улучшить fallback для ФЛ bank_selection.
+Сейчас:
+"сейчас хороший вариант — ткб. рассматриваем?"
 
-Если структура fact_result не поддерживает timing_text, добавить:
-facts["timing_text"] = ...
-или facts["opening_time"] = ...
+Нужно:
+"Для физлица сейчас основной рабочий вариант — ТКБ: открытие 1500 рублей, ведение бесплатно. Важный нюанс — расходные операции лучше заранее согласовывать с юристами банка. Смотрим тарифы подробнее?"
 
-Acceptance:
-- На timing retrieval возвращает timing_text из internal_ops/timelines.
-- На timing_docs retrieval возвращает timing_text + docs.
-- В логах видно matched_fields включает timing_text/opening_time, а не opening_fee.
+4. Убрать из intro фразу "живой человек, не бот".
+Заменить intro на:
+"Я Алексей, менеджер компании «В плюсе». Помогаем арбитражным управляющим открывать счета для должников: подбираем банк, сверяем условия и документы. Для кого сейчас подбираем счёт?"
 
-------------------------------------------------------------
-ЗАДАЧА 5. Сделать intent-aware fallback
-Файл: app/processing/renderer.py
+Дополнительно:
+- Добавить CRM_ENABLED=false для локальных тестов.
+- Если CRM_ENABLED=false, maybe_escalate не должен вызывать Bitrix, но должен ставить slots["_escalation_sent"]=True.
+- Bitrix ACCESS_DENIED не должен валить worker.
 
-Проблема:
-Когда LLM возвращает пусто, fallback отвечает не по смыслу вопроса.
-Пример:
-User: “как долго счёт открываться будет?”
-Bot fallback: “по ткб открытие обойдётся в 1500 рублей”
-
-Это неправильно.
-
-Что сделать:
-Добавить центральный fallback:
-
-def _intent_fallback(plan: dict, slots: dict, user_text: str = "") -> str:
-    intent = plan.get("intent") or plan.get("query_mode")
-    if intent == "timing":
-        return _render_timing_static(plan)
-    if intent == "timing_docs":
-        return _render_timing_docs_static(plan)
-    if intent == "docs":
-        return _render_docs_natural(...)
-    if intent in ("pricing", "specific_bank"):
-        return _render_specific_bank_static(plan)
-    if intent in ("bank_selection", "selection_opening"):
-        return _render_selection_opening_static(plan)
-    return _plan_fallback_text(plan, slots)
-
-Добавить:
-
-def _render_timing_static(plan: dict) -> str:
-    bank = plan.get("bank") or plan.get("_last_bank") or ""
-    timing = plan.get("timing_text") or plan.get("opening_time")
-    if not timing:
-        timing = "полное открытие обычно занимает около недели с момента заявки, а после подписания документов в банке — до двух дней"
-    prefix = f"По {bank} " if bank else ""
-    return f"{prefix}по срокам ориентир такой: {timing}. Документы подсказать?"
-
-def _render_timing_docs_static(plan: dict) -> str:
-    timing_part = ...
-    docs_part = ...
-    return f"{timing_part} По документам нужно: {docs_part}. Готовы подготовить?"
-
-Критично:
-- _render_specific_bank_static НЕ должен отвечать opening_fee, если intent == "timing".
-- docs fallback не должен добавлять тарифы/бонусы.
-- timing fallback не должен добавлять тарифы/бонусы.
-
-Acceptance:
-- При пустом LLM timing-вопрос всё равно получает timing-ответ.
-- При пустом LLM docs-вопрос получает docs-ответ.
-- При пустом LLM pricing-вопрос получает pricing-ответ.
-- Не бывает ответа “открытие 1500 рублей” на вопрос “как долго открывается?”
-
-------------------------------------------------------------
-ЗАДАЧА 6. Не смешивать docs/pricing/bonus/timing
-Файл: app/processing/plan_builder.py
-Файл: app/processing/renderer.py
-
-Проблема:
-На вопрос “что по документам?” бот может ответить тарифы + бонусы + документы.
-На вопрос “сроки?” бот может ответить бонусную формулу.
-Это перегружает и выглядит как игнорирование вопроса.
-
-Что сделать:
-В build_response_plan и renderer соблюдать intent:
-
-- intent == docs:
-  использовать только docs + минимальный контекст банка.
-  Не добавлять opening_fee/monthly_fee/bonus_rate в текст ответа.
-
-- intent == pricing:
-  использовать opening_fee, monthly_fee, transfer_fee, bonus кратко.
-  Не добавлять docs, если пользователь не спросил документы.
-
-- intent == bonus:
-  использовать только bonus, не всю тарифную сетку.
-
-- intent == timing:
-  использовать только timing/opening_time/process, не тарифы.
-
-- intent == timing_docs:
-  использовать timing + docs.
-
-Acceptance:
-- “что по документам у ТКБ?” → только документы.
-- “а по срокам как?” → только сроки.
-- “что там по тарифам?” → тарифы и кратко бонус, если уместно.
-- Не выводить внутреннюю формулу бонуса ((∑S × P) / D) × O × 0,93 клиенту, если он не спрашивал формулу.
-
-------------------------------------------------------------
-ЗАДАЧА 7. Anti-repeat и loop breaker
-Файл: app/processing/renderer.py
-Файл: app/processing/message_processor.py
-
-Проблема:
-Бот несколько раз подряд повторил:
-“по ткб открытие обойдётся в 1500 рублей... рассматриваем этот вариант?”
-
-Даже когда клиент несколько раз уточнял сроки.
-
-Что сделать:
-1. После получения text проверить near-duplicate с slots["_last_bot_text"].
-2. Если duplicate и intent == timing, вернуть timing fallback.
-3. Если duplicate и user_text содержит frustration/repeat:
-   - “я спрашивал”
-   - “что не понятно”
-   - “ну а”
-   - “я же”
-   - “не про это”
-   тогда ответить:
-   “Понял, не буду повторяться. По срокам: ...”
-4. Не делать повторный LLM retry, если уже использован static fallback. Это только увеличивает число Timeweb вызовов и часто снова даёт пустой ответ.
-
-Добавить tired/frustration ack:
-
-_TIRED_ACK_RE = re.compile(
-    r"^(да\s+да|ладно|ну\s+ладно|ок\s+ладно|понял\s+ладно|да\s+ладно)",
-    re.I | re.U,
-)
-
-Если tired ack после повторов:
-- не повторять тарифы;
-- ответить коротко по открытому вопросу или мягко перевести:
-  “Понял, не буду грузить. По срокам ориентир — около недели с заявки, после подписания до двух дней. Хотите, подключу менеджера для оформления?”
-
-Acceptance:
-- На повторный вопрос про сроки бот не повторяет тариф.
-- “да да ладно” не вызывает повтор тарифов.
-- Near-duplicate не приводит к ещё одному пустому LLM retry.
-
-------------------------------------------------------------
-ЗАДАЧА 8. Question policy по intent
-Файл: app/processing/renderer.py или app/processing/plan_builder.py
-
-Проблема:
-Бот почти всегда заканчивает “рассматриваем этот вариант?”, даже если клиент спрашивает сроки/документы. Это раздражает.
-
-Что сделать:
-Добавить вопрос в конце в зависимости от intent:
-
-NEXT_QUESTION_BY_INTENT = {
-    "bank_selection": "Что важнее — дешевле открыть или быстрее оформить?",
-    "specific_bank": "Что ещё уточнить — документы или сроки?",
-    "pricing": "Смотрим этот вариант или сравним с другим?",
-    "docs": "Готовы прислать?",
-    "timing": "Документы подсказать?",
-    "timing_docs": "Готовы подготовить?",
-    "bonus": "Рассматриваем этот вариант?",
-}
-
-Использовать максимум один вопрос в конце.
-
-Acceptance:
-- timing не заканчивается “рассматриваем?”
-- docs не заканчивается “рассматриваем?”
-- pricing может заканчивать “смотрим этот вариант или сравним?”
-
-------------------------------------------------------------
-ЗАДАЧА 9. Handoff не ломать
-Файл: app/processing/message_processor.py
-Файл: app/processing/utils.py / escalation logic
-
-Проблема:
-После всех правок нельзя сломать передачу менеджеру.
-
-Проверить, что сигналы:
-- “мне подходит”
-- “как оформим”
-- “куда оплатить”
-- “что дальше”
-- “давайте”
-- “оформляем”
-- “готов начать”
-- “по рукам”
-- “сойдёт”
-
-ведут к:
-- action = HANDOFF или needs_handoff = True
-- maybe_escalate(...)
-- bridge text
-- slots["_escalation_sent"] = True
-
-LLM не должен решать, создавать CRM-задачу или нет.
-
-Acceptance:
-- “мне подходит, как оформим?” → handoff.
-- После handoff бот не продолжает консультацию.
-- Handoff имеет приоритет выше docs/timing/pricing.
-
-------------------------------------------------------------
-ЗАДАЧА 10. Тесты
-Добавить/обновить тесты.
-
-Минимальные тесты:
-
-1. test_explicit_bank_selection_fl
-Input: “у меня должник физ лицо, надо банк подобрать”
-Expected:
-client_type = ФЛ
-query_mode = bank_selection
-needs_kb = True
-
-2. test_timing_detection
-Input: “а по срокам как?”
-Expected:
-query_mode = timing
-
-3. test_timing_not_pricing
-Input: “как долго счет открывается?”
-Expected:
-fallback contains “срок” / “недел” / “до двух дней”
-fallback does NOT contain “открытие обойдётся”
-
-4. test_timing_docs_detection
-Input: “как долго откроется и какие документы нужны?”
-Expected:
-query_mode = timing_docs
-
-5. test_docs_only_no_pricing
-Input: “что по документам у ТКБ?”
-Expected:
-answer contains docs
-answer does not contain opening_fee/monthly_fee unless user asked pricing
-
-6. test_handoff_priority
-Input: “мне подходит, как оформим?”
-Expected:
-handoff
-
-7. test_timeweb_payload_gpt5
-For model gpt-5-mini:
-payload has max_completion_tokens
-payload does not have max_tokens
-payload does not have temperature
-payload does not have top_p
-
-8. test_timeweb_empty_content_logging
-Mock Timeweb empty content.
-Expected:
-provider returns ""
-logs warning with finish_reason/raw.
-
-------------------------------------------------------------
-ФИНАЛЬНЫЙ ACCEPTANCE CRITERIA
-
-Готово, если:
-
-1. “у меня должник физ лицо, надо банк подобрать” больше не уходит в smalltalk.
-2. “ну давайте, а что там по тарифам?” даёт тарифы ТКБ/ФЛ.
-3. “а по срокам как?” даёт сроки открытия, не бонусы и не opening_fee.
-4. “как долго счет открывается и какие документы нужны?” отвечает срок + документы.
-5. Повтор “ну а счет как долго открываться будет?” не повторяет тариф.
-6. “да да ладно” не запускает повтор тарифов.
-7. При пустом Timeweb ответе renderer использует intent-aware fallback.
-8. В Timeweb provider для gpt-5-mini используется max_completion_tokens и не отправляются temperature/top_p.
-9. 502 Timeweb не валит worker.
-10. Handoff при “мне подходит / как оформим” работает.
-11. В конце ответа максимум один вопрос.
-12. LLM не придумывает факты: тарифы, сроки, банки, документы берутся только из KB/PLAN.
+Acceptance criteria:
+1. Timeweb gpt-5-mini перестаёт массово возвращать пустой content за счёт max_completion_tokens=3000+.
+2. Если content всё равно пустой, intent-aware fallback отвечает по смыслу.
+3. "какие условия в ТКБ?" → conditions, не просто pricing.
+4. "я спрашиваю подробнее какие там условия" → conditions.
+5. ФЛ bank_selection отвечает не "ткб. рассматриваем?", а кратко раскрывает ТКБ.
+6. Intro не говорит "живой человек, не бот".
+7. Handoff работает, но локально Bitrix можно отключить через CRM_ENABLED=false.

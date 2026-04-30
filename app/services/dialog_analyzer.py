@@ -345,6 +345,7 @@ async def detect_stage_and_action(
             [{"role": "system", "content": CLASSIFIER_PROMPT},
              {"role": "user",   "content": user_content}],
             model=settings.OLLAMA_ANALYZER_MODEL,
+            max_tokens=settings.TIMEWEB_ANALYZER_MAX_TOKENS,
         )
         m = _JSON_RE.search(raw)
         if not m:

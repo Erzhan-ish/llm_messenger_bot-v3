@@ -18,6 +18,7 @@ QUERY_MODE_FILTER_MAP: Dict[str, List[str]] = {
     "process":       ["constraint", "internal_ops"],
     "timing":        ["internal_ops"],
     "timing_docs":   ["internal_ops", "docs"],
+    "conditions":    ["pricing", "bonus", "docs", "feature", "constraint", "selection", "availability"],
     "smalltalk":     [],
     "service":       [],
     "intro":         [],
