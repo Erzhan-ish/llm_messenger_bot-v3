@@ -1,0 +1,383 @@
+Ты работаешь с проектом llm_messenger_bot-v3.
+
+Главная задача: исправить логику обработки сообщений и рендеринга ответов так, чтобы бот не уходил в smalltalk/service, когда клиент уже дал конкретный sales-запрос, и чтобы пользовательский текст формулировался естественно через LLM-render, но без потери контроля над фактами, маршрутом диалога и эскалацией.
+
+ВАЖНО:
+- Не отдавай LLM всю бизнес-логику.
+- LLM должен быть свободен только в формулировке текста.
+- Правила/slots/router решают, ЧТО делать.
+- KB/RAG даёт факты, ЧТО можно говорить.
+- LLM-render решает, КАК красиво сказать.
+- Validator проверяет, что LLM не придумал лишнего.
+- Handoff/CRM/escalation должны оставаться под контролем кода, а не LLM.
+
+Не исправляй кодировку русских фраз без необходимости. В моём файле русские строки хранятся нормально, символы ??? появились только при копировании текста в чат.
+
+Проблема №1: сообщение с явным запросом попадает в smalltalk
+
+Пример бага:
+Пользователь: "у меня должник физ лицо, надо банк подобрать"
+Сейчас система решает:
+Stage: OTHER
+Action: ANSWER
+Mode: smalltalk
+needs_kb: False
+
+Из-за этого бот отвечает:
+"Я здесь, чтобы помочь с открытием счёта. Что вас интересует?"
+
+Это неправильно. Клиент уже сообщил:
+- client_type = ФЛ
+- intent/query_mode = bank_selection
+- needs_kb = True
+
+Ожидаемое решение:
+Для сообщения "у меня должник физ лицо, надо банк подобрать" система должна сделать:
+slots["client_type"] = "ФЛ"
+
+decision = {
+    "stage": "SELECT",
+    "action": "ANSWER",
+    "query_mode": "bank_selection",
+    "needs_kb": True,
+    "needs_handoff": False,
+    "confidence": 0.95,
+    "handoff_reason": None,
+}
+
+А не smalltalk.
+
+Что нужно сделать:
+
+1. Исправить routing в app/processing/message_processor.py
+
+Добавь rule-based detection до вызова LLM-классификатора.
+
+Нужно ловить такие фразы:
+- "надо банк подобрать"
+- "банк для физ лица"
+- "банк для физика"
+- "у меня юр лицо"
+- "у меня ООО"
+- "какой банк выбрать"
+- "нужен банк"
+- "есть подешевле"
+- "что по Уралсибу"
+- "какие тарифы"
+- "что по документам"
+
+Добавь regex:
+
+_BANK_SELECTION_REQUEST_RE = re.compile(
+    r"(банк\s+(подобрать|выбрать|посоветовать|нужен)"
+    r"|нужен\s+банк"
+    r"|надо\s+банк"
+    r"|подобрать\s+банк"
+    r"|какой\s+банк"
+    r"|где\s+открыть"
+    r"|банк\s+для\s+(физ|физика|физ\s*лица|юр\s*лица|ооо|ип))",
+    re.I | re.U,
+)
+
+Также добавь/проверь regex для распознавания client_type:
+- "физ лицо", "физик", "физика", "должник физ лицо" -> ФЛ
+- "юр лицо", "юридическое лицо", "ООО", "компания" -> ЮЛ
+- "ИП", "индивидуальный предприниматель" -> ИП
+
+После extract_runtime_slots(user_text, slots) добавь:
+
+explicit_bank_selection = bool(
+    slots.get("client_type")
+    and _BANK_SELECTION_REQUEST_RE.search(user_text)
+)
+
+Перед вызовом detect_stage_and_action(...) добавь ветку:
+
+elif explicit_bank_selection:
+    logger.info(
+        "Session {} | Explicit bank selection detected | client_type={}",
+        session.id,
+        slots.get("client_type"),
+    )
+    decision = {
+        "stage": "SELECT",
+        "action": "ANSWER",
+        "query_mode": "bank_selection",
+        "needs_kb": True,
+        "needs_handoff": False,
+        "confidence": 0.95,
+        "handoff_reason": None,
+    }
+
+Смысл: если клиент явно сказал "ФЛ/ЮЛ/ИП + надо банк подобрать", не спрашивать LLM, smalltalk это или нет. Это очевидный sales-intent.
+
+2. Исправить pricing/docs/specific_bank routing
+
+Добавь rule-based routing для явных вопросов:
+- "какие тарифы у Уралсиба"
+- "сколько стоит ТКБ"
+- "что по документам у Уралсиба"
+- "какие документы"
+- "что нужно для открытия"
+
+Пример regex:
+
+_PRICE_QUERY_RE = re.compile(
+    r"\b(тариф|тарифы|сколько\s+стоит|стоимость|цена|ценник|ведение|открытие|плат[её]жк|комисси)\b",
+    re.I | re.U,
+)
+
+_DOCS_QUERY_RE = re.compile(
+    r"\b(документ|документы|что\s+нужно|что\s+понадобится|сканы|паспорт|инн|решение\s+суда)\b",
+    re.I | re.U,
+)
+
+Если в slots уже есть bank_name или банк явно найден в user_text, то:
+- PRICE_QUERY_RE + bank_name -> query_mode = "specific_bank" или "pricing", needs_kb=True
+- DOCS_QUERY_RE + bank_name -> query_mode = "docs", needs_kb=True
+
+Не допускать, чтобы такие вопросы уходили в smalltalk.
+
+3. Использовать dialog_analyzer.py только для неоднозначных сообщений
+
+dialog_analyzer должен работать для фраз вроде:
+- "ну не знаю"
+- "а если так?"
+- "что лучше?"
+- "а как у них?"
+- "хм"
+- "может быть"
+
+Но очевидные sales-intents должны обрабатываться правилами в message_processor.py до LLM-классификатора.
+
+4. Дать LLM больше свободы в render-слое
+
+Файл: app/processing/renderer.py
+Файл: app/llm/prompts/manager/loader.py
+
+Сейчас service/smalltalk/intro/greeting часто возвращаются статическим шаблоном. Нужно сделать так, чтобы пользовательский текст чаще формулировался через LLM-render, но на основе готового plan.
+
+Правильная схема:
+user_text
+→ rules/slots
+→ decision
+→ retrieve_facts
+→ build_response_plan
+→ LLM renderer пишет живой ответ
+→ validate_answer_against_facts
+→ send_bot
+
+Нельзя делать:
+user_text → LLM → ответ
+
+Потому что LLM может проигнорировать KB, придумать тарифы или пропустить handoff.
+
+5. Для action == "service" разрешить LLM-render, но с безопасным fallback
+
+В render_manager_text(...) сейчас service может возвращаться напрямую из _SERVICE_TEXTS. Нужно изменить так, чтобы greeting/intro/smalltalk могли генерироваться через LLM, но fallback остался коротким и безопасным.
+
+Пример логики:
+
+if action == "service":
+    prompt = build_render_prompt(plan, user_text=user_text, dialog_ctx=dialog_ctx)
+    messages = [{"role": "system", "content": prompt}]
+    if user_text:
+        messages.append({"role": "user", "content": user_text})
+
+    try:
+        raw_text = await ask_llm(messages, max_tokens=180)
+        text = cleanup_text(raw_text)
+        if text:
+            return text
+    except Exception:
+        logger.exception("service render LLM failed")
+
+    return _service_fallback(plan, slots)
+
+Добавить _service_fallback:
+
+def _service_fallback(plan: dict, slots: dict) -> str:
+    intent = plan.get("intent")
+
+    if intent == "greeting":
+        return "Здравствуйте. Я Алексей, менеджер «В плюсе». Подскажите, счёт нужен для ООО, ИП или физлица?"
+
+    if intent == "intro":
+        return "Я Алексей, менеджер компании «В плюсе». Помогаем арбитражным управляющим открывать счета для должников. Для кого сейчас подбираем счёт?"
+
+    if intent == "smalltalk":
+        return "Да, понял вас. Подскажите, счёт открываем для ООО, ИП или физлица?"
+
+    return "Подскажите, для кого нужен счёт — ООО, ИП или физлица?"
+
+6. Не парсить данные в renderer по русским label
+
+В renderer.py сейчас fallback может искать значения по label вроде "Открытие", "Ведение", "Бонус". Это хрупко.
+
+Лучше в plan_builder.py передавать нормализованные поля:
+
+plan["opening_fee"] = ...
+plan["monthly_fee"] = ...
+plan["transfer_fee"] = ...
+plan["bonus_rate"] = ...
+plan["docs"] = ...
+plan["bank"] = ...
+plan["client_type"] = ...
+
+А renderer должен читать структурированные поля:
+
+opening = plan.get("opening_fee")
+monthly = plan.get("monthly_fee")
+bonus = plan.get("bonus_rate")
+
+Если пока сложно переделать полностью, сделай совместимость:
+- сначала читать нормализованные поля;
+- если их нет, fallback читать из items.
+
+7. Улучшить natural rendering, но не ломать facts validation
+
+LLM-render должен писать естественно:
+
+Плохо:
+"Условия: открытие — 3500 руб., обслуживание — 1600 руб."
+
+Хорошо:
+"по Уралсибу открытие обойдётся в 3500 рублей, дальше ведение 1600 в месяц. рассматриваем этот вариант?"
+
+Плохо:
+"Документы: сканы не требуются. Нужен ИНН и перечень счетов."
+
+Хорошо:
+"тут всё просто: сканы собирать не придётся, нужен только ИНН должника и список счетов. готовы прислать?"
+
+Плохо:
+"Процент на остаток: от 4% до 8.5% годовых."
+
+Хорошо:
+"там ещё банк начисляет процент на остаток — от 4 до 8.5 годовых, зависит от суммы. рассматриваем этот вариант?"
+
+Плохо:
+"Сравнение: ТКБ — открытие 2800, Уралсиб — открытие 3500."
+
+Хорошо:
+"сейчас есть два хороших варианта. в ТКБ дешевле открыть сам счёт за 2800, зато в Уралсибе выгоднее потом вести — 1600 в месяц. вам что важнее: сэкономить на старте или на ведении?"
+
+8. Усилить build_render_prompt
+
+В app/llm/prompts/manager/loader.py добавь правила:
+
+- Пиши как живой менеджер.
+- 1–3 предложения.
+- Один вопрос в конце.
+- Не пиши списками, если пользователь не просил список.
+- Не используй формат "Документы:", "Условия:", "Бонус:", "Открытие счёта:".
+- Не перечисляй данные как из базы.
+- Превращай KB-данные в обычную речь.
+- Сложные проценты сжимай: "от 4 до 8.5 годовых, зависит от суммы".
+- Документы формулируй как действие клиента.
+- Не придумывай тарифы, сроки, банки, бонусы и документы.
+- Если точного факта нет, не выдумывай. Дай безопасный короткий ответ и задай один уточняющий вопрос.
+- Никогда не возвращай пустой ответ.
+
+Фраза для prompt:
+
+"Ты свободен в формулировке, но не свободен в фактах. Все цифры, банки, условия и документы бери только из DATA/KB/PLAN."
+
+9. Handoff нельзя отдавать LLM
+
+Проверить, что сигналы:
+- "мне подходит"
+- "как оформим"
+- "куда оплатить"
+- "что дальше"
+- "давайте"
+- "оформляем"
+- "готов начать"
+- "по рукам"
+- "сойдёт"
+
+обрабатываются правилами и ведут к:
+action = "HANDOFF"
+needs_handoff = True
+maybe_escalate(...)
+send bridge text
+
+LLM не должен решать, создавать CRM-задачу или нет.
+
+10. Проверочные сценарии
+
+После правок обязательно прогнать:
+
+Сценарий 1:
+User: привет
+Bot: приветствие + вопрос "для ООО, ИП или физлица?"
+
+User: у меня должник физ лицо, надо банк подобрать
+Expected:
+query_mode = bank_selection
+needs_kb = True
+client_type = ФЛ
+Bot должен предложить ТКБ/Уралсиб, а не smalltalk.
+
+Сценарий 2:
+User: у меня юр лицо надо банк подобрать
+User: есть подешевле?
+Expected:
+query_mode = bank_selection или compare
+client_type = ЮЛ
+Bot сравнивает банки естественно.
+
+Сценарий 3:
+User: какие тарифы у Уралсиба?
+Expected:
+query_mode = specific_bank/pricing
+bank_name = Уралсиб
+needs_kb = True
+Bot отвечает по тарифам, не smalltalk.
+
+Сценарий 4:
+User: что по документам у Уралсиба?
+Expected:
+query_mode = docs
+bank_name = Уралсиб
+needs_kb = True
+Bot отвечает только про документы, без лишней выгрузки тарифов и бонусов.
+
+Сценарий 5:
+User: мне подходит, как оформим?
+Expected:
+action = HANDOFF или needs_handoff = True
+Bot пишет bridge text и запускает escalation/CRM.
+Не продолжать консультацию.
+
+Сценарий 6:
+User: что не понятно то? банк нужен для физ лица
+Expected:
+frustration detected
+client_type = ФЛ
+query_mode должен продолжить last_mode или bank_selection, но не smalltalk.
+
+11. Логи
+
+Добавить понятные логи:
+- explicit_bank_selection detected
+- explicit_pricing_for_bank detected
+- explicit_docs_for_bank detected
+- decision normalized
+- service LLM render used
+- static fallback used
+- handoff signal detected
+
+12. Acceptance Criteria
+
+Исправление считается готовым, если:
+
+- Сообщение "у меня должник физ лицо, надо банк подобрать" больше не уходит в smalltalk.
+- Сообщение "какие тарифы у Уралсиба" больше не уходит в smalltalk.
+- Сообщение "что по документам у Уралсиба" возвращает docs-ответ, а не тарифы+бонусы+документы в одной куче.
+- LLM пишет естественный текст на основе PLAN/DATA.
+- Fallback остаётся безопасным, но используется только аварийно.
+- Handoff не сломан.
+- CRM/escalation логика не передана LLM.
+- Нет выдуманных тарифов, банков, документов и сроков.
+- В конце ответа максимум один вопрос.

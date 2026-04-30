@@ -187,7 +187,7 @@ def extract_runtime_slots(text: str, slots: Dict) -> Dict:
 
     # First pass: set if unknown
     if not slots.get("client_type"):
-        if any(x in t for x in ["физ лицо", "фл", "физлицо", "физическое", 
+        if any(x in t for x in ["физ лиц", "фл", "физлицо", "физическое",
                                 "физ.", "физику", "физики",
                                 "должник", "банкрот", "списывают долги", "физик"]):
             slots["client_type"] = "ФЛ"

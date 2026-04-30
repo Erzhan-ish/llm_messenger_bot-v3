@@ -22,6 +22,44 @@ _TIMING_REPLY = (
     "Хотите узнать, что нужно подготовить?"
 )
 
+_REFERENCE_EXAMPLES = {
+    "pricing": [
+        "ДАННЫЕ: Открытие: 3500 руб., Ведение: 1600 руб./мес., Платежи: от 35 руб.\n"
+        "ПЛОХО: «Условия: открытие — 3 500 руб., обслуживание — 1 600 руб.»\n"
+        "ХОРОШО: «открытие обойдется в 3500 рублей и потом 1600 в месяц. оформляем или посмотрим другие варианты?»"
+    ],
+    "docs": [
+        "ДАННЫЕ: Для открытия счета в Уралсибе по ЮЛ сканы документов от АУ не нужны, достаточно названия или ИНН должника и перечня счетов.\n"
+        "ПЛОХО: «Документы: сканы не требуются. Нужен ИНН и перечень счетов.»\n"
+        "ХОРОШО: «тут все просто, сканы собирать не придется. нужен только инн должника и список счетов. готовы прислать?»"
+    ],
+    "bonus": [
+        "ДАННЫЕ: Бонус на остаток: до 10 млн руб. — 4%; 10–50 млн — 4.5%; 50–250 млн — 5.5%; 250–500 млн — 6%; ... свыше 1 млрд руб. — 8.5%.\n"
+        "ПЛОХО: «Процент на остаток: от 4% до 8.5% годовых.»\n"
+        "ХОРОШО: «там еще банк начисляет хороший процент на остаток, от 4 до 8.5 годовых выходит в зависимости от суммы. рассматриваем этот вариант?»"
+    ],
+    "compare": [
+        "ДАННЫЕ: ТКБ (открытие 2800 руб., ведение 2090 руб./мес.), Уралсиб (открытие 3500 руб., ведение 1600 руб./мес.).\n"
+        "ПЛОХО: «Сравнение: ТКБ (открытие 2800) и Уралсиб (открытие 3500).»\n"
+        "ХОРОШО: «сейчас есть два хороших варианта. в ткб дешевле открыть сам счет за 2800, зато в уралсибе выгоднее его потом вести по 1600 в месяц. вам что важнее сэкономить на старте или на ведении?»"
+    ],
+    "selection_opening": [
+        "ДАННЫЕ: ТКБ (открытие 2800 руб., ведение 2090 руб./мес.), Уралсиб (открытие 3500 руб., ведение 1600 руб./мес.).\n"
+        "ПЛОХО: «Сравнение: ТКБ (открытие 2800) и Уралсиб (открытие 3500).»\n"
+        "ХОРОШО: «сейчас есть два хороших варианта. в ткб дешевле открыть сам счет за 2800, зато в уралсибе выгоднее его потом вести по 1600 в месяц. вам что важнее сэкономить на старте или на ведении?»"
+    ],
+    "specific_bank": [
+        "ДАННЫЕ: Открытие: 3500 руб., Ведение: 1600 руб./мес., Платежи: от 35 руб.\n"
+        "ПЛОХО: «Условия: открытие — 3 500 руб., обслуживание — 1 600 руб.»\n"
+        "ХОРОШО: «открытие обойдется в 3500 рублей и потом 1600 в месяц. оформляем или посмотрим другие варианты?»"
+    ],
+    "clarify": [
+        "ДАННЫЕ: Нужно узнать тип клиента (ИП, ООО, ФЛ).\n"
+        "ПЛОХО: «Уточните: ИП, ООО, ФЛ.»\n"
+        "ХОРОШО: «подскажите, счет нужен для ип, ооо или физлица?»"
+    ]
+}
+
 # ---------------------------------------------------------------------------
 # Objection detection
 # ---------------------------------------------------------------------------
@@ -326,14 +364,15 @@ def _plan_factual(base: dict, qmode: str, facts_result: dict, facts: dict,
         base["bank"] = bank
         return base
 
-    items: list = []
     of = bank_profile.get("opening_fee")
     mf = bank_profile.get("monthly_fee")
+    br = bank_profile.get("bonus_rate")
+
+    items: list = []
     if of is not None:
         items.append({"label": "Открытие счёта", "value": f"{int(of)} руб."})
     if mf is not None:
         items.append({"label": "Ведение счёта",  "value": f"{int(mf)} руб./мес."})
-    br = bank_profile.get("bonus_rate")
     if br:
         items.append({"label": "Бонус АУ", "value": str(br)})
 
@@ -351,6 +390,10 @@ def _plan_factual(base: dict, qmode: str, facts_result: dict, facts: dict,
     base["docs"]        = docs
     base["constraints"] = constraints
     base["status"]      = bank_profile.get("status") or facts.get("status")
+    # Normalized fields for direct renderer access (no label parsing needed)
+    base["opening_fee"] = of
+    base["monthly_fee"] = mf
+    base["bonus_rate"]  = br
 
     sales_stage = slots.get("sales_stage") or "QUALIFY"
     stage_q = STAGE_NEXT_STEP.get(sales_stage)
@@ -411,5 +454,16 @@ def build_response_plan(
         plan = _plan_partner_banks(base, slots)
     else:
         plan = _plan_factual(base, qmode, facts_result, facts, slots, decision, client_type, confidence)
+
+    intent = plan.get("intent")
+    action = plan.get("action")
+    if intent in ("pricing", "docs", "specific_bank", "bonus"):
+        ref_key = intent
+    elif action in ("compare", "selection_opening", "clarify"):
+        ref_key = action
+    else:
+        ref_key = intent or action
+    
+    plan["reference_examples"] = _REFERENCE_EXAMPLES.get(ref_key, [])
 
     return plan

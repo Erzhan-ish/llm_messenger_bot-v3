@@ -30,7 +30,7 @@ from app.processing.renderer import (
     render_manager_text,
     _plan_fallback_text,
 )
-from app.processing.slots import DEFAULT_SLOTS, extract_runtime_slots, _invalidate_last_context
+from app.processing.slots import DEFAULT_SLOTS, extract_runtime_slots, _invalidate_last_context, _detect_bank
 from app.processing.utils import (
     _build_dialog_context,
     _is_aggressive,
@@ -98,6 +98,29 @@ _READY_FOLLOWUP_RE = re.compile(
 # Uses stems (no trailing \b) so inflected forms like "тарифы", "условиях", "стоимости" match.
 _BANKING_KEYWORD_RE = re.compile(
     r"(тариф|условия|стоимост|комисс|открыти|ведени|счёт|счет|платёж|платеж|бонус)",
+    re.I | re.U,
+)
+
+# Rule-based explicit intent detection — fires before LLM classifier for obvious sales queries.
+_BANK_SELECTION_REQUEST_RE = re.compile(
+    r"(банк\s+(подобрать|выбрать|посоветовать|нужен)"
+    r"|нужен\s+банк"
+    r"|надо\s+банк"
+    r"|подобрать\s+банк"
+    r"|какой\s+банк"
+    r"|где\s+открыть"
+    r"|открыть\s+счет|открыть\s+счёт"
+    r"|банк\s+для\s+(физ|физика|физ\s*лица|юр\s*лица|ооо|ип)"
+    r"|нужен\s+счет|нужен\s+счёт"
+    r"|счет\s+нужен|счёт\s+нужен)",
+    re.I | re.U,
+)
+_PRICE_QUERY_RE = re.compile(
+    r"\b(тариф|тарифы|сколько\s+стоит|стоимость|цена|ценник|ведение|открытие|платёжк|платежк|комисси)\b",
+    re.I | re.U,
+)
+_DOCS_QUERY_RE = re.compile(
+    r"\b(документ\w*|что\s+нужно|что\s+понадобится|сканы|паспорт\w*|инн|решение\s+суда)\b",
     re.I | re.U,
 )
 
@@ -439,10 +462,62 @@ async def process_message(message):
         # decision remains None if not set → will be resolved in STEP 3
 
         # --- STEP 3: Narrow Classifier (with follow-up context check) ---
+        # Pre-compute rule-based explicit intent signals (after slot extraction)
+        _rule_bank = slots.get("bank_name") or slots.get("_last_bank")
+        _bank_in_msg = _detect_bank(user_text.lower())
+        explicit_bank_selection = bool(
+            slots.get("client_type") and _BANK_SELECTION_REQUEST_RE.search(user_text)
+        )
+        explicit_pricing = bool(_rule_bank and _PRICE_QUERY_RE.search(user_text))
+        explicit_docs    = bool(_rule_bank and _DOCS_QUERY_RE.search(user_text))
+        # Bank name directly in current message + active dialog → go to specific_bank
+        explicit_bank_mention = bool(
+            _bank_in_msg and slots.get("client_type")
+            and (slots.get("_last_mode") or slots.get("_last_bank") or slots.get("bank_name"))
+            and not explicit_pricing and not explicit_docs
+        )
+
         last_mode = slots.get("_last_mode")
         if decision is not None:
             # Decision already set in STEP 2b (frustration/repeat detection)
             pass
+        elif explicit_docs:
+            logger.info(
+                "Session {} | explicit_docs_for_bank detected | bank={}",
+                session.id, _rule_bank,
+            )
+            decision = {
+                "stage": "PRESENTATION", "action": "ANSWER", "query_mode": "docs",
+                "needs_kb": True, "needs_handoff": False, "confidence": 0.90, "handoff_reason": None,
+            }
+        elif explicit_pricing:
+            logger.info(
+                "Session {} | explicit_pricing_for_bank detected | bank={}",
+                session.id, _rule_bank,
+            )
+            decision = {
+                "stage": "PRESENTATION", "action": "ANSWER", "query_mode": "specific_bank",
+                "needs_kb": True, "needs_handoff": False, "confidence": 0.90, "handoff_reason": None,
+            }
+        elif explicit_bank_selection:
+            logger.info(
+                "Session {} | explicit_bank_selection detected | client_type={}",
+                session.id, slots.get("client_type"),
+            )
+            decision = {
+                "stage": "SELECT", "action": "ANSWER", "query_mode": "bank_selection",
+                "needs_kb": True, "needs_handoff": False, "confidence": 0.95, "handoff_reason": None,
+            }
+        elif explicit_bank_mention:
+            logger.info(
+                "Session {} | explicit_bank_mention detected | bank={}",
+                session.id, _bank_in_msg,
+            )
+            slots["bank_name"] = _bank_in_msg
+            decision = {
+                "stage": "PRESENTATION", "action": "ANSWER", "query_mode": "specific_bank",
+                "needs_kb": True, "needs_handoff": False, "confidence": 0.85, "handoff_reason": None,
+            }
         elif (
             is_short
             and last_mode in ("specific_bank", "pricing", "bank_selection", "docs")

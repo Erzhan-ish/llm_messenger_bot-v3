@@ -153,135 +153,148 @@ def _plan_fallback_text(plan: dict, slots: dict = None) -> str:
     return _FALLBACK_TEXT
 
 
-_SELECTION_OPENING_ENDINGS = [
-    "Разобрать подробнее — условия, документы или ограничения?",
-    "Что интересует больше — документы для открытия или дополнительные условия?",
-    "Хотите разобрать подробнее или сразу по документам?",
-]
+def _summarize_bonus(value: str) -> str:
+    """Summarizes complex bonus strings into a natural phrase."""
+    if not value:
+        return ""
+    pcts = re.findall(r"(\d+(?:\.\d+)?)\s*%", value)
+    if not pcts:
+        return value.lower()
+    nums = [float(p) for p in pcts]
+    if min(nums) == max(nums):
+        return f"{min(nums):g} годовых на остаток"
+    return f"от {min(nums):g} до {max(nums):g} годовых, зависит от суммы"
 
-_SPECIFIC_BANK_ENDINGS = [
-    "Нужна информация о документах для открытия?",
-    "Что-то ещё уточнить — документы или условия работы?",
-    "Разобрать документы или есть другие вопросы?",
-]
 
-
-def _fmt_fee(value, suffix: str = " руб./мес.") -> str:
-    """Format a fee value: 0 → 'бесплатно', otherwise number + suffix."""
-    if value == 0:
-        return "бесплатно"
-    return f"{int(value)} руб./мес." if "мес" in suffix else f"{int(value)} руб."
+def _render_docs_natural(bank: str, docs: list) -> str:
+    """Natural renderer specifically for document intent."""
+    if not docs:
+        return f"по документам в {bank} всё просто. готовы прислать?"
+    
+    docs_text = " ".join(docs).lower()
+    needs_scans = "скан" in docs_text and "не нуж" not in docs_text
+    
+    parts = []
+    if not needs_scans:
+        parts.append("тут всё просто: сканы собирать не придётся.")
+    
+    req_docs = []
+    if "инн" in docs_text:
+        req_docs.append("инн должника")
+    elif "название" in docs_text:
+        req_docs.append("название должника")
+    if "счет" in docs_text or "счёт" in docs_text:
+        req_docs.append("список счетов")
+        
+    if req_docs:
+        parts.append("нужен только " + " и ".join(req_docs) + ".")
+    else:
+        parts.append("нужны: " + ", ".join(docs[:3]).lower() + ".")
+        
+    return " ".join(parts) + " готовы прислать?"
 
 
 def _render_selection_opening_static(plan: dict) -> str:
-    """Static render for selection_opening — no LLM, no hallucinations. Handles 1+ candidates."""
     candidates  = plan.get("candidates") or []
-    client_type = plan.get("client_type") or ""
-    question    = plan.get("question_to_ask")
-
-    ct_label = {"ФЛ": "физических лиц", "ЮЛ": "юридических лиц", "ИП": "ИП"}.get(client_type, "")
-    ct_prefix = f"Для {ct_label} " if ct_label else ""
-
-    if not candidates:
-        return _FALLBACK_TEXT
-
-    if len(candidates) == 1:
-        c    = candidates[0]
+    if len(candidates) >= 2:
+        c1, c2 = candidates[0], candidates[1]
+        b1, b2 = c1.get("bank", ""), c2.get("bank", "")
+        of1, of2 = float(c1.get("opening_fee") or 0), float(c2.get("opening_fee") or 0)
+        mf1, mf2 = float(c1.get("monthly_fee") or 0), float(c2.get("monthly_fee") or 0)
+        
+        if of2 < of1:
+            b1, b2 = b2, b1
+            of1, of2 = of2, of1
+            mf1, mf2 = mf2, mf1
+            
+        if mf2 < mf1:
+            return f"сейчас есть два хороших варианта. в {b1.lower()} дешевле открыть сам счет за {int(of1)}, зато в {b2.lower()} выгоднее его потом вести по {int(mf2)} в месяц. вам что важнее сэкономить на старте или на ведении?"
+        else:
+            return f"сейчас есть два хороших варианта: {b1.lower()} и {b2.lower()}. в {b1.lower()} открытие {int(of1)} руб., ведение {int(mf1)} в месяц. какой из них рассмотрим подробнее?"
+    elif len(candidates) == 1:
+        c = candidates[0]
         bank = c.get("bank", "")
-        of   = c.get("opening_fee")
-        mf   = c.get("monthly_fee")
+        of = c.get("opening_fee")
         parts = []
         if of is not None:
-            parts.append(f"открытие {_fmt_fee(of, ' руб.')}")
+            parts.append(f"открытие {int(of)} рублей")
+        mf = c.get("monthly_fee")
         if mf is not None:
-            parts.append(f"ведение {_fmt_fee(mf, ' руб./мес.')}")
+            parts.append(f"ведение {int(mf)} в месяц")
         pricing = ", ".join(parts)
-        body = f"{ct_prefix}рабочий вариант — {bank}" + (f", {pricing}" if pricing else "") + "."
-    else:
-        bank_parts = []
-        for c in candidates:
-            bank = c.get("bank", "")
-            of   = c.get("opening_fee")
-            mf   = c.get("monthly_fee")
-            details = []
-            if of is not None:
-                details.append(f"открытие {int(of)} руб.")
-            if mf is not None:
-                details.append(f"ведение {int(mf)} руб./мес.")
-            info = bank + (f" ({', '.join(details)})" if details else "")
-            bank_parts.append(info)
-        names_str = ", ".join(bank_parts)
-        body = f"{ct_prefix}рабочие варианты: {names_str}."
-
-    constraints = plan.get("constraints") or []
-    if constraints:
-        body = f"{constraints[0]} {body}"
-
-    if question in _CLARIFY_VARIANTS:
-        q_text = _CLARIFY_VARIANTS[question][0]
-        return f"{body} {q_text}"
-
-    key = "".join(c.get("bank", "") for c in candidates) + client_type
-    idx = abs(hash(key)) % len(_SELECTION_OPENING_ENDINGS)
-    return f"{body} {_SELECTION_OPENING_ENDINGS[idx]}"
+        return f"сейчас хороший вариант — {bank.lower()}" + (f". {pricing}" if pricing else "") + ". рассматриваем?"
+    
+    return _FALLBACK_TEXT
 
 
 def _render_specific_bank_static(plan: dict) -> str:
-    """Static render for single-bank answer with pricing data — no LLM, no hallucinations."""
-    bank        = plan.get("bank") or ""
-    items       = plan.get("items") or []
-    client_type = plan.get("client_type") or ""
-    docs        = plan.get("docs") or []
+    intent = plan.get("intent") or ""
+    bank   = plan.get("bank") or ""
+    items  = plan.get("items") or []
+    docs   = plan.get("docs") or []
+    
+    if intent == "docs":
+        return _render_docs_natural(bank, docs)
 
-    ct_label = {"ФЛ": "физических лиц", "ЮЛ": "юридических лиц", "ИП": "ИП"}.get(client_type, "")
-
-    fees = []
+    of, mf, bonus = None, None, None
     for item in items:
-        label = item.get("label", "") or ""
-        val   = (item.get("value", "") or "").strip()
-        if not (label and val):
-            continue
-        if val in ("0 руб./мес.", "0 руб.", "0"):
-            val = "бесплатно"
-        # Natural phrasing: strip label capitals, write inline
-        if "Открытие" in label:
-            fees.append(f"открытие {val}")
-        elif "Ведение" in label:
-            fees.append(f"ведение {val}")
-        elif "Бонус" in label:
-            # Avoid "бонус АУ Бонус в ТКБ..." duplication when value already starts with "Бонус"
-            if val.lower().startswith("бонус"):
-                fees.append(val)
-            else:
-                fees.append(f"бонус АУ {val}")
-        else:
-            fees.append(f"{label.lower()} {val}")
+        label = item.get("label", "").lower()
+        val = item.get("value", "")
+        if "открыти" in label:
+            of = val
+        elif "ведени" in label or "обслуживани" in label:
+            mf = val
+        elif "бонус" in label:
+            bonus = val
 
-    if docs:
-        fees.append(f"документы: {', '.join(docs[:4])}")
-
-    if not fees:
-        return f"По {bank} — что именно уточнить: тарифы, документы или условия?"
-
-    pricing = ", ".join(fees).rstrip(".")
-    if ct_label:
-        body = f"Для {ct_label} у {bank} {pricing}."
-    else:
-        body = f"У {bank} {pricing}."
-
-    idx = abs(hash(bank + client_type)) % len(_SPECIFIC_BANK_ENDINGS)
-    return f"{body} {_SPECIFIC_BANK_ENDINGS[idx]}"
+    parts = []
+    if of:
+        num = re.sub(r"[^\d]", "", of)
+        if num:
+            parts.append(f"открытие обойдётся в {num} рублей")
+        elif of in ("0 руб./мес.", "0 руб.", "0", "бесплатно"):
+            parts.append("открытие бесплатно")
+    if mf:
+        num = re.sub(r"[^\d]", "", mf)
+        if num:
+            parts.append(f"дальше ведение {num} в месяц")
+        elif mf in ("0 руб./мес.", "0 руб.", "0", "бесплатно"):
+            parts.append("дальше ведение бесплатно")
+            
+    body = f"по {bank.lower()} " + (" и ".join(parts)) if parts else f"по {bank.lower()} условия такие"
+    
+    if bonus:
+        sum_bonus = _summarize_bonus(bonus)
+        body += f". ещё банк начисляет хороший процент на остаток, {sum_bonus}"
+        
+    return body + ". рассматриваем этот вариант?"
 
 
 # ---------------------------------------------------------------------------
 # Render manager text
 # ---------------------------------------------------------------------------
+def _service_fallback(plan: dict, slots: dict) -> str:
+    intent = plan.get("intent", "")
+    if intent == "greeting":
+        return "Здравствуйте. Я Алексей, менеджер «В плюсе». Подскажите, счёт нужен для ООО, ИП или физлица?"
+    if intent == "intro":
+        return "Я Алексей, менеджер «В плюсе». Помогаем арбитражным управляющим открывать счета для должников. Для кого сейчас подбираем счёт?"
+    if intent == "smalltalk":
+        return "Да, готов помочь. Подскажите, счёт открываем для ООО, ИП или физлица?"
+    if intent == "ack":
+        return _SERVICE_TEXTS.get("ack", "Понял, продолжаем.")
+    if intent == "thanks":
+        return _SERVICE_TEXTS.get("thanks", "Пожалуйста!")
+    return "Подскажите, для кого нужен счёт — ООО, ИП или физлицо?"
+
+
 async def render_manager_text(plan: dict, *, user_text: str = "", dialog_ctx: str = "", slots: dict = None) -> str:
     slots = slots or {}
     action = plan.get("action")
 
     if action == "service":
         intent = plan.get("intent", "")
+
         if intent == "no_candidates" and plan.get("bank"):
             return (
                 f"К сожалению, {plan['bank']} временно не принимает новые счета. "
@@ -291,6 +304,30 @@ async def render_manager_text(plan: dict, *, user_text: str = "", dialog_ctx: st
             last_bot = slots.get("_last_bot_text", "")
             if last_bot and ("плюсе" in last_bot.lower() or "алексей" in last_bot.lower()):
                 return "Да, уже представился. Что именно интересует — условия, банки или документы?"
+            return _SERVICE_TEXTS["intro"]
+
+        # greeting/ack/thanks — stay static (short, safe, no latency)
+        if intent in ("greeting", "ack", "thanks"):
+            return _SERVICE_TEXTS.get(intent, _FALLBACK_TEXT)
+
+        # smalltalk — try LLM render so response uses dialog context
+        if intent == "smalltalk":
+            logger.info("service LLM render used | intent=smalltalk")
+            prompt = build_render_prompt(plan, user_text=user_text, dialog_ctx=dialog_ctx)
+            messages = [{"role": "system", "content": prompt}]
+            if user_text:
+                messages.append({"role": "user", "content": user_text})
+            try:
+                raw = await ask_llm(messages, max_tokens=180)
+                logger.info("LLM raw response (action=service/smalltalk, len={}): {!r}", len(raw or ""), (raw or "")[:200])
+                text = cleanup_text(raw)
+                if text:
+                    return text
+            except Exception:
+                logger.exception("service render LLM failed")
+            logger.info("static fallback used | intent=smalltalk")
+            return _service_fallback(plan, slots)
+
         return _SERVICE_TEXTS.get(intent, _FALLBACK_TEXT)
 
     if action == "handoff":

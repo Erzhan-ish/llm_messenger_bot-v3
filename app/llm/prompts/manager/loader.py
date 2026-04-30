@@ -199,6 +199,25 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
         ctx_parts.append(f"### ПОСЛЕДНИЙ ВОПРОС КЛИЕНТА:\n{user_text}")
     ctx_section = "\n\n".join(ctx_parts)
 
+    # Build ref_section based on micro-examples
+    ref_examples = plan.get("reference_examples") or []
+    ref_section = ""
+    if ref_examples:
+        ref_lines = "\n\n".join(ref_examples)
+        ref_section = (
+            "### МИКРОПРИМЕРЫ ФОРМУЛИРОВКИ\n"
+            "Используй эти примеры НЕ как факты, а как стиль преобразования сырых данных из KB в живой ответ.\n"
+            "Главное правило:\n"
+            "- не перечисляй данные как справочник;\n"
+            "- не пиши «Открытие счёта: ...», «Документы: ...», «Бонус: ...»;\n"
+            "- превращай данные в обычную речь менеджера;\n"
+            "- сложные проценты сжимай: «от 4 до 8.5 годовых, зависит от суммы»;\n"
+            "- документы формулируй как действие клиента;\n"
+            "- в конце максимум один короткий вопрос.\n"
+            "Факты, суммы, банки и условия бери ТОЛЬКО из раздела ДАННЫЕ.\n\n"
+            f"{ref_lines}"
+        )
+
     # Load template from render.md (hot-reload: read on every call for dev convenience)
     try:
         template = _RENDER_MD.read_text(encoding="utf-8")
@@ -206,7 +225,8 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
         template = (
             "### РОЛЬ\nТы — Алексей, менеджер ООО «В плюсе». Пишешь живо, как человек.\n"
             "{style_section}\n{ctx_section}\n\n### ДАННЫЕ ДЛЯ ОТВЕТА (используй только их):\n"
-            "{data_text}\n\n### ЗАДАЧА:\n{instr}{anti_repeat_section}\n\n### ЗАПРЕТЫ:\n"
+            "{data_text}\n\n### ЗАДАЧА:\n{instr}{anti_repeat_section}\n\n"
+            "{ref_section}\n\n### ЗАПРЕТЫ:\n"
             "{restriction_lines}\n- Не добавляй данных, которых нет в разделе ДАННЫЕ.\n"
             "- Максимум 1 вопрос в конце, только если он указан в задаче."
         )
@@ -218,6 +238,7 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
         instr=instr,
         anti_repeat_section=anti_repeat_section,
         restriction_lines=restriction_lines,
+        ref_section=ref_section,
     ).strip()
 
 
