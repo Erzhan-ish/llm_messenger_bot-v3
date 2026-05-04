@@ -522,5 +522,147 @@ class TestNewE2EScenarios(unittest.TestCase):
         self.assertTrue(result["is_valid"], f"Ожидался valid, reason={result['reason']}")
 
 
+# ---------------------------------------------------------------------------
+# Тесты плана v11 (7 новых)
+# ---------------------------------------------------------------------------
+class TestPlanV11(unittest.TestCase):
+    """Проверяют исправления из плана v11: _introduced, answer_contract, validator."""
+
+    def _validate(self, reply, brain_result=None, entities=None, slots=None,
+                  tool_results=None, user_text="", answer_contract=None):
+        from app.services.response_validator import validate_reply
+        return validate_reply(
+            reply,
+            brain_result or {},
+            entities or {},
+            slots or {},
+            tool_results=tool_results,
+            user_text=user_text,
+            answer_contract=answer_contract,
+        )
+
+    # test_no_repeated_intro
+    def test_no_repeated_intro(self):
+        """Если _introduced=True и ответ начинается с 'Здравствуйте' → repeated_intro."""
+        r = self._validate(
+            "Здравствуйте! Активные банки — Альфа-Банк, ТКБ, Уралсиб.",
+            slots={"_introduced": True},
+        )
+        self.assertFalse(r["is_valid"])
+        self.assertEqual(r["reason"], "repeated_intro")
+
+    # test_no_repeated_intro_ok_when_not_introduced
+    def test_no_repeated_intro_ok_when_not_introduced(self):
+        """Если _introduced=False — приветствие допустимо."""
+        r = self._validate(
+            "Здравствуйте! Активные банки — Альфа-Банк, ТКБ, Уралсиб.",
+            slots={"_introduced": False},
+        )
+        self.assertTrue(r["is_valid"])
+
+    # test_card_not_no_problem — answer_contract.do_not_include=[нет проблем]
+    def test_card_not_no_problem(self):
+        """answer_contract.debtor_card: фраза 'нет проблем' запрещена."""
+        contract = {
+            "topic": "debtor_card",
+            "must_include": ["реализация имущества"],
+            "do_not_include": ["нет проблем"],
+        }
+        r = self._validate(
+            "Нет проблем с картой. Оформим после решения суда.",
+            answer_contract=contract,
+        )
+        self.assertFalse(r["is_valid"])
+        self.assertIn("forbidden_phrase", r["reason"])
+
+    # test_card_why_explains_reason — near_duplicate + "почему?" → did_not_explain_reason
+    def test_card_why_explains_reason(self):
+        """'почему?' после дублирующего ответа → did_not_explain_reason."""
+        prev = "До введения реализации имущества карту должнику оформить нельзя."
+        r = self._validate(
+            "До введения реализации имущества карту должнику оформить нельзя.",
+            slots={"_last_bot_text": prev},
+            user_text="почему?",
+        )
+        self.assertFalse(r["is_valid"])
+        self.assertEqual(r["reason"], "did_not_explain_reason")
+
+    # test_validator_blocks_cash_when_card
+    def test_validator_blocks_cash_when_card(self):
+        """answer_contract.topic=debtor_card + reply упоминает наличные → wrong_topic_fact."""
+        contract = {
+            "topic": "debtor_card",
+            "do_not_include": ["наличные"],
+        }
+        r = self._validate(
+            "Снятие наличных возможно только по решению суда.",
+            answer_contract=contract,
+        )
+        self.assertFalse(r["is_valid"])
+        self.assertEqual(r["reason"], "wrong_topic_fact")
+
+    # test_validator_blocks_repeated_intro
+    def test_validator_blocks_repeated_intro(self):
+        """_introduced=True + ответ начинается с 'Здравствуйте' → repeated_intro."""
+        r = self._validate(
+            "Здравствуйте! Мы сотрудничаем с Альфа-Банком.",
+            slots={"_introduced": True},
+        )
+        self.assertFalse(r["is_valid"])
+        self.assertEqual(r["reason"], "repeated_intro")
+
+    # test_validator_partner_banks_no_tariffs
+    def test_validator_partner_banks_no_tariffs(self):
+        """topic=partner_banks + тарифы в ответе → answered_tariffs_when_asked_bank_list."""
+        contract = {"topic": "partner_banks", "do_not_include": []}
+        r = self._validate(
+            "У нас Альфа-Банк — открытие 800 руб., ТКБ и Уралсиб.",
+            answer_contract=contract,
+        )
+        self.assertFalse(r["is_valid"])
+        self.assertEqual(r["reason"], "answered_tariffs_when_asked_bank_list")
+
+    # test_answer_contract_build_for_banks_topic
+    def test_answer_contract_build_for_banks_topic(self):
+        """build_fact_pack для 'с какими банками' → answer_contract.topic=partner_banks."""
+        from app.services.context_builder import build_fact_pack
+        pack = build_fact_pack("с какими банками работаете?", {}, {})
+        contract = pack.get("answer_contract", {})
+        self.assertEqual(contract.get("topic"), "partner_banks")
+        self.assertIn("Альфа-Банк", contract.get("must_include", []))
+
+    # test_answer_contract_build_for_card_topic
+    def test_answer_contract_build_for_card_topic(self):
+        """build_fact_pack для 'карту сделать' → answer_contract.topic=debtor_card."""
+        from app.services.context_builder import build_fact_pack
+        pack = build_fact_pack("можно карту сделать?", {}, {})
+        contract = pack.get("answer_contract", {})
+        self.assertEqual(contract.get("topic"), "debtor_card")
+        self.assertIn("наличные", contract.get("do_not_include", []))
+
+    # test_answer_contract_fl_selection
+    def test_answer_contract_fl_selection(self):
+        """build_fact_pack для ФЛ → answer_contract.topic=bank_selection_fl с ТКБ."""
+        from app.services.context_builder import build_fact_pack
+        pack = build_fact_pack("какой вариант?", {}, {"mentioned_client_type": "ФЛ"})
+        contract = pack.get("answer_contract", {})
+        self.assertEqual(contract.get("topic"), "bank_selection_fl")
+        must = contract.get("must_include", [])
+        self.assertTrue(any("ТКБ" in m for m in must))
+
+    # test_introduced_in_memory
+    def test_introduced_in_memory(self):
+        """build_conversation_context включает _introduced из slots."""
+        import asyncio
+        from app.services.context_builder import build_conversation_context
+        async def _run():
+            ctx = await build_conversation_context(
+                "какие варианты?", session_id=9999, slots={"_introduced": True}
+            )
+            return ctx
+        ctx = asyncio.get_event_loop().run_until_complete(_run())
+        self.assertTrue(ctx["memory"].get("_introduced"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

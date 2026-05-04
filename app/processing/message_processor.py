@@ -379,17 +379,18 @@ async def process_message(message):
         reply = cleanup_text(brain_result.get("reply") or "")
 
         # 9. Validate reply
+        answer_contract = fact_pack.get("answer_contract") if fact_pack else None
         if reply:
             val = validate_reply(
                 reply, brain_result, current_entities, slots,
                 tool_results=tool_results, user_text=user_text,
+                answer_contract=answer_contract,
             )
             if not val["is_valid"]:
                 logger.warning(
                     "Session {} | Reply validation failed: {} — calling repair",
                     session.id, val["reason"],
                 )
-                # Build repair hint from validation reason
                 repair_hint = val["reason"]
                 if repair_hint == "open_account_without_handoff_or_request_data":
                     repair_hint = (
@@ -401,6 +402,32 @@ async def process_message(message):
                     repair_hint = (
                         "promised_action_without_handoff: Не обещай что ты сам откроешь счёт. "
                         "Скажи 'поможем оформить', запроси данные или подключи менеджера."
+                    )
+                elif repair_hint == "repeated_intro":
+                    repair_hint = (
+                        "repeated_intro: Клиент уже знает тебя. Убери приветствие "
+                        "и представление — начни сразу по сути вопроса."
+                    )
+                elif repair_hint == "wrong_topic_fact":
+                    repair_hint = (
+                        "wrong_topic_fact: Ты использовал факт из неправильной темы. "
+                        "Следуй answer_contract: do_not_include. "
+                        "Используй только must_include факты из fact_pack."
+                    )
+                elif repair_hint == "missing_primary_fact":
+                    repair_hint = (
+                        "missing_primary_fact: В ответе отсутствует основной факт. "
+                        "Добавь must_include факты из fact_pack.answer_contract."
+                    )
+                elif repair_hint == "did_not_explain_reason":
+                    repair_hint = (
+                        "did_not_explain_reason: Клиент спросил 'почему?' — объясни причину "
+                        "простыми словами. Не повторяй прошлый ответ."
+                    )
+                elif repair_hint == "answered_tariffs_when_asked_bank_list":
+                    repair_hint = (
+                        "answered_tariffs_when_asked_bank_list: Клиент спросил список банков, "
+                        "а не тарифы. Дай только список активных банков и банков на паузе."
                     )
                 repaired = await conversation_brain_repair(
                     previous_reply=reply,

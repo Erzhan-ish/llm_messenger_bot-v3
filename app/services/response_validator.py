@@ -13,6 +13,15 @@ _STOP_WORDS = {
     "вы", "с", "к", "из", "же", "то", "так", "уже", "ещё", "при", "без",
 }
 
+# Паттерн тарифных цифр (800, 2800, 3500, 2090, 1600) в контексте стоимости
+_TARIFF_NUMBERS_RE = re.compile(r"\b(800|2800|3500|2090|1600|1500)\s*руб", re.I | re.U)
+
+# Паттерн слов про наличные
+_CASH_WORDS_RE = re.compile(r"\b(наличн\w*|судебное\s+решение\s+о\s+выдаче\s+наличными)\b", re.I | re.U)
+
+# "почему?" паттерн
+_WHY_RE = re.compile(r"^\s*(почему|а\s+почему|почему\s+нельзя|в\s+чём\s+причина|в\s+чем\s+причина)\s*[?!]?\s*$", re.I | re.U)
+
 # Мягкие фразы намерения открыть счёт (не попадают в hard handoff guard)
 _OPEN_ACCOUNT_SOFT_RE = re.compile(
     r"(счет\s+откройте|откройте\s+(?:мне\s+)?счет"
@@ -69,6 +78,7 @@ def validate_reply(
     slots: dict,
     tool_results: Optional[dict] = None,
     user_text: str = "",
+    answer_contract: Optional[dict] = None,
 ) -> dict:
     """
     Проверить ответ brain.
@@ -78,10 +88,19 @@ def validate_reply(
     if not reply or not reply.strip():
         return {"is_valid": False, "reason": "empty_reply"}
 
+    reply_lower = reply.lower()
+
     # Повтор предыдущего ответа
     prev_text = slots.get("_last_bot_text") or ""
     if prev_text and _is_near_duplicate(reply, prev_text):
+        # "почему?" после дубликата — особый случай
+        if user_text and _WHY_RE.match(user_text):
+            return {"is_valid": False, "reason": "did_not_explain_reason"}
         return {"is_valid": False, "reason": "near_duplicate_of_previous"}
+
+    # Повторное приветствие
+    if slots.get("_introduced") and reply_lower.startswith("здравствуйте"):
+        return {"is_valid": False, "reason": "repeated_intro"}
 
     # Комиссия из tool_result должна быть в ответе
     if tool_results:
@@ -101,7 +120,6 @@ def validate_reply(
     if expected_bank:
         all_banks = ["Альфа-Банк", "ТКБ", "Уралсиб", "Т-Банк", "МКБ", "Росбанк"]
         other_banks = [b for b in all_banks if b != expected_bank]
-        reply_lower = reply.lower()
         for other in other_banks:
             if other.lower() in reply_lower and expected_bank.lower() not in reply_lower:
                 return {"is_valid": False, "reason": f"wrong_bank_{other}_instead_of_{expected_bank}"}
@@ -124,5 +142,27 @@ def validate_reply(
         is_comparison = active_task_type in _COMPARISON_TASK_TYPES
         if not is_comparison and not handoff.get("needed") and action not in ("handoff", "request_data"):
             return {"is_valid": False, "reason": "open_account_without_handoff_or_request_data"}
+
+    # Answer contract checks
+    if answer_contract:
+        topic = answer_contract.get("topic") or ""
+        do_not_include = answer_contract.get("do_not_include") or []
+
+        # topic=debtor_card: запрещены слова про наличные
+        if topic == "debtor_card" and _CASH_WORDS_RE.search(reply):
+            return {"is_valid": False, "reason": "wrong_topic_fact"}
+
+        # topic=partner_banks: запрещены тарифные цифры
+        if topic == "partner_banks" and _TARIFF_NUMBERS_RE.search(reply):
+            return {"is_valid": False, "reason": "answered_tariffs_when_asked_bank_list"}
+
+        # topic=bank_selection_fl: ТКБ должен быть в ответе
+        if topic == "bank_selection_fl" and "ткб" not in reply_lower:
+            return {"is_valid": False, "reason": "missing_primary_fact"}
+
+        # Общая проверка do_not_include
+        for phrase in do_not_include:
+            if phrase.lower() in reply_lower:
+                return {"is_valid": False, "reason": f"forbidden_phrase_{phrase[:30]}"}
 
     return {"is_valid": True, "reason": None}

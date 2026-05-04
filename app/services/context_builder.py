@@ -101,15 +101,15 @@ _BANK_PRICING_FL = [
 
 _CARD_RULES = {
     "realization_card": (
-        "Если введена реализация имущества, карта оформляется и подписывается "
-        "финансовым управляющим, не самим должником."
+        "Если у гражданина введена реализация имущества, новая банковская карта "
+        "оформляется и подписывается исключительно финансовым управляющим."
     ),
     "cash_withdrawal": (
         "Снятие наличных возможно только после судебного решения о выдаче наличными."
     ),
     "before_realization": (
         "До введения реализации имущества карту должнику оформить нельзя. "
-        "Сначала нужно дождаться судебного решения о введении реализации."
+        "Дождитесь судебного решения о введении реализации имущества."
     ),
 }
 
@@ -187,6 +187,58 @@ def extract_entities(text: str) -> dict:
         "mentioned_client_type": _extract_client_type(text),
         "mentioned_recipient": _extract_recipient(text),
     }
+
+
+# ---------------------------------------------------------------------------
+# Answer contract builder
+# ---------------------------------------------------------------------------
+
+def _build_answer_contract(
+    asks_card: bool,
+    asks_banks: bool,
+    client_type: Optional[str],
+    active_task: dict,
+    user_text: str,
+) -> dict:
+    """Контракт качества ответа — не routing, а ограничения на содержание."""
+    base = {
+        "must_answer_current_question": True,
+        "do_not_repeat_intro": True,
+        "do_not_repeat_previous_answer": True,
+        "max_questions": 1,
+        "style": "natural_short",
+    }
+
+    if asks_card:
+        return {
+            **base,
+            "topic": "debtor_card",
+            "must_include": ["реализация имущества", "финансовый управляющий"],
+            "do_not_include": ["наличные", "судебное решение о выдаче наличными", "нет проблем"],
+            "next_question": "Реализация уже введена?",
+        }
+
+    if asks_banks:
+        return {
+            **base,
+            "topic": "partner_banks",
+            "must_include": ["Альфа-Банк", "ТКБ", "Уралсиб"],
+            "should_include": ["Т-Банк, МКБ и Росбанк на паузе"],
+            "do_not_include": ["opening_fee", "monthly_fee"],
+            "next_question": "Счёт подбираем для юрлица или физлица?",
+        }
+
+    fl_task = client_type == "ФЛ" or active_task.get("client_type") == "ФЛ"
+    if fl_task:
+        return {
+            **base,
+            "topic": "bank_selection_fl",
+            "must_include": ["ТКБ", "открытие 1500", "ведение 0"],
+            "should_include": ["расходные операции согласуются юристами банка"],
+            "do_not_include": ["общий список банков"],
+        }
+
+    return base
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +321,16 @@ def build_fact_pack(
             "НЕ добавляй тарифы, если клиент не просил. Уточни тип клиента (ЮЛ/ФЛ/ИП)."
         )
 
+    # --- Answer contract ---
+    active_task = memory.get("active_task") or {}
+    pack["answer_contract"] = _build_answer_contract(
+        asks_card=asks_card,
+        asks_banks=asks_banks,
+        client_type=client_type,
+        active_task=active_task,
+        user_text=user_text,
+    )
+
     return pack
 
 
@@ -305,6 +367,7 @@ async def build_conversation_context(
         "client_type": slots.get("client_type"),
         "last_answer_summary": slots.get("_last_answer_summary"),
         "sales_context": slots.get("_sales_context"),
+        "_introduced": bool(slots.get("_introduced")),
     }
 
     fact_pack = build_fact_pack(user_text, memory, current_entities)
