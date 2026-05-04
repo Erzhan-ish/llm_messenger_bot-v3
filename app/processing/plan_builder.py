@@ -380,30 +380,203 @@ def _plan_out_of_scope(base: dict, slots: dict, decision: dict) -> dict:
     return base
 
 
+# ---------------------------------------------------------------------------
+# Transfer fee quote helpers
+# ---------------------------------------------------------------------------
+_ALFA_TRANSFER_FL_SCALE = [
+    (150_000, 0.0,   "до 150 000 руб. — без комиссии"),
+    (None,    0.005, "свыше 150 000 руб. — 0.5%"),
+]
+
+_URALSIB_EXTRA_FEES = {
+    "control_fee": ("150 руб.", "за контроль каждой банкротной операции"),
+    "transfer_ul": ("35 руб.", "перевод на юрлицо"),
+    "transfer_fl": ("без комиссии до 100 000 руб.", "перевод на физлицо"),
+}
+
+_BANK_TRANSFER_FL_SCALE: dict[str, list] = {
+    "Альфа-Банк": _ALFA_TRANSFER_FL_SCALE,
+}
+
+_LARGE_TRANSFER_THRESHOLD = 30_000_000
+
+
+def _calc_transfer_fee(bank: str, amount: int | None, target: str | None) -> dict:
+    """Return fee calculation result for transfer_fee_quote."""
+    if not amount or not bank:
+        return {}
+    scale = _BANK_TRANSFER_FL_SCALE.get(bank)
+    if not scale or target != "ФЛ":
+        return {}
+    for threshold, rate, label in scale:
+        if threshold is None or amount <= threshold:
+            fee = int(amount * rate)
+            return {
+                "bank": bank,
+                "amount": amount,
+                "transfer_target": target,
+                "fee": fee,
+                "rate": rate,
+                "rate_label": label,
+                "calculated_fee": fee,
+            }
+    return {}
+
+
+def _plan_transfer_fee_quote(base: dict, facts: dict, slots: dict, decision: dict, client_type) -> dict:
+    planner = decision.get("planner") or {}
+    bank = (
+        slots.get("_current_bank_mention")
+        or decision.get("bank_name")
+        or planner.get("bank_name")
+        or slots.get("bank_name")
+        or slots.get("_last_bank")
+        or (facts.get("bank_profile") or {}).get("bank")
+        or facts.get("bank")
+    )
+    amount = (
+        slots.get("_transfer_amount")
+        or decision.get("amount")
+        or planner.get("amount")
+    )
+    target = (
+        slots.get("_transfer_target")
+        or decision.get("transfer_target")
+        or planner.get("transfer_target")
+    )
+
+    fee_calc = _calc_transfer_fee(bank, amount, target) if bank else {}
+    is_large = bool(amount and amount > _LARGE_TRANSFER_THRESHOLD)
+
+    base["action"]           = "answer"
+    base["intent"]           = "transfer_fee_quote"
+    base["bank"]             = bank
+    base["client_type"]      = client_type
+    base["amount"]           = amount
+    base["transfer_target"]  = target
+    base["fee_details"]      = fee_calc
+    base["is_large_transfer"] = is_large
+    base["items"]            = []
+
+    if is_large:
+        base["constraint_topic"] = "large_transfer_requires_2_day_notice_and_creditor_registry"
+        from app.processing.domain_guard import constraint_fallback
+        base["large_transfer_note"] = constraint_fallback("large_transfer_requires_2_day_notice_and_creditor_registry")
+
+    if not bank:
+        base["question_to_ask"] = "bank_name"
+        slots["_pending_question_type"] = "bank_name"
+    else:
+        slots.pop("_pending_question_type", None)
+        if bank:
+            slots["_last_bank"] = bank
+
+    return base
+
+
+def _plan_extra_fees(base: dict, facts: dict, slots: dict, decision: dict, client_type) -> dict:
+    planner = decision.get("planner") or {}
+    bank = (
+        slots.get("_current_bank_mention")
+        or decision.get("bank_name")
+        or planner.get("bank_name")
+        or slots.get("bank_name")
+        or slots.get("_last_bank")
+        or (facts.get("bank_profile") or {}).get("bank")
+        or facts.get("bank")
+    )
+    bank_profile = facts.get("bank_profile") or {}
+    constraints  = bank_profile.get("constraints") or facts.get("constraints") or []
+    source_chunks = facts.get("source_chunks") or []
+
+    # Known extra fees for Уралсиб
+    extra_fee_details: dict = {}
+    if bank == "Уралсиб":
+        extra_fee_details = _URALSIB_EXTRA_FEES.copy()
+
+    base["action"]           = "answer"
+    base["intent"]           = "extra_fees"
+    base["bank"]             = bank
+    base["client_type"]      = client_type
+    base["extra_fee_details"] = extra_fee_details
+    base["constraints"]      = constraints
+    base["items"]            = []
+    base["source_chunks"]    = source_chunks[:4]
+
+    if not bank:
+        base["question_to_ask"] = "bank_name"
+        slots["_pending_question_type"] = "bank_name"
+    else:
+        slots.pop("_pending_question_type", None)
+        if bank:
+            slots["_last_bank"] = bank
+
+    return base
+
+
 def _plan_constraint(base: dict, facts: dict, slots: dict, decision: dict, client_type) -> dict:
     planner = decision.get("planner") or {}
-    topic = slots.get("_constraint_topic") or planner.get("answer_focus") or planner.get("constraint_topic")
+    topic = (
+        slots.get("_constraint_topic")
+        or decision.get("constraint_topic")
+        or planner.get("constraint_topic")
+        or planner.get("answer_focus")
+    )
+    scenario_topic = decision.get("scenario_topic") or planner.get("scenario_topic")
+    next_action = decision.get("next_action") or planner.get("next_action")
+
+    # Use NEXT_AFTER_CONSTRAINT map for deterministic routing
+    if topic and not next_action:
+        from app.domain.scenario_catalog import NEXT_AFTER_CONSTRAINT
+        next_action = NEXT_AFTER_CONSTRAINT.get(topic)
+
     bank_profile = facts.get("bank_profile") or {}
     constraints = bank_profile.get("constraints") or facts.get("constraints") or []
-    bank = bank_profile.get("bank") or facts.get("bank") or slots.get("bank_name") or slots.get("_last_bank")
+    bank = (
+        slots.get("_current_bank_mention")
+        or bank_profile.get("bank")
+        or facts.get("bank")
+        or slots.get("bank_name")
+        or slots.get("_last_bank")
+    )
 
     # High-risk constraints get deterministic wording even if KB retrieval is sparse.
     must_use = list(constraints[:3])
-    fallback_text = constraint_fallback(topic, bank=bank)
+    resolved_client = bank_profile.get("client_type") or facts.get("client_type") or client_type
+    fallback_text = constraint_fallback(topic, bank=bank, client_type=resolved_client)
     if not must_use:
         must_use = [fallback_text]
 
-    base["action"] = "answer"
-    base["intent"] = "constraint"
-    base["bank"] = bank
-    base["client_type"] = bank_profile.get("client_type") or facts.get("client_type") or client_type
-    base["constraints"] = constraints
+    base["action"]         = "answer"
+    base["intent"]         = "constraint"
+    base["bank"]           = bank
+    base["client_type"]    = resolved_client
+    base["constraints"]    = constraints
     base["must_use_facts"] = must_use
     base["constraint_topic"] = topic
-    base["answer_text"] = fallback_text
-    base["items"] = []
-    base["docs"] = []
-    base["question_to_ask"] = None
+    base["scenario_topic"] = scenario_topic
+    base["next_action"]    = next_action
+    base["answer_text"]    = fallback_text
+    base["items"]          = []
+    base["docs"]           = []
+
+    # Route post-constraint flow by topic
+    resolved_ct = base.get("client_type") or client_type
+    if topic == "special_account_without_main":
+        if not resolved_ct:
+            slots["_pending_question_type"] = "client_type_after_constraint"
+            base["question_to_ask"] = "client_type_after_constraint"
+        else:
+            slots["_pending_question_type"] = "confirm_client_type_after_constraint"
+            slots["_suggested_client_type"] = resolved_ct
+            base["question_to_ask"] = "priority"
+    elif topic in ("fl_realization_card_signed_by_financial_manager", "debtor_card_realization"):
+        # Do NOT ask ЮЛ/ИП/ФЛ — ask about realization status instead
+        slots["_pending_question_type"] = "realization_status"
+        slots["_last_constraint_topic"] = topic
+        base["question_to_ask"] = "realization_status"
+    else:
+        base["question_to_ask"] = None
     return base
 
 def _plan_conditions(base: dict, facts: dict, slots: dict, client_type) -> dict:
@@ -573,7 +746,15 @@ def build_response_plan(
     priority    = slots.get("priority_criteria")
     confidence  = facts_result.get("confidence", 0.0)
     facts       = facts_result.get("facts", {})
+    # Attach source_chunks so sub-builders can access them
+    facts["source_chunks"] = facts_result.get("source_chunks") or []
     base        = _make_base(client_type)
+
+    # Propagate new planner fields into the plan base
+    for field in ("scenario_topic", "constraint_topic", "next_action", "amount", "transfer_target"):
+        val = decision.get(field)
+        if val is not None:
+            base[field] = val
 
     if qmode == "out_of_scope":
         return _plan_out_of_scope(base, slots, decision)
@@ -588,7 +769,11 @@ def build_response_plan(
         return base
     if decision.get("action") == "HANDOFF":
         return _plan_handoff(base, qmode, decision.get("handoff_reason") or "early_handoff")
-    if qmode == "bank_selection":
+    if qmode == "transfer_fee_quote":
+        plan = _plan_transfer_fee_quote(base, facts, slots, decision, client_type)
+    elif qmode == "extra_fees":
+        plan = _plan_extra_fees(base, facts, slots, decision, client_type)
+    elif qmode == "bank_selection":
         plan = _plan_bank_selection(base, facts, slots, decision, client_type, priority)
     elif qmode == "partner_banks":
         plan = _plan_partner_banks(base, slots)
@@ -601,13 +786,14 @@ def build_response_plan(
 
     intent = plan.get("intent")
     action = plan.get("action")
-    if intent in ("pricing", "docs", "specific_bank", "bonus", "timing", "timing_docs", "conditions"):
+    if intent in ("pricing", "docs", "specific_bank", "bonus", "timing", "timing_docs",
+                  "conditions", "transfer_fee_quote", "extra_fees"):
         ref_key = intent
     elif action in ("compare", "selection_opening", "clarify"):
         ref_key = action
     else:
         ref_key = intent or action
-    
+
     plan["reference_examples"] = _REFERENCE_EXAMPLES.get(ref_key, [])
 
     return plan

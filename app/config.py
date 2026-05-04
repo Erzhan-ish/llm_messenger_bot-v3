@@ -4,13 +4,12 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
 
+
 class Settings(BaseSettings):
     # bitrix
     BITRIX_WEBHOOK_URL: str = ""
     DUTY_MANAGER_ID: int | None = None
     BITRIX_DISK_FOLDER_ID: int | None = None
-
-    ENABLE_BACKGROUND_ANALYSIS: bool = False
 
     # WhatsApp inbound
     WHATSAPP_VERIFY_TOKEN: str = ""
@@ -49,40 +48,37 @@ class Settings(BaseSettings):
     TIMEWEB_AI_MODEL: str = "deepseek-v3"
     TIMEWEB_AI_ANALYZER_MODEL: str = ""  # falls back to TIMEWEB_AI_MODEL if empty
 
-    # Application
-    LOG_LEVEL: str = "INFO"
-    SESSION_TTL_HOURS: int = 24
-    CONTEXT_MESSAGES_LIMIT: int = 10
-    ENABLE_LLM_SUMMARY: bool = False
-
-    # Timeouts
-    LLM_TIMEOUT: int = 60
-    HTTP_TIMEOUT: int = 30
-
-    # Per-call token budgets (gpt-5 reasoning eats completion_tokens fast)
+    # Provider-aware token budgets
     TIMEWEB_RENDER_MAX_TOKENS: int = 3000
     TIMEWEB_ANALYZER_MAX_TOKENS: int = 1500
     TIMEWEB_ENRICHMENT_MAX_TOKENS: int = 1000
-    TIMEWEB_SUMMARY_MAX_TOKENS: int = 1500
     TIMEWEB_ESCALATION_MAX_TOKENS: int = 2000
-    TIMEWEB_REASONING_EFFORT: str = "low"  # set "" to disable
-
-    # Per-call token budgets for Ollama (local models crash on large num_predict)
     OLLAMA_RENDER_MAX_TOKENS: int = 600
     OLLAMA_ANALYZER_MAX_TOKENS: int = 400
     OLLAMA_ENRICHMENT_MAX_TOKENS: int = 400
     OLLAMA_ESCALATION_MAX_TOKENS: int = 500
     OLLAMA_NUM_CTX: int = 4096
 
-    # CRM integration (set false for local testing — handoff sets slot but skips Bitrix)
-    CRM_ENABLED: bool = False
+    # MVP stability switches
+    ENABLE_BACKGROUND_ANALYSIS: bool = False
+    CRM_ENABLED: bool = True
 
+    # Application
+    LOG_LEVEL: str = "INFO"
+    SESSION_TTL_HOURS: int = 24
+    CONTEXT_MESSAGES_LIMIT: int = 10
+
+    # Timeouts
+    LLM_TIMEOUT: int = 60
+    HTTP_TIMEOUT: int = 30
+
+    ENABLE_LLM_SUMMARY: bool = False
     # STT (optional)
     STT_ENGINE: str = Field(default="faster-whisper")
     STT_MODEL_NAME: str = Field(default="small")
     STT_DEVICE: str = Field(default="cpu")
     STT_COMPUTE_TYPE: str = Field(default="int8")
-    
+
     # Knowledge Base
     KB_SOURCE_PATH: str = Field(default="")
     KB_CACHE_PATH: str = Field(default="app/knowledge_base/data/kb_cache.json")
@@ -111,7 +107,9 @@ settings = Settings()
 
 
 def llm_token_budget(kind: str) -> int:
-    """Return the correct max_tokens budget for the active LLM provider."""
-    if settings.LLM_PROVIDER == "ollama":
-        return getattr(settings, f"OLLAMA_{kind}_MAX_TOKENS")
-    return getattr(settings, f"TIMEWEB_{kind}_MAX_TOKENS")
+    """Return provider-aware token budget for RENDER/ANALYZER/ENRICHMENT/ESCALATION."""
+    k = (kind or "RENDER").upper()
+    provider = (getattr(settings, "LLM_PROVIDER", "stub") or "stub").lower()
+    prefix = "OLLAMA" if provider == "ollama" else "TIMEWEB"
+    default = 600 if provider == "ollama" else 1500
+    return int(getattr(settings, f"{prefix}_{k}_MAX_TOKENS", default))

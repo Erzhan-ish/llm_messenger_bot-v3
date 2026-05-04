@@ -11,20 +11,26 @@ from app.knowledge_base.service import get_kb, _kb_query_variants, _extract_bank
 from app.logging import logger
 
 QUERY_MODE_FILTER_MAP: Dict[str, List[str]] = {
-    "pricing":       ["pricing", "availability", "bonus", "selection"],
-    "docs":          ["docs", "constraint"],
-    "specific_bank": ["pricing", "feature", "availability", "constraint", "docs", "bonus", "selection"],
-    "bank_selection":["selection", "availability", "feature", "pricing", "bonus", "constraint"],
-    "process":       ["constraint", "internal_ops"],
-    "timing":        ["internal_ops"],
-    "timing_docs":   ["internal_ops", "docs"],
-    "conditions":    ["pricing", "bonus", "docs", "feature", "constraint", "selection", "availability"],
-    "constraint":    ["constraint", "docs", "selection", "internal_ops"],
-    "out_of_scope":  [],
-    "smalltalk":     [],
-    "service":       [],
-    "intro":         [],
-    "internal_ops":  ["internal_ops"],
+    "pricing":            ["pricing", "availability", "bonus", "selection"],
+    "docs":               ["docs", "constraint"],
+    "specific_bank":      ["pricing", "feature", "availability", "constraint", "docs", "bonus", "selection"],
+    "bank_selection":     ["selection", "availability", "feature", "pricing", "bonus", "constraint"],
+    "process":            ["constraint", "internal_ops"],
+    "timing":             ["internal_ops"],
+    "timing_docs":        ["internal_ops", "docs"],
+    "conditions":         ["pricing", "bonus", "docs", "feature", "constraint", "selection", "availability"],
+    "constraint":         ["constraint", "docs", "selection", "internal_ops"],
+    "transfer_fee_quote": ["pricing", "constraint", "internal_ops"],
+    "extra_fees":         ["pricing", "constraint", "internal_ops", "feature"],
+    "bonus":              ["bonus", "pricing"],
+    "access_cards":       ["constraint", "internal_ops", "feature"],
+    "operations":         ["internal_ops", "constraint"],
+    "signing":            ["constraint", "internal_ops"],
+    "out_of_scope":       [],
+    "smalltalk":          [],
+    "service":            [],
+    "intro":              [],
+    "internal_ops":       ["internal_ops"],
 }
 
 # Modes that skip KB entirely
@@ -336,12 +342,19 @@ async def retrieve_facts(
         k = 12
     elif query_mode == "bank_selection":
         k = 15  # need pricing chunks for multiple banks simultaneously
-    elif query_mode == "constraint":
-        k = 10  # need enough room for exact constraint aliases
+    elif query_mode in ("constraint", "transfer_fee_quote", "extra_fees", "access_cards", "operations"):
+        k = 10
     else:
         k = 4
 
-    bank_hints = _extract_bank_hints(question)
+    # Prioritize current message bank mention over history
+    current_bank = slots.get("_current_bank_mention")
+    if current_bank:
+        # Rebuild bank_hints to reflect the current message bank
+        from app.knowledge_base.service import _extract_bank_hints as _ebh
+        bank_hints = _ebh(current_bank)
+    else:
+        bank_hints = _extract_bank_hints(question)
 
     # --- Retrieval with score aggregation ---
     scored: Dict[Tuple[str, int], Tuple[float, Any]] = {}
@@ -397,9 +410,10 @@ async def retrieve_facts(
     max_score  = top_data[0][0] if top_data else 0.0
 
     # Filter top_chunks to only include chunks matching the requested bank
-    if bank_hints and query_mode in ("specific_bank", "pricing", "docs"):
+    if bank_hints and query_mode in ("specific_bank", "pricing", "docs", "transfer_fee_quote", "extra_fees"):
         bank_filtered = [ch for _, ch in top_data
-                         if any(h in (getattr(ch, "bank", "") or "").lower() for h in bank_hints)]
+                         if any(h in (getattr(ch, "bank", "") or "").lower() for h in bank_hints)
+                         or getattr(ch, "bank", None) is None]  # keep bank-agnostic chunks
         if bank_filtered:
             top_chunks = bank_filtered[:k]
 

@@ -35,6 +35,20 @@ _EMAIL_RE      = re.compile(r"(?i)\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b")
 _INN_RE        = re.compile(r"\b(\d{10}|\d{12})\b")
 _INN_LABELED_RE = re.compile(r"(?i)\bинн[:\s]*([0-9]{10}|[0-9]{12})\b")
 
+# Amount extraction: "200 000", "200000", "200 тыс", "30 млн", "2 млрд"
+_AMOUNT_RE = re.compile(
+    r"(\d[\d\s]*(?:\.\d+)?)\s*(млрд|млн|тыс(?:яч)?\.?)?(?:\s*руб\.?)?",
+    re.I | re.U,
+)
+_TRANSFER_TO_FL_RE = re.compile(
+    r"\b(физ\s*лиц\w*|фл\b|физик\w*|кредитору[-\s]*физ|гражданин\w*)\b",
+    re.I | re.U,
+)
+_TRANSFER_TO_UL_RE = re.compile(
+    r"\b(юр\s*лиц\w*|юл\b|ооо\b|компани\w*|организаци\w*)\b",
+    re.I | re.U,
+)
+
 # ---------------------------------------------------------------------------
 # Client style detection
 # ---------------------------------------------------------------------------
@@ -186,10 +200,11 @@ def extract_runtime_slots(text: str, slots: Dict) -> Dict:
             slots["client_type"] = "ФЛ"
 
     # First pass: set if unknown
+    # NOTE: "должник", "банкрот", "списывают долги" intentionally NOT included —
+    # these describe the debtor type, not the client (АУ) organisation type.
     if not slots.get("client_type"):
         if any(x in t for x in ["физ лиц", "фл", "физлицо", "физическое",
-                                "физ.", "физику", "физики",
-                                "должник", "банкрот", "списывают долги", "физик"]):
+                                "физ.", "физику", "физики", "физик"]):
             slots["client_type"] = "ФЛ"
         elif any(x in t for x in ["ооо", "юр лицо", "юл", "юрлицо", "организаци"]):
             slots["client_type"] = "ЮЛ"
@@ -271,5 +286,38 @@ def extract_runtime_slots(text: str, slots: Dict) -> Dict:
 
     # 10. Client style (accumulated signals)
     _update_client_style(text, slots)
+
+    # 11. Current bank mention — always reflects the bank named in THIS message.
+    # Has higher priority than _last_bank in plan/retrieval decisions.
+    bank_in_msg = _detect_bank(t)
+    if bank_in_msg:
+        slots["_current_bank_mention"] = bank_in_msg
+    else:
+        slots.pop("_current_bank_mention", None)
+
+    # 12. Transfer amount extraction (for transfer_fee_quote intent)
+    _m = _AMOUNT_RE.search(t)
+    if _m:
+        raw_num = _m.group(1).replace(" ", "")
+        try:
+            val = float(raw_num)
+            suffix = (_m.group(2) or "").lower()
+            if "млрд" in suffix:
+                val *= 1_000_000_000
+            elif "млн" in suffix:
+                val *= 1_000_000
+            elif "тыс" in suffix:
+                val *= 1_000
+            slots["_transfer_amount"] = int(val)
+        except ValueError:
+            pass
+    else:
+        slots.pop("_transfer_amount", None)
+
+    # 13. Transfer target type (ФЛ/ЮЛ) for transfer_fee_quote
+    if _TRANSFER_TO_FL_RE.search(t):
+        slots["_transfer_target"] = "ФЛ"
+    elif _TRANSFER_TO_UL_RE.search(t):
+        slots["_transfer_target"] = "ЮЛ"
 
     return slots

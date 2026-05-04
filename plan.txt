@@ -1,95 +1,888 @@
-Нужно пересмотреть архитектуру. Сейчас слишком много смысла зашито в системный код через regex и отдельные query_mode. Это стало хрупким: каждый новый кейс требует новый regex, а бот всё равно ошибается на формулировках.
+Ты работаешь с проектом llm_messenger_bot-v3.
 
-Новая цель:
-Перейти к архитектуре LLM-planner + guardrails.
+Цель: довести MVP-архитектуру “LLM думает, код контролирует” до устойчивого состояния.
+
+Контекст:
+читай в project_context.txt
+
+Главный принцип:
+- LLM-planner определяет смысл: intent, scenario_topic, constraint_topic, next_action.
+- Код контролирует: domain guard, hard handoff, stop/aggression, KB facts, CRM, fallback, anti-repeat.
+- Renderer формулирует живой ответ, но не придумывает факты.
+- Constraint не должен превращать любой вопрос в intent=constraint.
+- Constraint_topic — это дополнительное поле, а не всегда главный intent.
+
+Проблемы из последних тестов:
+1. Constraint-flow слишком общий: после вопроса про карту должника бот спрашивает “основной счёт для юрлица, ИП или физлица?”, хотя должен продолжать тему карты.
+2. Вопрос “Сколько будет стоить перевод 200 000 руб. на физлицо в Альфа-Банке?” ошибочно отвечает про открытие/ведение счёта, а должен считать/объяснять комиссию за перевод.
+3. Вопрос “Есть ли в Уралсибе дополнительные платежи за переводы, кроме основной комиссии?” ошибочно уходит в constraint и теряет банк.
+4. Бот иногда подставляет ФЛ по умолчанию, хотя клиент не указал тип клиента.
+5. Банк из текущего сообщения должен иметь приоритет над last_bank/retrieval.
+6. Нужен единый scenario catalog, чтобы planner выбирал из понятной карты сценариев, а не гадал.
+
+============================================================
+ЧТО НУЖНО ИСПРАВИТЬ
+============================================================
+
+1. Разделить constraint по темам
+
+Сейчас constraint обрабатывается слишком универсально:
+
+constraint → уточнить тип клиента → bank_selection
+
+Это подходит только для сценария:
+- special_account_without_main
+
+Но НЕ подходит для:
+- debtor_card_realization
+- operation_control
+- remote_signing_not_available
+- large_transfer_requires_2_day_notice_and_creditor_registry
+- no_online_bank_access_for_fl_ip_manager
+- etc.
+
+Нужно сделать constraint_topic обязательным полем для constraint-сценариев.
+
+Добавить/поддержать constraint_topic:
+
+- special_account_without_main
+- debtor_card_realization
+- operation_control
+- remote_signing_not_available
+- poa_only_for_legal_entities
+- no_branch_in_city
+- advance_opening_no_movements
+- deceased_individual_no_account
+- liquidated_legal_entity_limited_bank_choice
+- non_resident_requires_apostilled_registry
+- red_zone_company_individual_review
+- active_company_standard_uralsib_tariffs
+- cash_withdrawal_requires_court_decision
+- large_transfer_requires_2_day_notice_and_creditor_registry
+- manual_payments_mkb_paused
+- fl_tkb_expense_operations_require_bank_legal_approval
+- no_online_bank_access_for_fl_ip_manager
+- external_management_corporate_cards_blocked
+- fl_realization_card_signed_by_financial_manager
+- ip_restructuring_payments_require_fu_written_consent
+- no_capitalization
+- no_salary_project
+
+Добавить next_action по constraint_topic:
+
+NEXT_AFTER_CONSTRAINT = {
+    "special_account_without_main": "explain_constraint_then_qualify_main_account",
+    "debtor_card_realization": "explain_card_process",
+    "fl_realization_card_signed_by_financial_manager": "explain_card_process",
+    "operation_control": "explain_operation_control",
+    "remote_signing_not_available": "explain_signing_requirement",
+    "poa_only_for_legal_entities": "explain_poa_requirement",
+    "cash_withdrawal_requires_court_decision": "explain_cash_withdrawal_requirement",
+    "large_transfer_requires_2_day_notice_and_creditor_registry": "explain_large_transfer_requirement",
+    "no_capitalization": "explain_unavailable_service",
+    "no_salary_project": "explain_unavailable_service",
+}
+
+Acceptance:
+- “спецсчёт без основного можно?” → constraint_topic=special_account_without_main, next_action=explain_constraint_then_qualify_main_account.
+- “можно карту должнику при реализации имущества?” → constraint_topic=fl_realization_card_signed_by_financial_manager, next_action=explain_card_process.
+- “да, реализация введена” после вопроса о карте НЕ должен переводить в bank_selection.
+- “причём тут это?” после карты должен извиниться и вернуться к теме карты.
+
+============================================================
+
+2. Исправить flow для карты должника / реализации имущества
+
+Проблема:
+Клиент:
+“добрый день, я сопровождаю человека, у которого списывают долги через суд. Можно ему карту сделать?”
+
+Бот правильно отвечает:
+“Если у гражданина введена реализация имущества, карту оформляет и подписывает финансовый управляющий. Уточните, реализация имущества уже введена?”
+
+Потом клиент:
+“да введена”
+
+Сейчас бот ошибочно отвечает:
+“Понял. Уточните, пожалуйста: основной счёт открываем для юрлица, ИП или физлица?”
+
+Это неверно.
+
+Нужная логика:
+Если предыдущий constraint_topic был debtor_card_realization или fl_realization_card_signed_by_financial_manager и пользователь подтверждает “да / введена / реализация введена”, нужно продолжать тему карты:
+
+Ответ:
+“Понял. Тогда карту оформляет и подписывает финансовый управляющий, не сам должник. Подсказать, какие данные нужны для оформления?”
+
+Не спрашивать ЮЛ/ИП/ФЛ.
+
+Реализовать:
+- slots["_last_constraint_topic"] = "fl_realization_card_signed_by_financial_manager"
+- slots["_pending_question_type"] = "realization_status"
+- Если pending == realization_status и пользователь подтверждает “да/введена/уже введена”:
+  - intent = "constraint"
+  - scenario_topic = "fl_realization_card"
+  - constraint_topic = "fl_realization_card_signed_by_financial_manager"
+  - next_action = "explain_card_process"
+  - НЕ bank_selection
+
+Если пользователь отвечает “нет / ещё нет / пока не введена”:
+Ответ:
+“Тогда сначала нужно понимать стадию процедуры. Карта в таком режиме оформляется уже после введения реализации имущества. Подсказать, какой счёт можно открыть сейчас?”
+
+Acceptance:
+- “да введена” → ответ про карту ФУ.
+- “причем тут это?” → “Вы правы, это не про открытие основного счёта. По карте: если реализация введена, оформляет и подписывает финансовый управляющий. Подсказать данные для оформления?”
+- Нет перехода к “основной счёт для ЮЛ/ИП/ФЛ”.
+
+============================================================
+
+3. Добавить intent/query_mode transfer_fee_quote
+
+Проблема:
+Клиент:
+“Сколько будет стоить перевод 200 000 руб. на физлицо в Альфа-Банке?”
+
+Сейчас бот отвечает про открытие и ведение счёта:
+“В Альфа-Банке открытие 800, ведение 800...”
+
+Это неверно. Клиент спрашивает конкретный перевод.
+
+Нужно добавить:
+
+intent = "transfer_fee_quote"
+query_mode = "transfer_fee_quote"
+scenario_topic = "transfer_to_individual_fee"
+bank_name = "Альфа-Банк"
+amount = 200000
+transfer_target = "ФЛ"
+
+Нужно парсить:
+- amount: “200 000”, “200000”, “200 тыс”, “30 млн”
+- bank_name: Альфа-Банк / ТКБ / Уралсиб / etc.
+- transfer_target: ФЛ/ЮЛ по словам “физлицо”, “физ лицо”, “фл”, “кредитору-физлицу”, “юрлицо”, “компания”
+
+Добавить helpers:
+_AMOUNT_RE = ...
+_TRANSFER_TO_FL_RE = ...
+_TRANSFER_TO_UL_RE = ...
 
 Важно:
-- Не отдавать LLM действия/CRM/handoff полностью.
-- Но убрать из message_processor.py большую часть semantic-routing логики.
-- Код должен защищать границы и проверять результат.
-- LLM-planner должен определять intent/stage/focus на основе user_message + slots + KB_CONTEXT.
-- Renderer должен только формулировать ответ из готового плана.
+Это НЕ обычный pricing. Это не opening_fee/monthly_fee. Нельзя отвечать про открытие/ведение.
 
-Сделать:
+Для Альфа-Банка на ФЛ:
+- до 150 000 руб. — 0%
+- свыше 150 000 руб. — 0.5%
 
-1. Создать app/services/dialog_planner.py
-Функция:
-async def plan_dialog(user_text, slots, recent_dialog, kb_context, rule_hints=None) -> dict
+Пример для 200 000:
+200 000 × 0.5% = 1 000 руб.
 
-Planner возвращает строго JSON:
+Ответ:
+“В Альфа-Банке перевод 200 000 руб. на физлицо выйдет примерно 1 000 руб., потому что свыше 150 000 руб. применяется комиссия 0.5%. Сравнить с другим банком?”
+
+Если есть крупный перевод больше 30 млн:
+- scenario_topic = "large_transfer_to_individual"
+- constraint_topic = "large_transfer_requires_2_day_notice_and_creditor_registry"
+- intent всё равно transfer_fee_quote или operations, НЕ constraint.
+Ответ должен упомянуть:
+“Если сумма крупная, банк нужно предупредить за 2 дня и предоставить реестр кредиторов, тогда льготная комиссия составит 0.2%.”
+
+Acceptance:
+- “перевод 200 000 на физлицо в Альфа-Банке” → transfer_fee_quote, ответ ≈ 1 000 руб.
+- Не отвечать opening_fee/monthly_fee.
+- Для >30 млн упомянуть предупреждение за 2 дня и реестр кредиторов.
+
+============================================================
+
+4. Добавить intent/query_mode extra_fees
+
+Проблема:
+Клиент:
+“Есть ли в Уралсибе какие-то дополнительные платежи за переводы, кроме основной комиссии?”
+
+Сейчас planner выбирает constraint, retrieval уходит в constraint, банк теряется, ответ странный.
+
+Это не constraint. Это вопрос про дополнительные комиссии/платежи.
+
+Добавить:
+intent = "extra_fees"
+query_mode = "extra_fees"
+scenario_topic = "additional_transfer_fees"
+bank_name = "Уралсиб"
+
+Триггеры:
+- дополнительные платежи
+- кроме основной комиссии
+- еще какие комиссии
+- доп комиссии
+- контроль операции
+- платежи за переводы
+- комиссия сверх
+- скрытые платежи
+
+Для Уралсиба:
+- перевод на ЮЛ — 35 руб.
+- перевод на ФЛ до 100 000 руб. — без комиссии
+- есть 150 руб. за контроль каждой банкротной операции
+
+Ответ:
+“Да, в Уралсибе кроме основной комиссии есть 150 руб. за контроль каждой банкротной операции. По переводам на юрлица — 35 руб., а на физлица до 100 000 руб. без комиссии. Уточнить по какой сумме перевода?”
+
+Важно:
+- Не выбирать intent=constraint.
+- Не подменять Уралсиб на ТКБ.
+- Если банк не указан, уточнить банк.
+
+Acceptance:
+- “дополнительные платежи в Уралсибе” → extra_fees.
+- Ответ не упоминает ТКБ.
+- Ответ содержит 150 руб. за контроль операции, если факт есть в KB.
+- В конце один вопрос.
+
+============================================================
+
+5. Запретить planner выбирать intent=constraint для вопросов про комиссии, платежи и тарифы
+
+Обновить prompt dialog_planner.
+
+Добавить правило:
+
+“Не выбирай intent='constraint' только потому, что в KB есть ограничение. Сначала определи, что хочет клиент:
+- выбрать банк → bank_selection
+- узнать открытие/ведение → pricing
+- рассчитать перевод по сумме → transfer_fee_quote
+- узнать дополнительные комиссии/платежи → extra_fees
+- узнать бонус → bonus
+- узнать документы → docs
+- узнать сроки → timing
+- спросить можно/нельзя/регламентное ограничение → constraint
+
+Если пользователь спрашивает про комиссии, платежи, стоимость перевода, сколько будет стоить, дополнительные платежи — это pricing / transfer_fee_quote / extra_fees, НЕ constraint.
+
+constraint_topic можно заполнить дополнительно, если в ответе нужно упомянуть регламентное ограничение.”
+
+Примеры:
+- “Сколько перевод 200 000 на физлицо?” → transfer_fee_quote.
+- “Есть ли доп платежи?” → extra_fees.
+- “Можно открыть спецсчёт без основного?” → constraint.
+- “Можно карту должнику?” → constraint.
+- “Можно онлайн по ЭЦП?” → constraint.
+- “Какие тарифы?” → pricing.
+
+Acceptance:
+- Planner больше не переводит fee-вопросы в constraint.
+- constraint_topic может быть заполнен дополнительно, но intent остаётся fee/pricing, если клиент спросил стоимость.
+
+============================================================
+
+6. Не подставлять client_type=ФЛ по умолчанию
+
+Проблема:
+Клиент:
+“спецсчет открыть в ТКБ но основного еще нет”
+
+Бот:
+“Для физлица сначала подбираем основной счёт...”
+
+Клиент не говорил, что это ФЛ. Нельзя ставить ФЛ по умолчанию.
+
+Нужно:
+- Убрать любые default client_type = "ФЛ".
+- Если client_type неизвестен — None.
+- Если нужен тип клиента — спросить нейтрально:
+  “Счёт открываем для юрлица, ИП или физлица?”
+
+Проверить места:
+- slots.py
+- plan_builder.py
+- renderer.py
+- dialog_planner fallback/normalization
+- policy_validator
+- any helper that maps unknown client_type to ФЛ
+
+Acceptance:
+- Если тип клиента не указан, бот не говорит “для физлица”.
+- Он спрашивает: “для юрлица, ИП или физлица?”
+
+============================================================
+
+7. Приоритет bank_name из текущего сообщения
+
+Проблема:
+Клиент спрашивает про Уралсиб, а бот отвечает с упоминанием ТКБ.
+
+Правило:
+bank_from_current_user_text > current explicit extraction > slots["bank_name"] > slots["_last_bank"] > retrieved top bank
+
+Реализовать:
+- В extract_runtime_slots или message_processor отдельно сохранять:
+  slots["_current_bank_mention"] = bank_from_current_message
+- При build_response_plan/fact_retriever:
+  explicit_bank = slots["_current_bank_mention"] or decision["bank_name"] or slots["bank_name"] or slots["_last_bank"]
+- Если текущий текст содержит “Уралсиб”, retrieval и response plan не должны заменять его на ТКБ.
+- После успешного ответа обновить slots["_last_bank"].
+
+Acceptance:
+- “в Уралсибе дополнительные платежи?” → bank_name=Уралсиб.
+- Ответ не упоминает ТКБ.
+- Retrieval не перезаписывает explicit bank.
+
+============================================================
+
+8. Добавить scenario catalog для planner
+
+Цель:
+Не превращать собранный список сценариев в хаотичные regex внутри message_processor.py. Нужен отдельный scenario catalog, который даёт planner-у подсказки.
+
+Создать файл:
+app/domain/scenario_catalog.py
+
+Структура:
+
+from dataclasses import dataclass
+from typing import Optional
+
+@dataclass(frozen=True)
+class Scenario:
+    intent: str
+    scenario_topic: str
+    constraint_topic: Optional[str]
+    keywords: tuple[str, ...]
+    next_action: str
+
+SCENARIOS = [
+    ...
+]
+
+Добавить сценарии из списка:
+
+БАЗОВЫЕ:
+1. legal_entity_bank_selection
+intent=bank_selection
+constraint_topic=None
+keywords=("юр лицо", "юл", "ооо", "компания", "банк подобрать", "для юрлица")
+next_action=present_bank_options
+
+2. individual_bank_selection
+intent=bank_selection
+constraint_topic=None
+keywords=("физ лицо", "фл", "физик", "гражданин", "банк подобрать")
+next_action=present_bank_options
+
+3. opening_monthly_fee
+intent=pricing
+constraint_topic=None
+keywords=("стоимость открытия", "сколько стоит", "ведение", "тариф", "прайс")
+next_action=explain_pricing
+
+4. payment_transfer_fee
+intent=transfer_fee_quote
+constraint_topic=None
+keywords=("перевод", "платежка", "физлицо", "юрлицо", "комиссия", "сколько будет стоить")
+next_action=calculate_or_explain_transfer_fee
+
+5. additional_transfer_fees
+intent=extra_fees
+constraint_topic=None
+keywords=("дополнительные платежи", "кроме основной комиссии", "доп комиссия", "контроль операции")
+next_action=explain_extra_fees
+
+6. manager_bonus_rate
+intent=bonus
+constraint_topic=None
+keywords=("бонус", "вознаграждение", "личная выгода", "процент на остаток")
+next_action=explain_bonus
+
+ОРГАНИЗАЦИОННЫЕ:
+7. legal_entity_docs
+intent=docs
+keywords=("документы для юл", "что нужно для ооо", "инн должника", "перечень счетов")
+next_action=explain_docs
+
+8. individual_docs
+intent=docs
+keywords=("документы для физлица", "паспорт должника", "решение суда", "паспорт ау")
+next_action=explain_docs
+
+9. opening_timeline
+intent=timing
+keywords=("сроки", "как долго", "когда откроется", "сколько ждать", "после подписания")
+next_action=explain_timing
+
+10. remote_signing
+intent=constraint
+constraint_topic=remote_signing_not_available
+keywords=("онлайн", "эцп", "дистанционно подписать", "без визита")
+next_action=explain_signing_requirement
+
+11. power_of_attorney
+intent=constraint
+constraint_topic=poa_only_for_legal_entities
+keywords=("по доверенности", "помощник", "представитель", "нотариальная доверенность")
+next_action=explain_poa_requirement
+
+12. no_branch_in_city
+intent=constraint
+constraint_topic=no_branch_in_city
+keywords=("нет отделения", "нет офиса", "в моем городе нет", "далеко")
+next_action=explain_branch_options
+
+13. advance_opening
+intent=constraint
+constraint_topic=advance_opening_no_movements
+keywords=("заранее", "про запас", "пока движений нет", "без движений")
+next_action=explain_advance_opening
+
+НЕСТАНДАРТНЫЕ ДОЛЖНИКИ:
+14. deceased_individual
+intent=constraint
+constraint_topic=deceased_individual_no_account
+keywords=("должник умер", "умерший", "на умершего")
+next_action=explain_unavailable
+
+15. liquidated_legal_entity
+intent=constraint
+constraint_topic=liquidated_legal_entity_limited_bank_choice
+keywords=("ликвидированное юл", "компания ликвидирована", "ликвидация")
+next_action=explain_liquidation_rule
+
+16. non_resident_company
+intent=constraint
+constraint_topic=non_resident_requires_apostilled_registry
+keywords=("нерезидент", "иностранная компания", "торговая палата", "апостиль")
+next_action=explain_non_resident_docs
+
+17. red_zone_company
+intent=constraint
+constraint_topic=red_zone_company_individual_review
+keywords=("красная зона", "рисковая компания", "высокий риск")
+next_action=explain_individual_review
+
+18. active_company
+intent=constraint
+constraint_topic=active_company_standard_uralsib_tariffs
+keywords=("действующая компания", "не банкрот", "обычная компания")
+next_action=explain_active_company_tariffs
+
+ОПЕРАЦИИ:
+19. special_account_without_main
+intent=constraint
+constraint_topic=special_account_without_main
+keywords=("спецсчет без основного", "спецсчёт без основного", "только спецсчет", "основного нет")
+next_action=explain_constraint_then_qualify_main_account
+
+20. cash_withdrawal
+intent=constraint
+constraint_topic=cash_withdrawal_requires_court_decision
+keywords=("снять наличные", "наличка", "выдать наличными")
+next_action=explain_cash_withdrawal_requirement
+
+21. large_transfer_to_individual
+intent=transfer_fee_quote
+constraint_topic=large_transfer_requires_2_day_notice_and_creditor_registry
+keywords=("крупный перевод", "30 млн", "кредитору", "реестр кредиторов")
+next_action=explain_large_transfer_fee_and_requirement
+
+22. pension_payment_to_bankrupt
+intent=operations
+constraint_topic=None
+keywords=("пенсия", "выдать пенсию", "пенсия банкроту")
+next_action=explain_pension_payment
+
+23. mkb_manual_payments
+intent=constraint
+constraint_topic=manual_payments_mkb_paused
+keywords=("мкб", "ручные платежи", "внутрибанковский перевод", "рукописное заявление")
+next_action=explain_mkb_manual_payments
+
+24. tkb_fl_expense_operations
+intent=constraint
+constraint_topic=fl_tkb_expense_operations_require_bank_legal_approval
+keywords=("расходные операции", "ткб", "физлицо", "согласование юристов")
+next_action=explain_tkb_fl_operation_approval
+
+КАРТЫ И ДОСТУПЫ:
+25. internet_bank_access_fl_ip
+intent=constraint
+constraint_topic=no_online_bank_access_for_fl_ip_manager
+keywords=("интернет-банк", "доступ", "личный кабинет", "фл", "ип")
+next_action=explain_no_online_bank_access
+
+26. external_management_cards
+intent=constraint
+constraint_topic=external_management_corporate_cards_blocked
+keywords=("корпоративные карты", "внешнее управление", "карты юл")
+next_action=explain_cards_blocked
+
+27. fl_realization_card
+intent=constraint
+constraint_topic=fl_realization_card_signed_by_financial_manager
+keywords=("карта", "реализация имущества", "списывают долги", "должник", "финансовый управляющий")
+next_action=explain_card_process
+
+28. ip_restructuring_payments
+intent=constraint
+constraint_topic=ip_restructuring_payments_require_fu_written_consent
+keywords=("реструктуризация долгов ип", "платежи ип", "письменное согласие финансового управляющего")
+next_action=explain_ip_restructuring_payment_rule
+
+ОТКАЗНЫЕ:
+29. capitalization
+intent=constraint
+constraint_topic=no_capitalization
+keywords=("капитализация", "процент банку", "капал процент")
+next_action=explain_unavailable_service
+
+30. salary_project
+intent=constraint
+constraint_topic=no_salary_project
+keywords=("зарплатный проект", "зарплата сотрудникам", "бесплатные переводы сотрудникам")
+next_action=explain_unavailable_service
+
+Добавить:
+def build_scenario_hints(user_text: str) -> list[dict]:
+    ...
+- возвращает top 5 по keywords
+- учитывает score
+- передаётся в dialog_planner as rule_hints["scenario_hints"]
+
+Acceptance:
+- scenario_hints появляются в planner input.
+- Planner использует scenario_topic/constraint_topic из catalog.
+
+============================================================
+
+9. Обновить dialog_planner JSON schema
+
+Planner должен возвращать:
+
 {
   "domain": "in_scope|out_of_scope|unclear",
-  "stage": "...",
-  "intent": "...",
+  "stage": "GREETING|QUALIFY|PRESENTATION|OBJECTION|CONSTRAINT|DOCS|HANDOFF|OUT_OF_SCOPE",
+  "intent": "greeting|company_info|bank_selection|pricing|transfer_fee_quote|extra_fees|bonus|docs|timing|signing|access_cards|operations|constraint|objection|handoff|redirect_to_domain|clarify|conditions",
+  "query_mode": "...",
+  "scenario_topic": "string|null",
+  "constraint_topic": "string|null",
+  "next_action": "string|null",
   "client_type": "ФЛ|ЮЛ|ИП|null",
-  "bank_name": "...|null",
-  "answer_focus": "...",
+  "bank_name": "ТКБ|Уралсиб|Альфа-Банк|Т-Банк|МКБ|Росбанк|null",
+  "amount": number|null,
+  "transfer_target": "ФЛ|ЮЛ|null",
+  "answer_focus": "short description",
   "must_use_facts": [],
   "missing_info": [],
   "should_handoff": false,
   "should_stop": false,
-  "next_question": "...",
+  "next_question": "one short question",
   "confidence": 0.0
 }
 
-2. В message_processor.py оставить только hard guards:
-- reset
-- debounce
-- save message
-- direct aggression
-- direct handoff phrases
-- already escalated
-- CRM
-Остальные regex перевести в rule_hints, не в финальное решение.
+Обновить normalizer:
+- Если query_mode пустой → query_mode = intent.
+- Если intent=transfer_fee_quote → query_mode=transfer_fee_quote.
+- Если intent=extra_fees → query_mode=extra_fees.
+- Если scenario_hint имеет высокий score, использовать его как strong hint, но не override hard guards.
 
-3. Retrieval делать до planner:
-- retrieve broad KB context по user_text + slots + last_bank + aliases.
-- Для constraint topics использовать lexical alias matching.
-- Передавать top facts в planner.
+Acceptance:
+- planner output содержит scenario_topic/constraint_topic/next_action.
+- Нет старых решений без этих полей.
 
-4. Добавить policy_validator.py
-Проверки:
-- if domain=out_of_scope → только redirect answer, без KB sales.
-- if should_handoff=true → не продолжать консультацию.
-- if intent=constraint → must_use_facts должен содержать KB constraint.
-- if confidence < 0.55 → clarify или handoff для сложного вопроса.
-- if answer mentions price not in facts → fallback.
-- if answer repeats last_bot_text → focused fallback.
+============================================================
 
-5. Упростить renderer.py
-Renderer принимает только plan:
-- intent
-- must_use_facts
-- next_question
-- tone
-- slots
-И пишет 1–3 предложения.
-Убрать большую часть специальных static branches, оставить аварийные fallbacks:
+10. Обновить policy_validator
+
+Правила:
+
+1. Если domain=out_of_scope:
+- intent=redirect_to_domain
+- no KB sales
+- static redirect
+
+2. Если should_handoff=true:
+- не продолжать консультацию
+- handoff bridge + CRM
+
+3. Если intent in ["transfer_fee_quote", "extra_fees", "pricing", "bonus"]:
+- НЕ перезаписывать intent в constraint из-за constraint_topic.
+- constraint_topic можно оставить как дополнительный нюанс.
+
+4. Если intent=constraint:
+- constraint_topic обязателен.
+- Если constraint_topic отсутствует → intent=clarify или fallback to scenario_hints.
+
+5. Если scenario_topic=special_account_without_main:
+- next_action=explain_constraint_then_qualify_main_account.
+
+6. Если scenario_topic=fl_realization_card:
+- next_action=explain_card_process.
+- Не переходить в bank_selection.
+
+7. Если current_bank_mention есть:
+- bank_name должен совпадать с текущим упоминанием.
+
+8. Если confidence < 0.55:
+- clarify или handoff для сложного вопроса.
+
+9. Anti-repeat:
+- если ответ почти совпадает с last_bot_text, использовать focused fallback по текущему intent/next_action.
+
+Acceptance:
+- fee-вопросы не становятся constraint.
+- card-flow не уходит в bank_selection.
+- bank_name не теряется.
+- low confidence не приводит к уверенной выдумке.
+
+============================================================
+
+11. Обновить fact_retriever modes
+
+Добавить/поддержать:
+
+- transfer_fee_quote
+- extra_fees
+- bonus
+- operations
+- access_cards
+- signing
+
+Для transfer_fee_quote:
+Доставать:
+- transfer_to_fl_fee
+- transfer_to_yul_fee
+- cashout_fee
+- control_fee
+- large_transfer requirements
+
+Для extra_fees:
+Доставать:
+- control_fee
+- additional_fee
+- transfer_fee
+- operation_control
+- bank-specific notes
+
+Для constraint:
+Доставать:
+- constraints
+- docs only if relevant
+- не подмешивать unrelated pricing
+
+Для access_cards:
+Доставать:
+- internet bank access
+- card rules
+- external management cards
+- realization card
+
+Для operations:
+Доставать:
+- pension
+- large transfer
+- expense operations
+- cash withdrawal
+
+Acceptance:
+- “доп платежи Уралсиб” retrieval содержит control_fee/150 руб., а не unrelated ТКБ.
+- “перевод 200 000 Альфа” retrieval содержит шкалу комиссий на ФЛ.
+- “карта при реализации” retrieval содержит правило про финансового управляющего.
+
+============================================================
+
+12. Renderer: добавить deterministic render для high-precision сценариев
+
+Не отдавать полностью LLM такие ответы:
+- transfer_fee_quote с известной формулой
+- extra_fees с конкретными комиссиями
+- constraint с запретом/регламентом
 - out_of_scope
 - handoff
-- aggression_stop
-- no_kb_safe_clarify
 
-6. Обновить render prompt:
-- “Ты консультант для АУ по счетам должников.”
-- “Не отвечай на посторонние темы.”
-- “Используй только must_use_facts.”
-- “Если constraint — сначала объясни ограничение.”
-- “Не повторяй прошлый ответ.”
-- “1–3 предложения, один вопрос в конце.”
+Добавить:
+_render_transfer_fee_quote_static(plan)
+_render_extra_fees_static(plan)
+_render_constraint_static(plan)
+_render_card_process_static(plan)
 
-7. Уменьшить LLM calls:
-- выключить background analysis по умолчанию.
-- summary не вызывать в основном ответе.
-- максимум: planner + renderer.
-- для очевидного hard handoff — 0 LLM.
+Примеры:
 
-8. Тесты:
-- RTX 3060 → out_of_scope redirect.
-- спецсчёт без основного → constraint “нельзя”.
-- карта должника → constraint по реализации имущества.
-- юр лицо + подешевле → bank_selection/low_cost, но через planner.
-- скорость → timing/priority, не тарифы.
-- что дальше → handoff.
-- агрессия → stop/escalate.
-- повтор вопроса → не повторять прошлый ответ.
+transfer_fee_quote:
+“В Альфа-Банке перевод 200 000 руб. на физлицо выйдет примерно 1 000 руб., потому что свыше 150 000 руб. применяется комиссия 0.5%. Сравнить с другим банком?”
+
+extra_fees:
+“Да, в Уралсибе кроме основной комиссии есть 150 руб. за контроль каждой банкротной операции. По переводам на юрлица — 35 руб., а на физлица до 100 000 руб. без комиссии. Уточнить по какой сумме перевода?”
+
+card process:
+“Понял. Тогда карту оформляет и подписывает финансовый управляющий, не сам должник. Подсказать, какие данные нужны для оформления?”
+
+special_account_without_main:
+Если client_type unknown:
+“Отдельно спецсчёт без основного открыть нельзя. Сначала открывается основной счёт, потом уже спецсчёт. Счёт открываем для юрлица, ИП или физлица?”
+
+Если client_type known:
+“Отдельно спецсчёт без основного открыть нельзя. Сначала подбираем основной счёт, а спецсчёт открывается уже следующим шагом. Что важнее по основному счёту — дешевле открыть или быстрее оформить?”
+
+Acceptance:
+- Высокоточные ответы не галлюцинируются LLM.
+- В конце максимум один вопрос.
+- Нет “Альфа opening/monthly” на вопрос про перевод.
+
+============================================================
+
+13. Обновить plan_builder
+
+Plan должен содержать новые поля:
+- scenario_topic
+- constraint_topic
+- next_action
+- amount
+- transfer_target
+- current_bank_mention
+- must_use_facts
+- fee_details
+- extra_fee_details
+
+Для qmode=transfer_fee_quote:
+- не собирать opening/monthly как основной ответ
+- собрать fee scale и amount
+- если расчет известен — plan["calculated_fee"]
+
+Для qmode=extra_fees:
+- собрать доп комиссии, control fee, transfer fees
+- не уходить в constraint
+
+Для constraint:
+- использовать topic-specific next_action
+- не always bank_selection
+
+Acceptance:
+- plan для transfer_fee_quote содержит amount и calculated_fee.
+- plan для extra_fees содержит extra_fee_details.
+- plan для card constraint содержит next_action=explain_card_process.
+
+============================================================
+
+14. Обновить prompt render.md
+
+Добавить правила:
+- Ты консультант по счетам должников для АУ.
+- Не универсальный помощник.
+- Отвечай только на текущий вопрос.
+- Не повторяй прошлый ответ.
+- Контекст нужен только для банка, типа клиента и стадии.
+- Если intent=transfer_fee_quote, отвечай про перевод, не про открытие/ведение.
+- Если intent=extra_fees, отвечай про дополнительные платежи, не про constraint.
+- Если intent=constraint, сначала объясни ограничение.
+- Если constraint_topic есть, но intent не constraint, используй constraint как нюанс, но не меняй тему.
+- Не придумывай тарифы, комиссии, документы, сроки.
+- Факты бери только из PLAN/DATA.
+- 1–3 предложения.
+- Один вопрос в конце.
+
+Acceptance:
+- LLM-render не повторяет старые фразы.
+- LLM-render не меняет intent.
+- LLM-render не отвечает не на тот вопрос.
+
+============================================================
+
+15. Тесты
+
+Добавить/обновить тесты:
+
+1. test_special_account_without_main_unknown_client_type
+Input:
+“спецсчет открыть в ТКБ но основного еще нет, так можно?”
+Expected:
+intent=constraint
+constraint_topic=special_account_without_main
+No default client_type=ФЛ
+Answer asks “ЮЛ, ИП или ФЛ?”
+
+2. test_special_account_followup_yul
+Context:
+pending after special_account_without_main
+Input:
+“для ЮЛ”
+Expected:
+query_mode=bank_selection
+No repeated “нельзя”
+Answer moves to main account selection
+
+3. test_card_realization_confirmed
+Context:
+last_constraint_topic=fl_realization_card_signed_by_financial_manager
+pending=realization_status
+Input:
+“да введена”
+Expected:
+answer about financial manager signs card
+No bank_selection
+
+4. test_card_realization_user_confused
+Input:
+“причем тут это?”
+Expected:
+apology + return to card topic
+
+5. test_transfer_fee_quote_alfa_200k
+Input:
+“Сколько будет стоить перевод 200 000 руб. на физлицо в Альфа-Банке?”
+Expected:
+intent=transfer_fee_quote
+calculated_fee=1000
+No opening_fee/monthly response
+
+6. test_extra_fees_uralsib
+Input:
+“Есть ли в Уралсибе дополнительные платежи за переводы, кроме основной комиссии?”
+Expected:
+intent=extra_fees
+bank_name=Уралсиб
+Answer mentions 150 руб. control fee
+No ТКБ
+
+7. test_bank_priority_current_message
+Context:
+last_bank=ТКБ
+Input:
+“А в Уралсибе какие комиссии?”
+Expected:
+bank_name=Уралсиб
+
+8. test_no_default_client_type
+Input:
+“мне нужен спецсчет”
+Expected:
+client_type is None until user says it
+
+9. test_fee_question_not_constraint
+Input:
+“какие комиссии за перевод?”
+Expected:
+intent in [transfer_fee_quote, extra_fees, pricing], not constraint
+
+10. test_out_of_scope_rtx
+Input:
+“RTX 3060 купить можно?”
+Expected:
+out_of_scope redirect
+
+============================================================
+FINAL ACCEPTANCE CRITERIA
+============================================================
+
+Готово, если:
+
+1. “Сколько будет стоить перевод 200 000 руб. на физлицо в Альфа-Банке?” → ответ про комиссию перевода ≈ 1 000 руб., не про открытие/ведение.
+2. “Есть ли в Уралсибе дополнительные платежи за переводы?” → extra_fees, ответ про 150 руб. контроль операции, без ТКБ.
+3. “Спецсчёт без основного можно?” → constraint special_account_without_main, без default ФЛ.
+4. После “для ЮЛ” бот не повторяет constraint, а переходит к подбору основного счёта для ЮЛ.
+5. “Можно карту должнику при реализации имущества?” → constraint fl_realization_card.
+6. После “да введена” бот отвечает про оформление карты финансовым управляющим, не спрашивает ЮЛ/ИП/ФЛ.
+7. Fee/pricing вопросы не становятся constraint только из-за наличия constraint_topic.
+8. bank_name из текущего сообщения не перезаписывается last_bank/retrieval.
+9. Scenario catalog используется как hints для planner.
+10. Renderer high-precision сценарии рендерит deterministic/fallback, без галлюцинаций.
+11. В конце ответа максимум один вопрос.
+12. Бот не повторяет прошлый ответ.
+13. Out-of-scope мягко возвращает к теме счетов должников.

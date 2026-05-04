@@ -127,6 +127,99 @@ _FALLBACK_QUESTIONS = {
 
 
 
+_BANK_PREPOSITIONAL: dict[str, str] = {
+    "Альфа-Банк": "В Альфа-Банке",
+    "Уралсиб":    "В Уралсибе",
+    "ТКБ":        "В ТКБ",
+    "Т-Банк":     "В Т-Банке",
+    "МКБ":        "В МКБ",
+    "Росбанк":    "В Росбанке",
+    "ВТБ":        "В ВТБ",
+    "Сбербанк":   "В Сбербанке",
+}
+
+
+def _bank_in(bank: str) -> str:
+    return _BANK_PREPOSITIONAL.get(bank) or f"В {bank}"
+
+
+def _render_transfer_fee_quote_static(plan: dict) -> str:
+    """Deterministic render for transfer_fee_quote — no hallucinations."""
+    bank   = plan.get("bank") or ""
+    amount = plan.get("amount")
+    target = plan.get("transfer_target") or ""
+    fee_d  = plan.get("fee_details") or {}
+    fee    = fee_d.get("calculated_fee")
+    rate_label = fee_d.get("rate_label") or ""
+    is_large = plan.get("is_large_transfer")
+    large_note = plan.get("large_transfer_note") or ""
+
+    target_text = {"ФЛ": "физлицо", "ЮЛ": "юрлицо"}.get(target, "получателя")
+
+    if bank and amount is not None and fee is not None:
+        amount_fmt = f"{amount:,}".replace(",", " ")
+        fee_fmt    = f"{fee:,}".replace(",", " ")
+        parts = [
+            f"{_bank_in(bank)} перевод {amount_fmt} руб. на {target_text}",
+            f"выйдет примерно {fee_fmt} руб.,",
+            f"потому что {rate_label}." if rate_label else "",
+        ]
+        text = " ".join(p for p in parts if p)
+        if is_large and large_note:
+            text += f" {large_note}"
+        return text + " Сравнить с другим банком?"
+
+    if bank and amount is not None:
+        amount_fmt = f"{amount:,}".replace(",", " ")
+        return f"По переводу {amount_fmt} руб. на {target_text} в {bank} — уточню ставку. Какой тип перевода?"
+
+    if not bank:
+        return "В каком банке планируется перевод?"
+
+    return f"Уточните сумму перевода для расчёта комиссии в {bank}."
+
+
+def _render_extra_fees_static(plan: dict) -> str:
+    """Deterministic render for extra_fees."""
+    bank       = plan.get("bank") or ""
+    extra      = plan.get("extra_fee_details") or {}
+    constraints = plan.get("constraints") or []
+
+    if not bank:
+        return "По какому банку интересуют дополнительные платежи?"
+
+    if bank == "Уралсиб" and extra:
+        ctrl = extra.get("control_fee", ("", ""))[0]
+        ul   = extra.get("transfer_ul", ("", ""))[0]
+        fl   = extra.get("transfer_fl", ("", ""))[0]
+        parts = [f"Да, в {bank}е кроме основной комиссии есть {ctrl} за контроль каждой банкротной операции."]
+        if ul:
+            parts.append(f"По переводам на юрлица — {ul},")
+        if fl:
+            parts.append(f"а на физлица {fl}.")
+        return " ".join(parts) + " Уточнить по какой сумме перевода?"
+
+    if constraints:
+        note = "; ".join(constraints[:2])
+        return f"В {bank}е дополнительно: {note}. Уточнить детали?"
+
+    return f"По {bank}у — дополнительных скрытых платежей нет, но уточню по вашей конкретной ситуации. Какой перевод планируете?"
+
+
+def _render_card_process_static(plan: dict, confirmed: bool = True) -> str:
+    """Deterministic render for fl_realization_card flow."""
+    if confirmed:
+        return (
+            "Понял. Тогда карту оформляет и подписывает финансовый управляющий, "
+            "не сам должник. Подсказать, какие данные нужны для оформления?"
+        )
+    return (
+        "Тогда сначала нужно понимать стадию процедуры. "
+        "Карта в таком режиме оформляется уже после введения реализации имущества. "
+        "Подсказать, какой счёт можно открыть сейчас?"
+    )
+
+
 def _render_out_of_scope_static(plan: dict | None = None) -> str:
     return out_of_scope_reply()
 
@@ -136,15 +229,11 @@ def _render_constraint_static(plan: dict, slots: dict | None = None) -> str:
     topic = plan.get("constraint_topic") or slots.get("_constraint_topic")
     bank = plan.get("bank") or slots.get("bank_name") or slots.get("_last_bank")
     # Prefer deterministic high-risk wording to avoid accidental sales copy.
-    return plan.get("answer_text") or constraint_fallback(topic, bank=bank)
+    return plan.get("answer_text") or constraint_fallback(topic, bank=bank, client_type=(plan.get("client_type") or slots.get("client_type")))
 
 
 def _focused_fallback_for_current_intent(plan: dict, slots: dict | None = None) -> str:
     intent = plan.get("intent") or plan.get("query_mode")
-    if intent == "out_of_scope":
-        return _render_out_of_scope_static(plan)
-    if intent == "constraint":
-        return _render_constraint_static(plan, slots)
     if intent == "out_of_scope":
         return _render_out_of_scope_static(plan)
     if intent == "constraint":
@@ -159,6 +248,10 @@ def _focused_fallback_for_current_intent(plan: dict, slots: dict | None = None) 
         return _render_selection_opening_static(plan)
     if intent in ("pricing", "specific_bank", "conditions"):
         return _render_specific_bank_static(plan)
+    if intent == "transfer_fee_quote":
+        return _render_transfer_fee_quote_static(plan)
+    if intent == "extra_fees":
+        return _render_extra_fees_static(plan)
     return _plan_fallback_text(plan, slots)
 
 def _plan_fallback_text(plan: dict, slots: dict = None) -> str:
@@ -379,6 +472,10 @@ def _intent_fallback(plan: dict, slots: dict, user_text: str = "") -> str:
     if intent in ("bank_selection", "selection_opening") or plan.get("action") == "selection_opening":
         if plan.get("candidates"):
             return _render_selection_opening_static(plan)
+    if intent == "transfer_fee_quote":
+        return _render_transfer_fee_quote_static(plan)
+    if intent == "extra_fees":
+        return _render_extra_fees_static(plan)
     return _plan_fallback_text(plan, slots)
 
 
@@ -475,6 +572,16 @@ async def render_manager_text(plan: dict, *, user_text: str = "", dialog_ctx: st
 
     if action == "handoff":
         return _HANDOFF_TEXT
+
+    # High-precision answers are deterministic — LLM must not hallucinate facts.
+    if plan.get("intent") == "out_of_scope":
+        return _render_out_of_scope_static(plan)
+    if plan.get("intent") == "constraint":
+        return _render_constraint_static(plan, slots)
+    if plan.get("intent") == "transfer_fee_quote":
+        return _render_transfer_fee_quote_static(plan)
+    if plan.get("intent") == "extra_fees":
+        return _render_extra_fees_static(plan)
 
     if action == "clarify":
         return _clarify_text(plan, seed=plan.get("_seed", ""))

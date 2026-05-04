@@ -1,9 +1,10 @@
-"""Main message processing orchestrator.
+"""MVP message processing orchestrator.
 
-Heavy logic lives in sub-modules:
-  - app.processing.utils         — cleanup, send_bot, escalation, typing
-  - app.processing.plan_builder  — response plan builders
-  - app.processing.renderer      — static templates, render_manager_text, answer_with_plan
+Architecture goal: LLM thinks, code controls.
+
+Code is responsible for transport, memory, hard guards, CRM/handoff and
+fact validation. Soft semantic routing is delegated to ``dialog_planner``.
+Regex rules in this file are intentionally limited to hard actions and hints.
 """
 from __future__ import annotations
 
@@ -11,78 +12,96 @@ import asyncio
 import os
 import re
 import time
+from datetime import datetime
+from typing import Any
 
+from app.config import settings
 from app.context.session_manager import get_or_create_session, reset_session
 from app.logging import logger
 from app.outbound.dispatcher import OutboundDispatcher
 from app.processing.dedup import is_duplicate_message
 from app.processing.domain_guard import (
+    constraint_fallback,
     detect_constraint_topic,
     detect_domain,
-    is_aggressive_stop,
+    is_realization_confirmed,
+    is_realization_denied,
     out_of_scope_reply,
-    constraint_fallback,
 )
-from app.processing.plan_builder import (
-    _detect_objection,
-    _FOLLOWUP_RE,
-)
-from app.processing.rate_limit import check_rate_limit, RateLimitExceeded
-from app.processing.renderer import (
-    _build_handoff_bridge,
-    _clarify_text,
-    _CLARIFY_VARIANTS,
-    _SERVICE_TEXTS,
-    answer_with_plan,
-    render_manager_text,
-    _plan_fallback_text,
-)
-from app.processing.slots import DEFAULT_SLOTS, extract_runtime_slots, _invalidate_last_context, _detect_bank
+from app.processing.plan_builder import _detect_objection
+from app.processing.rate_limit import RateLimitExceeded, check_rate_limit
+from app.processing.renderer import _build_handoff_bridge, answer_with_plan
+from app.processing.slots import DEFAULT_SLOTS, _detect_bank, _invalidate_last_context, extract_runtime_slots
+from app.processing.triggers import AGGRESSIVE_REPLIES
 from app.processing.utils import (
+    _TypingScope,
     _build_dialog_context,
     _is_aggressive,
     _maybe_send_pause_phrase,
     _needs_facts,
-    _TypingScope,
-    cleanup_text,
     maybe_escalate,
     maybe_escalate_by_llm_signal,
     maybe_escalate_from_signal,
     send_bot,
 )
-from app.services.dialog_analyzer import detect_stage_and_action
 from app.services.dialog_planner import plan_dialog
-from app.services.policy_validator import planner_policy_check
 from app.services.escalation_detector import detect_escalation_signal
+from app.services.fact_retriever import retrieve_facts
+from app.services.llm_enrichment import llm_objection_reply
+from app.services.policy_validator import planner_policy_check
 from app.services.sales_policy import OBJECTION_TYPE_MAP
 from app.services.transcription_service import transcribe_audio
+from app.storage.repositories.jobs_repo import has_newer_queued_job
 from app.storage.repositories.messages_repo import get_messages_by_session, save_message
 from app.storage.repositories.sessions_repo import (
     get_client_need,
-    get_session_by_id,
     get_slots,
     get_user_last_escalation,
-    is_escalated,
-    mark_escalated,
     set_client_need,
     set_slots,
     touch_session_activity,
 )
-from app.storage.repositories.jobs_repo import has_newer_queued_job
-from app.services.llm_enrichment import llm_extract_missing_slots, llm_objection_reply, llm_ack_reply
-from app.processing.triggers import AGGRESSIVE_REPLIES
-
-from datetime import datetime
 
 scenario = "INBOUND_QUESTION"
 
+_CONSENT_SEARCH_RE = re.compile(
+    r"(мне\s+подходит|это\s+подходит|(?:всё|все|вроде|как\s+раз)\s+подходит"
+    r"|устраивает(?:\s+меня)?|сойд[её]т|договорились|начинаем|оформляем"
+    r"|приступаем|по\s+рукам|готов\s+открыть|хочу\s+открыть|давайте\s+оформим"
+    r"|готов\s+к\s+оформлению|куда\s+(?:оплатить|перевести)|что\s+дальше"
+    r"|готов\s+начать|выставляйте\s+сч[её]т|отправлю\s+документы|пришлю\s+документы)",
+    re.I | re.U,
+)
+_READY_FOLLOWUP_RE = re.compile(
+    r"^\s*(давайте|ок|окей|хорошо|отлично|договорились|начинаем|продолжаем"
+    r"|продолжим|что\s+дальше|как\s+дальше|дальше\s+что|и\s+что\s+теперь"
+    r"|принято|понял)\s*[.!?]?\s*$",
+    re.I | re.U,
+)
+_AFFIRMATIVE_RE = re.compile(r"^\s*(да|ага|угу|верно|правильно|точно|да\s+да|ок|окей)\s*[.!?]?\s*$", re.I | re.U)
+_CLIENT_TYPE_PATTERNS = (
+    ("ЮЛ", re.compile(r"\b(юл|юр\s*лиц\w*|юридическ\w*\s+лиц\w*|ооо|компани\w*)\b", re.I | re.U)),
+    ("ИП", re.compile(r"\b(ип|индивидуальн\w*\s+предпринимател\w*)\b", re.I | re.U)),
+    ("ФЛ", re.compile(r"\b(фл|физ\s*лиц\w*|физическ\w*\s+лиц\w*|физик\w*)\b", re.I | re.U)),
+)
+_HINTS = {
+    "maybe_pricing": re.compile(r"тариф|цен|стоимост|сколько\s+стоит|ведени|открыти|комисси|плат[её]ж", re.I | re.U),
+    "maybe_docs": re.compile(r"документ|скан|паспорт|инн|решени\w*\s+суда|что\s+нужно|что\s+понадоб", re.I | re.U),
+    "maybe_timing": re.compile(r"срок|как\s+долго|когда\s+откро|сколько\s+ждать|быстр|после\s+подачи", re.I | re.U),
+    "maybe_conditions": re.compile(r"услови|подробнее|что\s+входит|нюанс|расскаж", re.I | re.U),
+    "maybe_low_cost": re.compile(r"подешевле|дешевле|самый\s+деш[её]в|бюджет|эконом", re.I | re.U),
+    "maybe_speed": re.compile(r"скорост|быстр|побыстрее|срочн", re.I | re.U),
+}
+
+
+def _recognize_client_type(text: str) -> str | None:
+    for value, pattern in _CLIENT_TYPE_PATTERNS:
+        if pattern.search(text or ""):
+            return value
+    return None
+
 
 def _merge_trailing_user_messages(msgs: list, current_text: str, *, max_items: int = 3) -> str:
-    """Merge rapid consecutive user messages after debounce.
-
-    This lets "надо банк подобрать" + "есть подешевле?" be planned as one
-    request without losing separate message history.
-    """
     collected: list[str] = []
     for m in reversed(msgs or []):
         role = m.get("role") if isinstance(m, dict) else getattr(m, "role", None)
@@ -96,147 +115,211 @@ def _merge_trailing_user_messages(msgs: list, current_text: str, *, max_items: i
         if len(collected) >= max_items:
             break
     collected = list(reversed(collected))
-    if not collected:
-        return current_text
-    # Avoid duplicate current text if repository layer already returned it twice.
     deduped: list[str] = []
     for t in collected:
         if not deduped or deduped[-1] != t:
             deduped.append(t)
-    return "\n".join(deduped)
+    return "\n".join(deduped) if deduped else current_text
 
 
-_FRUSTRATION_RE = re.compile(
-    r"\b(я\s+же\s+(уже\s+)?(объяснил|сказал|написал|говорил|описал)"
-    r"|так\s+я\s+же|уже\s+ж(е)?\s+(написал|говорил|сказал|объяснил)"
-    r"|я\s+уже\s+(говорил|сказал|написал|объяснил|писал))\b",
-    re.I | re.U,
-)
-
-# Consent / readiness signal — searchable anywhere in text (not anchored).
-# Note: bare "подходит" is intentionally omitted — use contextual forms only to avoid matching "не подходит".
-_CONSENT_SEARCH_RE = re.compile(
-    r"(мне\s+подходит|это\s+подходит|(?:всё|все|вроде|как\s+раз)\s+подходит"
-    r"|устраивает(?:\s+меня)?|сойд[её]т"
-    r"|договорились|начинаем|оформляем|приступаем|по\s+рукам"
-    r"|готов\s+открыть|хочу\s+открыть|давайте\s+оформим|готов\s+к\s+оформлению"
-    r"|куда\s+(?:оплатить|перевести)|что\s+дальше|готов\s+начать"
-    r"|выставляйте\s+счёт|выставляйте\s+счет|отправлю\s+документы|пришлю\s+документы)",
-    re.I | re.U,
-)
-
-# Short neutral follow-ups after consent that don't ask for new info
-_READY_FOLLOWUP_RE = re.compile(
-    r"^\s*(давайте|ок|окей|хорошо|отлично|договорились|начинаем|продолжаем"
-    r"|продолжим|что\s+дальше|как\s+дальше|дальше\s+что|и\s+что\s+теперь"
-    r"|и\s+что\s+дальше|принято|понял)\s*[.!?]?\s*$",
-    re.I | re.U,
-)
-
-# Banking keyword safety net — used to detect mislabelled smalltalk with actual banking intent.
-# Uses stems (no trailing \b) so inflected forms like "тарифы", "условиях", "стоимости" match.
-_BANKING_KEYWORD_RE = re.compile(
-    r"(тариф|условия|стоимост|комисс|открыти|ведени|счёт|счет|платёж|платеж|бонус)",
-    re.I | re.U,
-)
-
-# Rule-based explicit intent detection — fires before LLM classifier for obvious sales queries.
-_BANK_SELECTION_REQUEST_RE = re.compile(
-    r"(банк\s+(подобрать|выбрать|посоветовать|нужен)"
-    r"|нужен\s+банк"
-    r"|надо\s+банк"
-    r"|подобрать\s+банк"
-    r"|какой\s+банк"
-    r"|где\s+открыть"
-    r"|открыть\s+счет|открыть\s+счёт"
-    r"|банк\s+для\s+(физ|физика|физ\s*лица|юр\s*лица|ооо|ип)"
-    r"|нужен\s+счет|нужен\s+счёт"
-    r"|счет\s+нужен|счёт\s+нужен)",
-    re.I | re.U,
-)
-_PRICE_QUERY_RE = re.compile(
-    r"\b(тариф\w*|сколько\s+стоит|стоимост\w*|цена|ценник|ведени\w*|открыти\w*|платёжк|платежк|комисси\w*)\b",
-    re.I | re.U,
-)
-_DOCS_QUERY_RE = re.compile(
-    r"\b(документ\w*|что\s+нужно|что\s+понадобится|сканы|паспорт\w*|инн|решение\s+суда)\b",
-    re.I | re.U,
-)
-_TIMING_QUERY_RE = re.compile(
-    r"(срок|сроки|как\s+долго|долго\s+ли|за\s+сколько"
-    r"|сколько\s+по\s+времени|когда\s+откро|когда\s+будет\s+открыт"
-    r"|как\s+быстро|после\s+подачи\s+документ|сколько\s+ждать"
-    r"|откроется|открываться\s+будет|откроют)",
-    re.I | re.U,
-)
-_TIRED_ACK_RE = re.compile(
-    r"^(да\s+да|ладно|ну\s+ладно|ок\s+ладно|понял\s+ладно|да\s+ладно)",
-    re.I | re.U,
-)
-_CONDITIONS_QUERY_RE = re.compile(
-    r"(услови\w*|подробнее|поподробнее|что\s+там|расскаж\w*|что\s+входит|нюанс\w*)",
-    re.I | re.U,
-)
-
-# Follow-up questions about bot/human identity — route back to INTRO if prior context was INTRO
-_IDENTITY_FOLLOWUP_RE = re.compile(
-    r"\b(ответь(\s+на\s+(мой\s+)?вопрос)?|скажи\s+(честно|прямо|мне)"
-    r"|давай\s+(прямо|честно|по.честному)|так\s+ты\s+(человек|живой|бот|ИИ)"
-    r"|ты\s+(всё.таки|всё\s+же|точно)\s+(человек|живой|бот)"
-    r"|прямо\s+скажи|не\s+уходи\s+от\s+вопроса|отвечай\s+на\s+вопрос)\b",
-    re.I | re.U,
-)
+def _normalize_decision(decision: dict | None) -> dict:
+    d = {
+        "stage": "OTHER",
+        "action": "ANSWER",
+        "query_mode": "smalltalk",
+        "needs_kb": False,
+        "needs_handoff": False,
+        "confidence": 0.0,
+        "handoff_reason": None,
+    }
+    if decision:
+        d.update(decision)
+    if d.get("action") == "HANDOFF" or d.get("needs_handoff"):
+        d["action"] = "HANDOFF"
+        d["needs_handoff"] = True
+    return planner_policy_check(d)
 
 
-# ---------------------------------------------------------------------------
-# Background Analysis (escalation only)
-# ---------------------------------------------------------------------------
+def _bank_selection_decision(confidence: float = 0.92) -> dict:
+    return {
+        "stage": "QUALIFY",
+        "action": "ANSWER",
+        "query_mode": "bank_selection",
+        "needs_kb": True,
+        "needs_handoff": False,
+        "confidence": confidence,
+        "handoff_reason": None,
+    }
+
+
+def _constraint_decision(topic: str, confidence: float = 0.99) -> dict:
+    return {
+        "stage": "CONSTRAINT",
+        "action": "ANSWER",
+        "query_mode": "constraint",
+        "needs_kb": True,
+        "needs_handoff": False,
+        "confidence": confidence,
+        "handoff_reason": None,
+        "planner": {"domain": "in_scope", "intent": "constraint", "answer_focus": topic, "constraint_topic": topic},
+    }
+
+
+def _build_rule_hints(text: str, slots: dict) -> dict[str, Any]:
+    # Current message bank mention takes priority over history
+    bank = (
+        slots.get("_current_bank_mention")
+        or _detect_bank((text or "").lower())
+        or slots.get("bank_name")
+        or slots.get("_last_bank")
+    )
+    return {
+        name: bool(pattern.search(text or "")) for name, pattern in _HINTS.items()
+    } | {
+        "known_bank": bank,
+        "current_bank_mention": slots.get("_current_bank_mention"),
+        "last_mode": slots.get("_last_mode"),
+        "client_type": slots.get("client_type"),
+        "transfer_amount": slots.get("_transfer_amount"),
+        "transfer_target": slots.get("_transfer_target"),
+    }
+
+
+async def _planner_kb_context(user_text: str, slots: dict, rule_hints: dict) -> list[str]:
+    """Broad deterministic KB glimpse for planner only.
+
+    The answer path still performs focused retrieval later. This context helps
+    the planner understand constraints and domain-specific nuance before it
+    chooses intent.
+    """
+    try:
+        if detect_constraint_topic(user_text):
+            mode = "constraint"
+        elif rule_hints.get("maybe_timing"):
+            mode = "timing_docs" if rule_hints.get("maybe_docs") else "timing"
+        elif rule_hints.get("maybe_docs"):
+            mode = "docs"
+        elif rule_hints.get("maybe_conditions"):
+            mode = "conditions"
+        elif rule_hints.get("known_bank"):
+            mode = "specific_bank"
+        elif slots.get("client_type"):
+            mode = "bank_selection"
+        else:
+            mode = "constraint"
+        result = await retrieve_facts(user_text, slots=slots, query_mode=mode)
+        chunks = result.get("source_chunks") or []
+        facts = result.get("facts") or {}
+        compact: list[str] = []
+        if facts.get("constraints"):
+            compact.extend([str(x) for x in facts.get("constraints", [])[:3]])
+        if facts.get("docs"):
+            compact.extend([str(x) for x in facts.get("docs", [])[:2]])
+        compact.extend([str(x) for x in chunks[:5]])
+        return [x for x in compact if x][:8]
+    except Exception:
+        logger.exception("planner KB context retrieval failed (ignored)")
+        return []
+
+
 async def run_business_analysis(session_id: int, user_text: str, had_unknown_any: bool, message: object):
-    """
-    Background task: escalation check only.
-    Does NOT affect the already-sent response.
-    Does NOT trigger a second handoff if one was already sent this session.
-    """
     try:
         slots = await get_slots(session_id) or {}
         if slots.get("_escalation_sent"):
-            logger.debug("Background analysis skipped — session already escalated | session_id={}", session_id)
             return
-
         msgs = await get_messages_by_session(session_id)
         dialog_text = _build_dialog_context(msgs, max_items=8, max_chars=1600)
-
         if had_unknown_any:
-            await maybe_escalate_by_llm_signal(
-                session_id, slots,
-                had_unknown_kb=True,
-                reason_hint="llm_signal_kb_fail",
-            )
+            await maybe_escalate_by_llm_signal(session_id, slots, had_unknown_kb=True, reason_hint="llm_signal_kb_fail")
         else:
             signal = await detect_escalation_signal(dialog_text, had_unknown_kb=False)
-
             existing_need = await get_client_need(session_id)
             client_need_signal = signal.get("client_need")
             if not existing_need and client_need_signal and client_need_signal != "UNKNOWN":
                 try:
                     from app.services.client_need_detector import NEED_LABELS
-                    label = NEED_LABELS.get(client_need_signal, "Консультация")
-                    await set_client_need(session_id, label)
+                    await set_client_need(session_id, NEED_LABELS.get(client_need_signal, "Консультация"))
                 except Exception:
                     logger.exception("set_client_need from signal failed (ignored)")
-
-            await maybe_escalate_from_signal(
-                session_id, slots, signal,
-                reason_hint="background_signal",
-            )
-
+            await maybe_escalate_from_signal(session_id, slots, signal, reason_hint="background_signal")
     except Exception:
         logger.exception("Background business analysis failed")
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+async def _handle_pending_realization_status(session, message, slots: dict, user_text: str, processing_start: float) -> bool:
+    """Handle user reply to 'реализация имущества уже введена?' question."""
+    pending = slots.get("_pending_question_type")
+    if pending != "realization_status":
+        return False
+
+    from app.processing.renderer import _render_card_process_static
+
+    if is_realization_confirmed(user_text):
+        slots.pop("_pending_question_type", None)
+        await set_slots(session.id, slots)
+        reply = _render_card_process_static({}, confirmed=True)
+        await send_bot(
+            session, message.channel, message.external_user_id, reply, slots,
+            query_mode="constraint", processing_start=processing_start, client_msg_len=len(user_text),
+        )
+        return True
+
+    if is_realization_denied(user_text):
+        slots.pop("_pending_question_type", None)
+        await set_slots(session.id, slots)
+        reply = _render_card_process_static({}, confirmed=False)
+        await send_bot(
+            session, message.channel, message.external_user_id, reply, slots,
+            query_mode="constraint", processing_start=processing_start, client_msg_len=len(user_text),
+        )
+        return True
+
+    # User is confused or asked something unrelated — return to card topic
+    topic_reply = (
+        "Вы правы, это не про открытие основного счёта. "
+        "По карте: если реализация имущества введена, карту оформляет и подписывает "
+        "финансовый управляющий. Реализация уже введена?"
+    )
+    await send_bot(
+        session, message.channel, message.external_user_id, topic_reply, slots,
+        query_mode="service", processing_start=processing_start, client_msg_len=len(user_text),
+    )
+    return True
+
+
+async def _handle_pending_after_constraint(session, message, slots: dict, user_text: str, processing_start: float) -> bool:
+    pending = slots.get("_pending_question_type")
+    if pending not in ("client_type_after_constraint", "confirm_client_type_after_constraint"):
+        return False
+
+    ct = _recognize_client_type(user_text)
+    if not ct and pending == "confirm_client_type_after_constraint" and _AFFIRMATIVE_RE.match(user_text or ""):
+        ct = slots.get("_suggested_client_type") or slots.get("client_type")
+
+    if not ct:
+        # Still inside qualification after a constraint, but do not repeat the constraint.
+        await send_bot(
+            session, message.channel, message.external_user_id,
+            "Понял. Уточните, пожалуйста: основной счёт открываем для юрлица, ИП или физлица?",
+            slots, query_mode="service", processing_start=processing_start, client_msg_len=len(user_text),
+        )
+        return True
+
+    slots["client_type"] = ct
+    slots.pop("_pending_question_type", None)
+    slots.pop("_suggested_client_type", None)
+    slots["sales_stage"] = "QUALIFY"
+    await set_slots(session.id, slots)
+
+    decision = _bank_selection_decision()
+    text, had_unknown_any = await answer_with_plan(session.id, user_text, slots, decision)
+    await send_bot(
+        session, message.channel, message.external_user_id, text, slots,
+        query_mode="bank_selection", processing_start=processing_start, client_msg_len=len(user_text),
+    )
+    return True
+
+
 async def process_message(message):
     print("RUNNING message_processor FROM:", __file__, "PID:", os.getpid())
 
@@ -248,36 +331,23 @@ async def process_message(message):
         job_id = None
 
     if await is_duplicate_message(
-            channel=message.channel,
-            external_user_id=message.external_user_id,
-            external_message_id=message.message_id,
+        channel=message.channel,
+        external_user_id=message.external_user_id,
+        external_message_id=message.message_id,
     ):
         return
 
     try:
-        await check_rate_limit(
-            channel=message.channel,
-            external_user_id=message.external_user_id,
-            limit=6,
-            window_seconds=10,
-        )
+        await check_rate_limit(channel=message.channel, external_user_id=message.external_user_id, limit=6, window_seconds=10)
     except RateLimitExceeded:
         return
 
     if message.text and message.text.strip() == "/reset":
         await reset_session(message.channel, message.external_user_id)
-        await OutboundDispatcher.send(
-            channel=message.channel,
-            external_user_id=message.external_user_id,
-            text="Контекст диалога сброшен. Начнём заново.",
-        )
+        await OutboundDispatcher.send(channel=message.channel, external_user_id=message.external_user_id, text="Контекст диалога сброшен. Начнём заново.")
         return
 
-    session = await get_or_create_session(
-        channel=message.channel,
-        external_user_id=message.external_user_id,
-    )
-
+    session = await get_or_create_session(channel=message.channel, external_user_id=message.external_user_id)
     try:
         await touch_session_activity(session.id)
     except Exception:
@@ -288,518 +358,182 @@ async def process_message(message):
             message.text = await transcribe_audio(message.audio_path)
         except Exception:
             slots = await get_slots(session.id) or DEFAULT_SLOTS.copy()
-            await send_bot(
-                session,
-                message.channel,
-                message.external_user_id,
-                "Не получилось распознать голосовое. Напишите текстом.",
-                slots,
-            )
+            await send_bot(session, message.channel, message.external_user_id, "Не получилось распознать голосовое. Напишите текстом.", slots)
             return
 
     message.text = (message.text or "").strip()
+    await save_message(session_id=session.id, role="user", text=message.text, channel=message.channel, external_message_id=message.message_id)
 
-    await save_message(
-        session_id=session.id,
-        role="user",
-        text=message.text,
-        channel=message.channel,
-        external_message_id=message.message_id,
-    )
-
-    # Debounce: give rapid consecutive messages a moment to arrive, then skip if a newer job is waiting
     if job_id:
         await asyncio.sleep(2.0)
         if await has_newer_queued_job(job_id, str(message.external_user_id)):
-            logger.info(
-                "Session {} | Debounce: skipping job {} — newer message from user {} is pending",
-                session.id, job_id, message.external_user_id,
-            )
-            # Extract slots from this debounced message so the next job inherits context
-            # (e.g. "для физика" → client_type=ФЛ, bank name, INN, etc.)
-            _dslots = await get_slots(session.id) or {}
-            extract_runtime_slots(message.text or "", _dslots)
+            logger.info("Session {} | Debounce: skipping job {} — newer message from user {} is pending", session.id, job_id, message.external_user_id)
+            dslots = await get_slots(session.id) or {}
+            extract_runtime_slots(message.text or "", dslots)
             if _CONSENT_SEARCH_RE.search(message.text or ""):
-                _dslots["_had_consent"] = True
-                logger.info("Session {} | Debounce: consent signal saved to slots", session.id)
-            await set_slots(session.id, _dslots)
+                dslots["_had_consent"] = True
+            await set_slots(session.id, dslots)
             return
 
-    # 24-hour escalation suppression — checked AFTER save_message so no messages are lost
+    # Suppress after escalation, but only after the message has been saved.
     last_esc = await get_user_last_escalation(session.user_id)
     if last_esc:
         delta = datetime.utcnow() - last_esc
         if delta.total_seconds() < 24 * 3600:
-            logger.info(f"User {session.user_id} | Suppressing bot response (escalated {delta.total_seconds()/3600:.1f}h ago)")
+            logger.info("User {} | Suppressing bot response (escalated {:.1f}h ago)", session.user_id, delta.total_seconds() / 3600)
             return
 
     slots = await get_slots(session.id) or DEFAULT_SLOTS.copy()
     if slots.get("_escalation_sent"):
-        logger.info(f"User {session.user_id} | Suppressing bot response (session already escalated in slots)")
+        logger.info("User {} | Suppressing bot response (session already escalated in slots)", session.user_id)
         return
 
     user_text = (message.text or "").strip()
     if not user_text:
-        slots = await get_slots(session.id) or DEFAULT_SLOTS.copy()
-        await send_bot(
-            session,
-            message.channel,
-            message.external_user_id,
-            "Не вижу текста сообщения. Напишите, пожалуйста, вопрос текстом.",
-            slots,
-        )
+        await send_bot(session, message.channel, message.external_user_id, "Не вижу текста сообщения. Напишите, пожалуйста, вопрос текстом.", slots)
         return
 
     processing_start = time.monotonic()
 
-    slots = await get_slots(session.id) or DEFAULT_SLOTS.copy()
-    slots.pop("_mode", None)
-
-    # Merge consecutive user messages captured by debounce. Use this for routing/planning,
-    # while preserving individual saved messages in history.
     try:
-        _msgs_for_merge = await get_messages_by_session(session.id)
-        effective_user_text = _merge_trailing_user_messages(_msgs_for_merge, user_text)
-        if effective_user_text != user_text:
+        msgs_for_merge = await get_messages_by_session(session.id)
+        merged = _merge_trailing_user_messages(msgs_for_merge, user_text)
+        if merged != user_text:
             logger.info("Session {} | merged recent user messages for planning", session.id)
-            user_text = effective_user_text
-            user_text_lower = re.sub(r"[^а-яёa-z\s]", "", user_text.lower()).strip()
+            user_text = merged
     except Exception:
         logger.exception("merge recent user messages failed (ignored)")
 
-    # --- STEP 1: Early Runtime Slot Extraction ---
+    slots.pop("_mode", None)
     extract_runtime_slots(user_text, slots)
-
     await set_slots(session.id, slots)
 
-    # Hard domain/constraint guards. These are deterministic rails, not semantic routing.
-    domain_decision = detect_domain(user_text)
-    constraint_topic = detect_constraint_topic(user_text)
-    if domain_decision.domain == "out_of_scope":
-        logger.info("Session {} | out_of_scope domain guard | reason={}", session.id, domain_decision.reason)
-        decision = {
-            "stage": "OUT_OF_SCOPE", "action": "ANSWER", "query_mode": "out_of_scope",
-            "needs_kb": False, "needs_handoff": False, "confidence": 0.99,
-            "handoff_reason": None,
-            "planner": {"domain": "out_of_scope", "intent": "redirect_to_domain"},
-        }
-        a, had_unknown_any = await answer_with_plan(session.id, user_text, slots, decision)
-        await send_bot(session, message.channel, message.external_user_id, a, slots,
-                       query_mode="out_of_scope", processing_start=processing_start,
-                       client_msg_len=len(user_text))
+    if await _handle_pending_realization_status(session, message, slots, user_text, processing_start):
         return
-    if constraint_topic:
-        logger.info("Session {} | constraint guard detected | topic={}", session.id, constraint_topic)
-        slots["_constraint_topic"] = constraint_topic
-        await set_slots(session.id, slots)
-        decision = {
-            "stage": "CONSTRAINT", "action": "ANSWER", "query_mode": "constraint",
-            "needs_kb": True, "needs_handoff": False, "confidence": 0.99,
-            "handoff_reason": None,
-            "planner": {"domain": "in_scope", "intent": "constraint", "answer_focus": constraint_topic},
-        }
-        a, had_unknown_any = await answer_with_plan(session.id, user_text, slots, decision)
-        await send_bot(session, message.channel, message.external_user_id, a, slots,
-                       query_mode="constraint", processing_start=processing_start,
-                       client_msg_len=len(user_text))
+
+    if await _handle_pending_after_constraint(session, message, slots, user_text, processing_start):
         return
 
     if _is_aggressive(user_text):
-        logger.warning(f"Session {session.id} | Aggression detected, sending warning and escalating.")
+        logger.warning("Session {} | Aggression detected, sending warning and escalating.", session.id)
         await send_bot(session, message.channel, message.external_user_id, AGGRESSIVE_REPLIES[0], slots)
         await maybe_escalate(session.id, slots, reason="aggression_profanity")
         return
 
     async with _TypingScope(message.channel, message.external_user_id):
-        from app.processing.state_detector import detect_state, DialogState
-        from app.processing.triggers import (
-            END_DIALOG_PHRASES,
-            NEGATIVE_REPLIES,
-            NOT_INTERESTED_REPLIES,
-            SHORT_NEUTRAL,
-        )
+        from app.processing.state_detector import DialogState, detect_state
+        from app.processing.triggers import END_DIALOG_PHRASES, NEGATIVE_REPLIES, NOT_INTERESTED_REPLIES, SHORT_NEUTRAL
 
         user_text_lower = re.sub(r"[^а-яёa-z\s]", "", user_text.lower()).strip()
         dialog_state = detect_state(user_text)
-        if dialog_state in (DialogState.NOT_INTERESTED, DialogState.LATER):
-            # Override: consent signal in same message means user is actually ready
-            if _CONSENT_SEARCH_RE.search(user_text):
-                dialog_state = DialogState.IN_PROGRESS
-            # Override: short reply to a pending question ("нет" to "ИП или ООО?") is context, not refusal
-            elif (
-                slots.get("_pending_question_type")
-                or (
-                    len(user_text.split()) <= 2
-                    and (slots.get("_last_bot_text") or "").rstrip().endswith("?")
-                )
-            ):
-                dialog_state = DialogState.IN_PROGRESS
+        if dialog_state in (DialogState.NOT_INTERESTED, DialogState.LATER) and (
+            _CONSENT_SEARCH_RE.search(user_text) or slots.get("_pending_question_type")
+        ):
+            dialog_state = DialogState.IN_PROGRESS
 
         if dialog_state == DialogState.AGGRESSIVE:
             await send_bot(session, message.channel, message.external_user_id, AGGRESSIVE_REPLIES[0], slots)
             await maybe_escalate(session.id, slots, reason="aggressive_state")
             return
-
         if dialog_state == DialogState.NEGATIVE:
             await send_bot(session, message.channel, message.external_user_id, NEGATIVE_REPLIES[0], slots)
             return
-
         if dialog_state == DialogState.NOT_INTERESTED:
             await send_bot(session, message.channel, message.external_user_id, NOT_INTERESTED_REPLIES[0], slots)
             return
-
         if dialog_state == DialogState.LATER:
-            await send_bot(
-                session,
-                message.channel,
-                message.external_user_id,
-                "Хорошо, напишем позже. Если появятся вопросы — я на связи.",
-                slots,
-            )
+            await send_bot(session, message.channel, message.external_user_id, "Хорошо, напишем позже. Если появятся вопросы — я на связи.", slots)
             return
-
         if user_text_lower in END_DIALOG_PHRASES:
             await send_bot(session, message.channel, message.external_user_id, "Рад был помочь! Обращайтесь, если появятся вопросы.", slots)
             await maybe_escalate(session.id, slots, reason="dialog_ended_by_user")
             return
 
-        # --- Consent fast-path (before objection) ---
-        # Consent wins over objection: "дорого, но мне подходит" → handoff, not objection reply.
-        if _CONSENT_SEARCH_RE.search(user_text):
-            logger.info(f"Session {session.id} | Consent signal → fast-path to handoff")
-            _bridge = _build_handoff_bridge(slots, "ready_to_open")
+        if _CONSENT_SEARCH_RE.search(user_text) or (slots.get("_had_consent") and _READY_FOLLOWUP_RE.match(user_text)):
+            logger.info("Session {} | Consent signal → fast-path to handoff", session.id)
+            slots.pop("_had_consent", None)
+            bridge = _build_handoff_bridge(slots, "ready_to_open")
             _invalidate_last_context(slots, reason="handoff")
             await set_slots(session.id, slots)
             await maybe_escalate(session.id, slots, reason="ready_to_open")
-            await send_bot(session, message.channel, message.external_user_id, _bridge, slots,
-                           processing_start=processing_start)
+            await send_bot(session, message.channel, message.external_user_id, bridge, slots, processing_start=processing_start)
             return
 
-        # --- Objection handling ---
         objection = _detect_objection(user_text)
         if objection:
-            slots["sales_stage"]    = "OBJECTION"
+            slots["sales_stage"] = "OBJECTION"
             slots["objection_type"] = OBJECTION_TYPE_MAP.get(objection, "other")
             await set_slots(session.id, slots)
             reply = await llm_objection_reply(objection, user_text, slots)
-            await send_bot(session, message.channel, message.external_user_id, reply, slots,
-                           query_mode="default", processing_start=processing_start,
-                           client_msg_len=len(user_text))
+            await send_bot(session, message.channel, message.external_user_id, reply, slots, query_mode="default", processing_start=processing_start, client_msg_len=len(user_text))
             return
 
-        # --- STEP 2: Contextual Short reply handling ---
-        pending = slots.get("_pending_question_type")
-        is_short = len(user_text.split()) <= 3
+        domain_decision = detect_domain(user_text)
+        constraint_topic = detect_constraint_topic(user_text)
 
-        if pending and is_short:
-            logger.info(f"Session {session.id} | Handling short reply for pending: {pending}")
-            _slot_recognized = False
-            if pending == "client_type":
-                if any(x in user_text_lower for x in ["ооо", "юл", "юр"]):
-                    slots["client_type"] = "ЮЛ"; _slot_recognized = True
-                elif any(x in user_text_lower for x in ["ип", "бизнес"]):
-                    slots["client_type"] = "ИП"; _slot_recognized = True
-                elif any(x in user_text_lower for x in ["физ", "фл"]):
-                    slots["client_type"] = "ФЛ"; _slot_recognized = True
+        if domain_decision.domain == "out_of_scope":
+            decision = _normalize_decision({
+                "stage": "OUT_OF_SCOPE", "action": "ANSWER", "query_mode": "out_of_scope",
+                "needs_kb": False, "needs_handoff": False, "confidence": 0.99,
+                "planner": {"domain": "out_of_scope", "intent": "redirect_to_domain"},
+            })
+        elif constraint_topic:
+            logger.info("Session {} | constraint guard detected | topic={}", session.id, constraint_topic)
+            slots["_constraint_topic"] = constraint_topic
+            slots["_last_constraint_topic"] = constraint_topic
+            slots["_constraint_answered"] = True
+            slots["sales_stage"] = "CONSTRAINT"
+
+            if constraint_topic in ("fl_realization_card_signed_by_financial_manager", "debtor_card_realization"):
+                # Card debtor: ask about realization status, not client type
+                slots["_pending_question_type"] = "realization_status"
+            elif not slots.get("client_type"):
+                slots["_pending_question_type"] = "client_type_after_constraint"
             else:
-                _slot_recognized = True  # other pending types are cleared unconditionally
-            if _slot_recognized:
-                slots.pop("_pending_question_type", None)
+                slots["_pending_question_type"] = "confirm_client_type_after_constraint"
+                slots["_suggested_client_type"] = slots.get("client_type")
+
             await set_slots(session.id, slots)
-
-        # --- STEP 2a: Prior-consent fast-path ---
-        # If a debounced message saved _had_consent, and the current message is a neutral
-        # follow-up ("давайте", "ок", etc.) or also contains consent → skip to handoff.
-        if slots.get("_had_consent"):
-            slots.pop("_had_consent", None)
-            if _CONSENT_SEARCH_RE.search(user_text) or _READY_FOLLOWUP_RE.match(user_text):
-                logger.info(f"Session {session.id} | Prior consent + neutral follow-up → handoff")
-                _bridge = _build_handoff_bridge(slots, "ready_to_open")
-                _invalidate_last_context(slots, reason="handoff")
-                await set_slots(session.id, slots)
-                await maybe_escalate(session.id, slots, reason="ready_to_open")
-                await send_bot(session, message.channel, message.external_user_id, _bridge, slots)
-                return
-            # User said something substantive after consent — proceed normally (consent consumed)
-            await set_slots(session.id, slots)
-
-        # --- STEP 2a-identity: Re-route identity follow-ups to INTRO ---
-        # "так ты человек?", "ответь на вопрос" after an intro response → INTRO again
-        decision = None
-        if slots.get("_last_intent") == "intro" and _IDENTITY_FOLLOWUP_RE.search(user_text):
-            logger.info(f"Session {session.id} | Identity follow-up → re-routing to intro")
-            decision = {
-                "stage": "INTRO", "action": "ANSWER", "query_mode": "intro",
-                "needs_kb": False, "needs_handoff": False,
-                "confidence": 0.95, "handoff_reason": None,
-            }
-
-        # --- STEP 2b: Frustration / repetition detection ---
-        # "так я же уже объяснил" — user is repeating themselves, use existing context
-        # Only runs if no earlier step already set a decision (e.g. identity re-route)
-        if decision is None and _FRUSTRATION_RE.search(user_text) and slots.get("client_type"):
-            # If the frustration message itself contains consent ("я же сказал мне подходит")
-            # → handoff, not a repeat of the bank presentation
-            if _CONSENT_SEARCH_RE.search(user_text):
-                logger.info(f"Session {session.id} | Frustration with consent → handoff")
-                _bridge = _build_handoff_bridge(slots, "ready_to_open")
-                _invalidate_last_context(slots, reason="handoff")
-                await set_slots(session.id, slots)
-                await maybe_escalate(session.id, slots, reason="ready_to_open")
-                await send_bot(session, message.channel, message.external_user_id, _bridge, slots)
-                return
-            logger.info(
-                f"Session {session.id} | Frustration/repeat detected — routing to bank_selection with context"
-            )
-            decision = {
-                "stage": "PRESENTATION", "action": "ANSWER",
-                "query_mode": slots.get("_last_mode", "bank_selection"),
-                "needs_kb": True, "needs_handoff": False,
-                "confidence": 0.85, "handoff_reason": None,
-            }
-        # decision remains None if not set → will be resolved in STEP 3
-
-        # --- STEP 3: Narrow Classifier (with follow-up context check) ---
-        # Pre-compute rule-based explicit intent signals (after slot extraction)
-        _rule_bank = slots.get("bank_name") or slots.get("_last_bank")
-        _bank_in_msg = _detect_bank(user_text.lower())
-        explicit_bank_selection = bool(
-            slots.get("client_type") and _BANK_SELECTION_REQUEST_RE.search(user_text)
-        )
-        explicit_pricing = bool(_rule_bank and _PRICE_QUERY_RE.search(user_text))
-        explicit_docs    = bool(_rule_bank and _DOCS_QUERY_RE.search(user_text))
-        # Bank name directly in current message + active dialog → go to specific_bank
-        explicit_bank_mention = bool(
-            _bank_in_msg and slots.get("client_type")
-            and (slots.get("_last_mode") or slots.get("_last_bank") or slots.get("bank_name"))
-            and not explicit_pricing and not explicit_docs
-        )
-
-        has_timing = bool(_TIMING_QUERY_RE.search(user_text))
-        has_docs_flag = bool(_DOCS_QUERY_RE.search(user_text))
-        tired_ack = bool(_TIRED_ACK_RE.match(user_text) and slots.get("client_type"))
-        has_conditions = bool(
-            (_rule_bank or slots.get("_last_bank"))
-            and _CONDITIONS_QUERY_RE.search(user_text)
-            and not _PRICE_QUERY_RE.search(user_text)
-            and not _DOCS_QUERY_RE.search(user_text)
-            and not has_timing
-        )
-
-        last_mode = slots.get("_last_mode")
-        if decision is not None:
-            # Decision already set in STEP 2b (frustration/repeat detection)
-            pass
-        elif has_timing and has_docs_flag:
-            logger.info("Session {} | timing_docs detected", session.id)
-            decision = {
-                "stage": "PRESENTATION", "action": "ANSWER", "query_mode": "timing_docs",
-                "needs_kb": True, "needs_handoff": False, "confidence": 0.97, "handoff_reason": None,
-            }
-        elif has_timing:
-            logger.info("Session {} | timing detected", session.id)
-            decision = {
-                "stage": "PRESENTATION", "action": "ANSWER", "query_mode": "timing",
-                "needs_kb": True, "needs_handoff": False, "confidence": 0.95, "handoff_reason": None,
-            }
-        elif explicit_docs:
-            logger.info(
-                "Session {} | explicit_docs_for_bank detected | bank={}",
-                session.id, _rule_bank,
-            )
-            decision = {
-                "stage": "PRESENTATION", "action": "ANSWER", "query_mode": "docs",
-                "needs_kb": True, "needs_handoff": False, "confidence": 0.90, "handoff_reason": None,
-            }
-        elif has_conditions:
-            logger.info(
-                "Session {} | conditions query detected | bank={}",
-                session.id, _rule_bank or slots.get("_last_bank"),
-            )
-            decision = {
-                "stage": "PRESENTATION", "action": "ANSWER", "query_mode": "conditions",
-                "needs_kb": True, "needs_handoff": False, "confidence": 0.95, "handoff_reason": None,
-            }
-        elif explicit_pricing:
-            logger.info(
-                "Session {} | explicit_pricing_for_bank detected | bank={}",
-                session.id, _rule_bank,
-            )
-            decision = {
-                "stage": "PRESENTATION", "action": "ANSWER", "query_mode": "specific_bank",
-                "needs_kb": True, "needs_handoff": False, "confidence": 0.90, "handoff_reason": None,
-            }
-        elif explicit_bank_selection:
-            logger.info(
-                "Session {} | explicit_bank_selection detected | client_type={}",
-                session.id, slots.get("client_type"),
-            )
-            decision = {
-                "stage": "SELECT", "action": "ANSWER", "query_mode": "bank_selection",
-                "needs_kb": True, "needs_handoff": False, "confidence": 0.95, "handoff_reason": None,
-            }
-        elif explicit_bank_mention:
-            logger.info(
-                "Session {} | explicit_bank_mention detected | bank={}",
-                session.id, _bank_in_msg,
-            )
-            slots["bank_name"] = _bank_in_msg
-            decision = {
-                "stage": "PRESENTATION", "action": "ANSWER", "query_mode": "specific_bank",
-                "needs_kb": True, "needs_handoff": False, "confidence": 0.85, "handoff_reason": None,
-            }
-        elif tired_ack:
-            _tired_last = last_mode
-            if _tired_last in ("timing", "timing_docs", "specific_bank", "pricing", "bank_selection", "docs"):
-                logger.info("Session {} | tired_ack → continuing mode={}", session.id, _tired_last)
-                decision = {
-                    "stage": "PRESENTATION", "action": "ANSWER", "query_mode": _tired_last,
-                    "needs_kb": True, "needs_handoff": False, "confidence": 0.70, "handoff_reason": None,
-                }
-            else:
-                decision = {
-                    "stage": "OTHER", "action": "ANSWER", "query_mode": "smalltalk",
-                    "needs_kb": False, "needs_handoff": False, "confidence": 0.60, "handoff_reason": None,
-                }
-        elif (
-            is_short
-            and last_mode in ("specific_bank", "pricing", "bank_selection", "docs", "timing", "timing_docs")
-            and _FOLLOWUP_RE.match(user_text)
-        ):
-            logger.info(f"Session {session.id} | Follow-up detected, continuing mode={last_mode}")
-            decision = {
-                "stage": "PRESENTATION", "action": "ANSWER", "query_mode": last_mode,
-                "needs_kb": True, "needs_handoff": False, "confidence": 0.85, "handoff_reason": None,
-            }
-            last_bank = slots.get("_last_bank")
-            if last_bank and last_mode == "specific_bank" and not slots.get("bank_name"):
-                slots["bank_name"] = last_bank
+            decision = _normalize_decision(_constraint_decision(constraint_topic))
         else:
-            # Soft semantic routing belongs to the planner. Regex above is kept only as
-            # high-confidence hints / legacy safety net.
             try:
-                _msgs_for_planner = await get_messages_by_session(session.id)
-                _recent_dialog = _build_dialog_context(_msgs_for_planner, max_items=8, max_chars=1800)
+                msgs_for_planner = await get_messages_by_session(session.id)
+                recent_dialog = _build_dialog_context(msgs_for_planner, max_items=8, max_chars=1800)
             except Exception:
-                _recent_dialog = ""
-            rule_hints = {
-                "explicit_bank_selection": explicit_bank_selection,
-                "explicit_pricing": explicit_pricing,
-                "explicit_docs": explicit_docs,
-                "has_timing": has_timing,
-                "has_conditions": has_conditions,
-                "last_mode": last_mode,
-                "known_bank": _rule_bank,
-            }
-            decision = await plan_dialog(user_text, slots=slots, recent_dialog=_recent_dialog, rule_hints=rule_hints)
-            # If planner is uncertain and old analyzer has a clearer non-smalltalk decision, keep compatibility.
-            if decision.get("query_mode") in ("smalltalk", "service") and domain_decision.domain == "in_scope":
-                legacy = await detect_stage_and_action(user_text, slots=slots)
-                if legacy and legacy.get("query_mode") not in ("smalltalk", "service"):
-                    decision = legacy
+                recent_dialog = ""
+            rule_hints = _build_rule_hints(user_text, slots)
+            kb_context = await _planner_kb_context(user_text, slots, rule_hints)
+            decision = await plan_dialog(user_text, slots=slots, recent_dialog=recent_dialog, kb_context=kb_context, rule_hints=rule_hints)
+            decision = _normalize_decision(decision)
 
-        # Normalize decision: ensure all expected keys exist with safe defaults
-        decision = {
-            "stage": "OTHER", "action": "ANSWER", "query_mode": "smalltalk",
-            "needs_kb": False, "needs_handoff": False, "confidence": 0.0, "handoff_reason": None,
-            **decision,
-        }
-        decision = planner_policy_check(decision)
+            # If planner is unsure but the user is still clearly inside the work domain, keep the funnel moving.
+            if decision.get("query_mode") in ("smalltalk", "service") and domain_decision.domain == "in_scope" and _needs_facts(user_text):
+                decision = _normalize_decision(_bank_selection_decision(confidence=0.65))
 
-        # Keep action/needs_handoff in sync
-        if decision["action"] == "HANDOFF":
-            decision["needs_handoff"] = True
-        if decision["needs_handoff"]:
-            decision["action"] = "HANDOFF"
+        logger.info("Session {} | Stage: {} | Action: {} | Mode: {}", session.id, decision["stage"], decision["action"], decision.get("query_mode"))
 
-        # Short vague message (≤3 words) classified as smalltalk/OTHER but client context is known
-        # → re-route to specific_bank if bank known, otherwise bank_selection
-        if (
-            is_short
-            and len(user_text.split()) <= 3
-            and decision.get("query_mode") in ("smalltalk", "service")
-            and decision.get("stage") in ("OTHER", "SERVICE")
-            and slots.get("client_type")
-        ):
-            known_bank = slots.get("bank_name") or slots.get("_last_bank")
-            target_mode = "specific_bank" if known_bank else "bank_selection"
-            logger.info(f"Session {session.id} | Short+ctx re-route: smalltalk → {target_mode}")
-            decision = {
-                "stage": "PRESENTATION", "action": "ANSWER", "query_mode": target_mode,
-                "needs_kb": True, "needs_handoff": False, "confidence": 0.70, "handoff_reason": None,
-            }
-
-        # Smalltalk post-override: fires only when message has a question mark or explicit
-        # banking keyword, which means the LLM likely misrouted a compound/follow-up message.
-        if (
-            decision.get("query_mode") in ("smalltalk", "service")
-            and decision.get("stage") in ("OTHER", "SERVICE")
-            and slots.get("client_type")
-            and slots.get("_last_mode") in ("bank_selection", "specific_bank", "pricing")
-            and ("?" in user_text or _BANKING_KEYWORD_RE.search(user_text))
-        ):
-            last_q = slots.get("_last_mode", "bank_selection")
-            # Upgrade to specific_bank if a bank is now known in context
-            known_bank = slots.get("bank_name") or slots.get("_last_bank")
-            if known_bank and last_q == "bank_selection":
-                last_q = "specific_bank"
-            logger.info(f"Session {session.id} | Smalltalk+banking post-override → {last_q}")
-            decision = {
-                "stage": "PRESENTATION", "action": "ANSWER", "query_mode": last_q,
-                "needs_kb": True, "needs_handoff": False, "confidence": 0.65, "handoff_reason": None,
-            }
-            if last_q == "specific_bank" and slots.get("_last_bank") and not slots.get("bank_name"):
-                slots["bank_name"] = slots["_last_bank"]
-
-        logger.info(f"Session {session.id} | Stage: {decision['stage']} | Action: {decision['action']} | Mode: {decision.get('query_mode')}")
-
-        # --- STEP 3b: LLM slot enrichment (only when KB is needed and client_type is missing) ---
-        if (
-            decision.get("needs_kb")
-            and not slots.get("client_type")
-            and len(user_text.split()) > 4
-        ):
-            await llm_extract_missing_slots(user_text, slots)
-            await set_slots(session.id, slots)
-
-        # --- STEP 4: Early Handoff ---
         if decision.get("action") == "HANDOFF" or decision.get("needs_handoff"):
-            handoff_reason = decision.get("handoff_reason") or "early_handoff"
-            bridge_text = _build_handoff_bridge(slots, handoff_reason)
+            reason = decision.get("handoff_reason") or "early_handoff"
+            bridge_text = _build_handoff_bridge(slots, reason)
             _invalidate_last_context(slots, reason="handoff")
-            await maybe_escalate(session.id, slots, reason=handoff_reason)
+            await maybe_escalate(session.id, slots, reason=reason)
             await send_bot(session, message.channel, message.external_user_id, bridge_text, slots)
             return
-
         if decision.get("action") == "STOP":
             return
 
-        # --- New pipeline: retrieve → plan → validate → render ---
         qmode = decision.get("query_mode", "service")
-        await _maybe_send_pause_phrase(
-            session.id, message.channel, message.external_user_id, qmode, slots
-        )
-
-        a, had_unknown_any = await answer_with_plan(session.id, user_text, slots, decision)
-
+        await _maybe_send_pause_phrase(session.id, message.channel, message.external_user_id, qmode, slots)
+        answer, had_unknown_any = await answer_with_plan(session.id, user_text, slots, decision)
         await send_bot(
-            session, message.channel, message.external_user_id, a, slots,
-            query_mode=qmode,
-            processing_start=processing_start,
-            client_msg_len=len(user_text),
+            session, message.channel, message.external_user_id, answer, slots,
+            query_mode=qmode, processing_start=processing_start, client_msg_len=len(user_text),
         )
 
-        qmode_final = qmode
-        from app.config import settings as _settings
         if (
-            _settings.ENABLE_BACKGROUND_ANALYSIS
+            getattr(settings, "ENABLE_BACKGROUND_ANALYSIS", False)
             and user_text_lower not in SHORT_NEUTRAL
             and user_text_lower not in END_DIALOG_PHRASES
-            and qmode_final not in ("service", "intro", "smalltalk", "out_of_scope", "constraint")
+            and qmode not in ("service", "intro", "smalltalk", "out_of_scope", "constraint")
         ):
-            asyncio.create_task(run_business_analysis(
-                session_id=session.id,
-                user_text=user_text,
-                had_unknown_any=had_unknown_any,
-                message=message,
-            ))
+            asyncio.create_task(run_business_analysis(session.id, user_text, had_unknown_any, message))
