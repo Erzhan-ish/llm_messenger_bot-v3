@@ -1,10 +1,10 @@
 """MVP message processing orchestrator.
 
-Architecture goal: LLM thinks, code controls.
+Architecture: LLM conversation_brain thinks and writes, code controls
+transport, memory, hard guards, CRM/handoff and tool execution.
 
-Code is responsible for transport, memory, hard guards, CRM/handoff and
-fact validation. Soft semantic routing is delegated to ``dialog_planner``.
-Regex rules in this file are intentionally limited to hard actions and hints.
+Semantic routing is fully delegated to conversation_brain.
+Code only handles hard safety actions and infrastructure.
 """
 from __future__ import annotations
 
@@ -20,34 +20,27 @@ from app.context.session_manager import get_or_create_session, reset_session
 from app.logging import logger
 from app.outbound.dispatcher import OutboundDispatcher
 from app.processing.dedup import is_duplicate_message
-from app.processing.domain_guard import (
-    constraint_fallback,
-    detect_constraint_topic,
-    detect_domain,
-    out_of_scope_reply,
-)
-from app.processing.plan_builder import _detect_objection
 from app.processing.rate_limit import RateLimitExceeded, check_rate_limit
-from app.processing.renderer import _build_handoff_bridge, answer_with_plan
-from app.processing.slots import DEFAULT_SLOTS, _detect_bank, _invalidate_last_context, extract_runtime_slots, get_active_task, update_active_task
+from app.processing.renderer import _build_handoff_bridge
+from app.processing.slots import DEFAULT_SLOTS, extract_runtime_slots
 from app.processing.triggers import AGGRESSIVE_REPLIES
 from app.processing.utils import (
     _TypingScope,
     _build_dialog_context,
     _is_aggressive,
+    _is_near_duplicate,
     _maybe_send_pause_phrase,
-    _needs_facts,
+    cleanup_text,
     maybe_escalate,
     maybe_escalate_by_llm_signal,
     maybe_escalate_from_signal,
     send_bot,
 )
-from app.services.dialog_planner import plan_dialog
+from app.services.context_builder import build_conversation_context, extract_entities
+from app.services.conversation_brain import conversation_brain_repair, run_conversation_brain
 from app.services.escalation_detector import detect_escalation_signal
-from app.services.fact_retriever import retrieve_facts, retrieve_planner_context
-from app.services.llm_enrichment import llm_objection_reply
-from app.services.policy_validator import active_task_consistency_check, planner_policy_check
-from app.services.sales_policy import OBJECTION_TYPE_MAP
+from app.services.fact_retriever import retrieve_context_for_brain
+from app.services.response_validator import validate_reply
 from app.services.transcription_service import transcribe_audio
 from app.storage.repositories.jobs_repo import has_newer_queued_job
 from app.storage.repositories.messages_repo import get_messages_by_session, save_message
@@ -62,12 +55,16 @@ from app.storage.repositories.sessions_repo import (
 
 scenario = "INBOUND_QUESTION"
 
-_CONSENT_SEARCH_RE = re.compile(
+# ---------------------------------------------------------------------------
+# Hard guards (regex only, NOT semantic routing)
+# ---------------------------------------------------------------------------
+_CONSENT_HARD_RE = re.compile(
     r"(мне\s+подходит|это\s+подходит|(?:всё|все|вроде|как\s+раз)\s+подходит"
     r"|устраивает(?:\s+меня)?|сойд[её]т|договорились|начинаем|оформляем"
     r"|приступаем|по\s+рукам|готов\s+открыть|хочу\s+открыть|давайте\s+оформим"
     r"|готов\s+к\s+оформлению|куда\s+(?:оплатить|перевести)|что\s+дальше"
-    r"|готов\s+начать|выставляйте\s+сч[её]т|отправлю\s+документы|пришлю\s+документы)",
+    r"|готов\s+начать|выставляйте\s+сч[её]т|отправлю\s+документы|пришлю\s+документы"
+    r"|подключите\s+менеджера|позовите\s+(?:человека|менеджера))",
     re.I | re.U,
 )
 _READY_FOLLOWUP_RE = re.compile(
@@ -76,14 +73,6 @@ _READY_FOLLOWUP_RE = re.compile(
     r"|принято|понял)\s*[.!?]?\s*$",
     re.I | re.U,
 )
-_HINTS = {
-    "maybe_pricing": re.compile(r"тариф|цен|стоимост|сколько\s+стоит|ведени|открыти|комисси|плат[её]ж", re.I | re.U),
-    "maybe_docs": re.compile(r"документ|скан|паспорт|инн|решени\w*\s+суда|что\s+нужно|что\s+понадоб", re.I | re.U),
-    "maybe_timing": re.compile(r"срок|как\s+долго|когда\s+откро|сколько\s+ждать|быстр|после\s+подачи", re.I | re.U),
-    "maybe_conditions": re.compile(r"услови|подробнее|что\s+входит|нюанс|расскаж", re.I | re.U),
-    "maybe_low_cost": re.compile(r"подешевле|дешевле|самый\s+деш[её]в|бюджет|эконом", re.I | re.U),
-    "maybe_speed": re.compile(r"скорост|быстр|побыстрее|срочн", re.I | re.U),
-}
 
 
 def _merge_trailing_user_messages(msgs: list, current_text: str, *, max_items: int = 3) -> str:
@@ -107,55 +96,20 @@ def _merge_trailing_user_messages(msgs: list, current_text: str, *, max_items: i
     return "\n".join(deduped) if deduped else current_text
 
 
-def _normalize_decision(decision: dict | None) -> dict:
-    d = {
-        "stage": "OTHER",
-        "action": "ANSWER",
-        "query_mode": "smalltalk",
-        "needs_kb": False,
-        "needs_handoff": False,
-        "confidence": 0.0,
-        "handoff_reason": None,
-    }
-    if decision:
-        d.update(decision)
-    if d.get("action") == "HANDOFF" or d.get("needs_handoff"):
-        d["action"] = "HANDOFF"
-        d["needs_handoff"] = True
-    return planner_policy_check(d)
-
-
-def _constraint_decision(topic: str, confidence: float = 0.99) -> dict:
-    return {
-        "stage": "CONSTRAINT",
-        "action": "ANSWER",
-        "query_mode": "constraint",
-        "needs_kb": True,
-        "needs_handoff": False,
-        "confidence": confidence,
-        "handoff_reason": None,
-        "planner": {"domain": "in_scope", "intent": "constraint", "answer_focus": topic, "constraint_topic": topic},
-    }
-
-
-def _build_rule_hints(text: str, slots: dict) -> dict[str, Any]:
-    # Current message bank mention takes priority over history
-    bank = (
-        slots.get("_current_bank_mention")
-        or _detect_bank((text or "").lower())
-        or slots.get("bank_name")
-        or slots.get("_last_bank")
-    )
-    return {
-        name: bool(pattern.search(text or "")) for name, pattern in _HINTS.items()
-    } | {
-        "known_bank": bank,
-        "current_bank_mention": slots.get("_current_bank_mention"),
-        "last_mode": slots.get("_last_mode"),
-        "client_type": slots.get("client_type"),
-        "transfer_amount": slots.get("_transfer_amount"),
-        "transfer_target": slots.get("_transfer_target"),
-    }
+def _update_slots_from_state(slots: dict, state_update: dict) -> None:
+    """Обновить слоты памяти из state_update brain."""
+    if not state_update:
+        return
+    if state_update.get("active_task") is not None:
+        slots["_active_task"] = state_update["active_task"]
+    if state_update.get("last_bank") is not None:
+        slots["_last_bank"] = state_update["last_bank"]
+    if state_update.get("last_topic") is not None:
+        slots["_last_topic"] = state_update["last_topic"]
+    if state_update.get("pending_question") is not None:
+        slots["_pending_question"] = state_update["pending_question"]
+    if state_update.get("last_answer_summary") is not None:
+        slots["_last_answer_summary"] = state_update["last_answer_summary"]
 
 
 async def run_business_analysis(session_id: int, user_text: str, had_unknown_any: bool, message: object):
@@ -232,12 +186,12 @@ async def process_message(message):
             logger.info("Session {} | Debounce: skipping job {} — newer message from user {} is pending", session.id, job_id, message.external_user_id)
             dslots = await get_slots(session.id) or {}
             extract_runtime_slots(message.text or "", dslots)
-            if _CONSENT_SEARCH_RE.search(message.text or ""):
+            if _CONSENT_HARD_RE.search(message.text or ""):
                 dslots["_had_consent"] = True
             await set_slots(session.id, dslots)
             return
 
-    # Suppress after escalation, but only after the message has been saved.
+    # Suppress after escalation
     last_esc = await get_user_last_escalation(session.user_id)
     if last_esc:
         delta = datetime.utcnow() - last_esc
@@ -257,11 +211,12 @@ async def process_message(message):
 
     processing_start = time.monotonic()
 
+    # Merge trailing user messages (debounce)
     try:
         msgs_for_merge = await get_messages_by_session(session.id)
         merged = _merge_trailing_user_messages(msgs_for_merge, user_text)
         if merged != user_text:
-            logger.info("Session {} | merged recent user messages for planning", session.id)
+            logger.info("Session {} | merged recent user messages for brain", session.id)
             user_text = merged
     except Exception:
         logger.exception("merge recent user messages failed (ignored)")
@@ -270,6 +225,9 @@ async def process_message(message):
     extract_runtime_slots(user_text, slots)
     await set_slots(session.id, slots)
 
+    # -----------------------------------------------------------------------
+    # HARD GUARD 1: aggression
+    # -----------------------------------------------------------------------
     if _is_aggressive(user_text):
         logger.warning("Session {} | Aggression detected, sending warning and escalating.", session.id)
         await send_bot(session, message.channel, message.external_user_id, AGGRESSIVE_REPLIES[0], slots)
@@ -282,8 +240,12 @@ async def process_message(message):
 
         user_text_lower = re.sub(r"[^а-яёa-z\s]", "", user_text.lower()).strip()
         dialog_state = detect_state(user_text)
+
+        # -----------------------------------------------------------------------
+        # HARD GUARD 2: dialog state guards (non-semantic, based on state_detector)
+        # -----------------------------------------------------------------------
         if dialog_state in (DialogState.NOT_INTERESTED, DialogState.LATER) and (
-            _CONSENT_SEARCH_RE.search(user_text) or slots.get("_pending_question_type")
+            _CONSENT_HARD_RE.search(user_text) or slots.get("_pending_question")
         ):
             dialog_state = DialogState.IN_PROGRESS
 
@@ -305,104 +267,127 @@ async def process_message(message):
             await maybe_escalate(session.id, slots, reason="dialog_ended_by_user")
             return
 
-        if _CONSENT_SEARCH_RE.search(user_text) or (slots.get("_had_consent") and _READY_FOLLOWUP_RE.match(user_text)):
+        # -----------------------------------------------------------------------
+        # HARD GUARD 3: explicit consent → hard handoff (no LLM needed)
+        # -----------------------------------------------------------------------
+        if _CONSENT_HARD_RE.search(user_text) or (slots.get("_had_consent") and _READY_FOLLOWUP_RE.match(user_text)):
             logger.info("Session {} | Consent signal → fast-path to handoff", session.id)
             slots.pop("_had_consent", None)
+            slots["_had_consent"] = True
             bridge = _build_handoff_bridge(slots, "ready_to_open")
-            _invalidate_last_context(slots, reason="handoff")
+            slots.pop("_had_consent", None)
             await set_slots(session.id, slots)
             await maybe_escalate(session.id, slots, reason="ready_to_open")
             await send_bot(session, message.channel, message.external_user_id, bridge, slots, processing_start=processing_start)
             return
 
-        objection = _detect_objection(user_text)
-        if objection:
-            slots["sales_stage"] = "OBJECTION"
-            slots["objection_type"] = OBJECTION_TYPE_MAP.get(objection, "other")
+        # -----------------------------------------------------------------------
+        # MAIN PIPELINE: conversation_brain
+        # -----------------------------------------------------------------------
+
+        # 1. Build context
+        ctx = await build_conversation_context(user_text, session.id, slots)
+        recent_dialog = ctx["recent_dialog"]
+        memory = ctx["memory"]
+        current_entities = ctx["current_entities"]
+
+        # 2. Retrieve KB facts (broad, no query_mode)
+        kb_facts = await retrieve_context_for_brain(user_text, memory, current_entities)
+
+        # 3. Pause phrase (human timing)
+        await _maybe_send_pause_phrase(session.id, message.channel, message.external_user_id, "default", slots)
+
+        # 4. Call brain (first pass)
+        brain_result = await run_conversation_brain(user_text, recent_dialog, memory, kb_facts)
+
+        # 5. Execute tool if requested
+        tool_results: dict | None = None
+        needs_tool = brain_result.get("needs_tool") or {}
+        tool_name = needs_tool.get("name") or "none"
+
+        if tool_name == "calculate_transfer_fee":
+            tool_args = needs_tool.get("args") or {}
+            bank = tool_args.get("bank") or current_entities.get("mentioned_bank") or (slots.get("_active_task") or {}).get("bank_name") or slots.get("_last_bank")
+            amount = tool_args.get("amount") or current_entities.get("mentioned_amount") or slots.get("_transfer_amount")
+            recipient = tool_args.get("recipient") or current_entities.get("mentioned_recipient") or slots.get("_transfer_target")
+
+            if bank and amount:
+                from app.domain.calculators import calculate_transfer_fee
+                fee_result = calculate_transfer_fee(bank, amount, recipient)
+                tool_results = {"calculate_transfer_fee": fee_result}
+                logger.info("Session {} | tool calculate_transfer_fee | bank={} amount={} recipient={} fee={}", session.id, bank, amount, recipient, fee_result.get("calculated_fee"))
+
+                # 6. Re-call brain with tool results
+                brain_result = await run_conversation_brain(
+                    user_text, recent_dialog, memory, kb_facts, tool_results=tool_results
+                )
+
+        # 7. Extract reply
+        reply = cleanup_text(brain_result.get("reply") or "")
+
+        # 8. Validate reply
+        if reply:
+            val = validate_reply(reply, brain_result, current_entities, slots, tool_results=tool_results)
+            if not val["is_valid"]:
+                logger.warning("Session {} | Reply validation failed: {} — calling repair", session.id, val["reason"])
+                repaired = await conversation_brain_repair(
+                    previous_reply=reply,
+                    validation_error=val["reason"],
+                    user_text=user_text,
+                    memory=memory,
+                    kb_facts=kb_facts,
+                    tool_results=tool_results,
+                )
+                if repaired and repaired.strip():
+                    reply = repaired
+                    logger.info("Session {} | Repaired reply len={}", session.id, len(reply))
+
+        # 9. Fallback if still no reply
+        if not reply or not reply.strip():
+            logger.warning("Session {} | Brain returned no reply — using fallback", session.id)
+            reply = "Секунду, уточняю информацию. Какой именно вопрос вас интересует?"
+
+        # 10. Dynamic greeting injection (only for first turn)
+        if (
+            not slots.get("_introduced")
+            and slots.get("_turn_count", 0) <= 1
+        ):
+            if not any(w in reply.lower() for w in ["здравствуйте", "добрый", "привет", "алексей"]):
+                reply = "Здравствуйте! Я Алексей, менеджер «В плюсе». " + reply
+            slots["_introduced"] = True
+
+        # 11. Update memory from state_update
+        state_update = brain_result.get("state_update") or {}
+        _update_slots_from_state(slots, state_update)
+
+        # 12. Track last_bank for handoff bridge
+        if current_entities.get("mentioned_bank"):
+            slots["_last_bank"] = current_entities["mentioned_bank"]
+
+        # 13. Check handoff (only from brain if explicit consent set)
+        handoff = brain_result.get("handoff") or {}
+        if handoff.get("needed") and slots.get("_had_consent"):
+            bridge = _build_handoff_bridge(slots, handoff.get("reason") or "ready_to_open")
+            slots.pop("_had_consent", None)
             await set_slots(session.id, slots)
-            reply = await llm_objection_reply(objection, user_text, slots)
-            await send_bot(session, message.channel, message.external_user_id, reply, slots, query_mode="default", processing_start=processing_start, client_msg_len=len(user_text))
+            await maybe_escalate(session.id, slots, reason=handoff.get("reason") or "brain_handoff")
+            await send_bot(session, message.channel, message.external_user_id, bridge, slots, processing_start=processing_start, client_msg_len=len(user_text))
             return
 
-        domain_decision = detect_domain(user_text)
-        constraint_topic = detect_constraint_topic(user_text)
-
-        if domain_decision.domain == "out_of_scope":
-            decision = _normalize_decision({
-                "stage": "OUT_OF_SCOPE", "action": "ANSWER", "query_mode": "out_of_scope",
-                "needs_kb": False, "needs_handoff": False, "confidence": 0.99,
-                "planner": {"domain": "out_of_scope", "intent": "redirect_to_domain"},
-            })
-        elif constraint_topic:
-            logger.info("Session {} | constraint guard detected | topic={}", session.id, constraint_topic)
-            slots["_constraint_topic"] = constraint_topic
-            slots["_last_constraint_topic"] = constraint_topic
-            slots["_constraint_answered"] = True
-            slots["sales_stage"] = "CONSTRAINT"
-
-            _card_topics = ("fl_realization_card_signed_by_financial_manager", "debtor_card_realization")
-            _pending_q = "realization_status" if constraint_topic in _card_topics else None
-            slots["_active_task"] = {
-                "intent": "constraint",
-                "constraint_topic": constraint_topic,
-                "pending_question": _pending_q,
-                "next_action": "explain_card_process" if _pending_q else None,
-                "bank_name": slots.get("_current_bank_mention") or slots.get("bank_name"),
-                "client_type": slots.get("client_type"),
-                "amount": None,
-                "transfer_target": None,
-                "last_answer_summary": None,
-            }
-
-            await set_slots(session.id, slots)
-            decision = _normalize_decision(_constraint_decision(constraint_topic))
-        else:
-            try:
-                msgs_for_planner = await get_messages_by_session(session.id)
-                recent_dialog = _build_dialog_context(msgs_for_planner, max_items=8, max_chars=1800)
-            except Exception:
-                recent_dialog = ""
-            active_task = get_active_task(slots)
-            rule_hints = _build_rule_hints(user_text, slots)
-            kb_context = await retrieve_planner_context(user_text, slots=slots, active_task=active_task)
-            decision = await plan_dialog(
-                user_text, slots=slots, active_task=active_task,
-                recent_dialog=recent_dialog, kb_context=kb_context, rule_hints=rule_hints,
-            )
-            at_ok, at_reason = active_task_consistency_check(decision, active_task)
-            if not at_ok:
-                logger.warning("Session {} | active_task consistency fail: {} — re-anchoring to active_task intent", session.id, at_reason)
-                if active_task.get("intent") == "transfer_fee_quote":
-                    decision["query_mode"] = "transfer_fee_quote"
-                    decision["needs_kb"] = True
-            decision = _normalize_decision(decision)
-
-        logger.info("Session {} | Stage: {} | Action: {} | Mode: {}", session.id, decision["stage"], decision["action"], decision.get("query_mode"))
-
-        if decision.get("action") == "HANDOFF" or decision.get("needs_handoff"):
-            reason = decision.get("handoff_reason") or "early_handoff"
-            bridge_text = _build_handoff_bridge(slots, reason)
-            _invalidate_last_context(slots, reason="handoff")
-            await maybe_escalate(session.id, slots, reason=reason)
-            await send_bot(session, message.channel, message.external_user_id, bridge_text, slots)
-            return
-        if decision.get("action") == "STOP":
-            return
-
-        qmode = decision.get("query_mode", "service")
-        await _maybe_send_pause_phrase(session.id, message.channel, message.external_user_id, qmode, slots)
-        answer, had_unknown_any = await answer_with_plan(session.id, user_text, slots, decision)
-        update_active_task(slots, decision)
+        slots.pop("_had_consent", None)
         await set_slots(session.id, slots)
+
+        # 14. Send reply
+        had_unknown = not bool(kb_facts)
         await send_bot(
-            session, message.channel, message.external_user_id, answer, slots,
-            query_mode=qmode, processing_start=processing_start, client_msg_len=len(user_text),
+            session, message.channel, message.external_user_id, reply, slots,
+            query_mode="default", processing_start=processing_start, client_msg_len=len(user_text),
         )
 
+        # 15. Background analysis (optional)
         if (
             getattr(settings, "ENABLE_BACKGROUND_ANALYSIS", False)
             and user_text_lower not in SHORT_NEUTRAL
             and user_text_lower not in END_DIALOG_PHRASES
-            and qmode not in ("service", "intro", "smalltalk", "out_of_scope", "constraint")
         ):
-            asyncio.create_task(run_business_analysis(session.id, user_text, had_unknown_any, message))
+            asyncio.create_task(run_business_analysis(session.id, user_text, had_unknown, message))

@@ -516,6 +516,145 @@ async def retrieve_facts(
     }
 
 
+async def retrieve_context_for_brain(
+    user_text: str,
+    memory: dict,
+    current_entities: dict,
+) -> list[dict]:
+    """Широкий KB-поиск для conversation_brain — без query_mode, без intent.
+
+    Ищет по: текущему тексту, active_task банку, last_bank, mentioned_bank,
+    ключевым словам домена. Гарантирует попадание партнёрских банков если
+    клиент спрашивает о банках.
+    """
+    kb = get_kb()
+    if not kb:
+        return []
+
+    active_task = memory.get("active_task") or {}
+    bank_focus = (
+        current_entities.get("mentioned_bank")
+        or active_task.get("bank_name")
+        or active_task.get("bank")
+        or memory.get("last_bank")
+    )
+    client_type = memory.get("client_type")
+
+    broad_types = ["constraint", "pricing", "docs", "feature", "bonus", "selection", "internal_ops", "availability"]
+
+    # Дополнительные запросы по контексту
+    queries = [user_text]
+
+    # Если активный банк — добавить запрос по нему
+    if bank_focus:
+        queries.append(f"{bank_focus} тарифы условия")
+        queries.append(f"{bank_focus} перевод комиссия")
+
+    # Всегда добавить широкий запрос по банкам-партнёрам
+    text_lower = user_text.lower()
+    bank_question_keywords = ["банк", "партнёр", "партнер", "сотруднич", "работает", "работаем", "список"]
+    if any(kw in text_lower for kw in bank_question_keywords):
+        queries.append("партнёрские банки активные паузе Альфа ТКБ Уралсиб")
+
+    # Ключевые слова домена
+    domain_kws = ["карта", "реализация", "перевод", "комиссия", "открытие", "ведение"]
+    if any(kw in text_lower for kw in domain_kws):
+        queries.append(" ".join(kw for kw in domain_kws if kw in text_lower))
+
+    try:
+        from typing import Tuple
+        bank_hints = _extract_bank_hints(bank_focus or user_text)
+        scored: dict = {}
+
+        for qv in queries:
+            enriched = qv
+            if client_type:
+                enriched += f" {client_type}"
+
+            for ch, score in kb.search_with_scores(enriched, top_k=8, allowed_types=broad_types):
+                if getattr(ch, "is_internal", False):
+                    continue
+                key = (getattr(ch, "source", ""), getattr(ch, "chunk_id", -1))
+                boosted = float(score)
+
+                if bank_hints:
+                    chunk_bank = (getattr(ch, "bank", "") or "").lower()
+                    if any(h in chunk_bank for h in bank_hints):
+                        boosted *= 2.5
+
+                if key not in scored or boosted > scored[key][0]:
+                    scored[key] = (boosted, ch)
+
+        ranked = sorted(scored.values(), key=lambda x: x[0], reverse=True)
+        top_chunks = [ch for _, ch in ranked[:14]]
+
+        facts: list[dict] = []
+        seen: set[str] = set()
+
+        # Сначала — selection/availability (банки-партнёры)
+        for ch in top_chunks:
+            ch_type = getattr(ch, "type", "") or ""
+            if ch_type in ("selection", "availability"):
+                fact = getattr(ch, "fact", None)
+                bank = getattr(ch, "bank", None)
+                status = getattr(ch, "status", None)
+                text = getattr(ch, "text", "") or ""
+                key = f"{bank}:{status}:{fact or text[:80]}"
+                if key not in seen:
+                    seen.add(key)
+                    facts.append({
+                        "type": ch_type,
+                        "bank": bank,
+                        "status": status,
+                        "fact": fact,
+                        "text": text[:300],
+                    })
+
+        # Затем — constraint
+        for ch in top_chunks:
+            if getattr(ch, "type", "") == "constraint":
+                fact = getattr(ch, "fact", None)
+                text = getattr(ch, "text", "") or ""
+                key = f"constraint:{fact or text[:80]}"
+                if key not in seen:
+                    seen.add(key)
+                    facts.append({
+                        "type": "constraint",
+                        "bank": getattr(ch, "bank", None),
+                        "fact": fact,
+                        "text": text[:300],
+                    })
+
+        # Затем — pricing и остальные
+        for ch in top_chunks:
+            ch_type = getattr(ch, "type", "") or ""
+            if ch_type in ("selection", "availability", "constraint"):
+                continue
+            fact = getattr(ch, "fact", None)
+            text = getattr(ch, "text", "") or ""
+            field = getattr(ch, "field", "") or ""
+            key = f"{ch_type}:{getattr(ch, 'bank', '')}:{fact or text[:60]}"
+            if key not in seen:
+                seen.add(key)
+                facts.append({
+                    "type": ch_type,
+                    "bank": getattr(ch, "bank", None),
+                    "client_type": getattr(ch, "client_type", None),
+                    "field": field,
+                    "value_num": getattr(ch, "value_num", None),
+                    "fact": fact,
+                    "text": text[:300],
+                    "status": getattr(ch, "status", None),
+                })
+
+        logger.info("retrieve_context_for_brain | chunks={} | bank_focus={}", len(facts), bank_focus)
+        return facts[:16]
+
+    except Exception:
+        logger.exception("retrieve_context_for_brain failed (ignored)")
+        return []
+
+
 async def retrieve_planner_context(
     user_text: str,
     slots: Optional[dict] = None,
