@@ -78,12 +78,14 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
     question       = plan.get("question_to_ask")
     docs           = plan.get("docs") or []
     constraints    = plan.get("constraints") or []
-    status         = plan.get("status")
     allowed_points = plan.get("allowed_points") or []
-    funnel_next    = plan.get("funnel_next")  # "docs" / "pricing" / None
+    funnel_next    = plan.get("funnel_next")
     timing_text    = plan.get("timing_text") or plan.get("opening_time") or ""
     must_use_facts = plan.get("must_use_facts") or []
     answer_text    = plan.get("answer_text") or ""
+    calculation    = plan.get("calculation") or {}    # deterministic fee calc result
+    amount         = plan.get("amount")
+    transfer_target = plan.get("transfer_target")
 
     # --- DATA SECTION ---
     data_lines: List[str] = []
@@ -97,6 +99,33 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
         data_lines.append("Обязательные факты: " + "; ".join(str(x) for x in must_use_facts[:4]))
     if answer_text:
         data_lines.append(f"Безопасная формулировка: {answer_text}")
+
+    # Fee calculation — highest priority for transfer_fee_quote / extra_fees
+    if calculation:
+        calc_lines = [f"РАСЧЁТ КОМИССИИ (используй эти данные точно):"]
+        if calculation.get("amount"):
+            calc_lines.append(f"  Сумма перевода: {calculation['amount']:,} руб.".replace(",", " "))
+        if calculation.get("transfer_target"):
+            tgt = {"ФЛ": "физлицо", "ЮЛ": "юрлицо"}.get(calculation["transfer_target"], calculation["transfer_target"])
+            calc_lines.append(f"  Получатель: {tgt}")
+        if calculation.get("calculated_fee") is not None:
+            calc_lines.append(f"  Комиссия: {calculation['calculated_fee']:,} руб.".replace(",", " "))
+        if calculation.get("rate_label"):
+            calc_lines.append(f"  Ставка: {calculation['rate_label']}")
+        if calculation.get("control_fee"):
+            calc_lines.append(f"  Контроль банкротной операции: {calculation['control_fee']} руб.")
+        if calculation.get("total_fee") is not None and calculation.get("control_fee"):
+            calc_lines.append(f"  Итого: {calculation['total_fee']:,} руб.".replace(",", " "))
+        if calculation.get("explanation"):
+            calc_lines.append(f"  Пояснение: {calculation['explanation']}")
+        if calculation.get("large_transfer_note"):
+            calc_lines.append(f"  Важно: {calculation['large_transfer_note']}")
+        if calculation.get("fl_transfer_free_up_to"):
+            calc_lines.append(f"  Переводы на физлицо до {calculation['fl_transfer_free_up_to']:,} руб. — бесплатно".replace(",", " "))
+        if calculation.get("ul_transfer_fee"):
+            calc_lines.append(f"  Перевод на юрлицо: {calculation['ul_transfer_fee']} руб.")
+        data_lines.append("\n".join(calc_lines))
+
     if items:
         data_lines.append(_format_items(items))
     if docs:
@@ -105,13 +134,12 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
         data_lines.append(f"Ограничения: {'; '.join(constraints[:3])}")
     if candidates:
         data_lines.append(_format_candidates(candidates))
-    # For selection_opening: also show explicit allowed_points as concrete facts
     if action == "selection_opening" and allowed_points:
         data_lines.append("Ключевые факты:\n" + "\n".join(f"- {p}" for p in allowed_points))
 
     data_text = "\n".join(data_lines) if data_lines else "Конкретных данных нет."
 
-    # --- INSTRUCTIONS by action ---
+    # --- INSTRUCTIONS by action / intent ---
     if intent == "out_of_scope":
         instr = (
             "Коротко и спокойно скажи, что мы занимаемся только счетами должников "
@@ -123,6 +151,34 @@ def build_render_prompt(plan: Dict[str, Any], *, user_text: str = "", dialog_ctx
         instr = (
             "Ответь на вопрос как консультант по ограничению. Сначала объясни обязательный факт/ограничение "
             "из раздела ДАННЫЕ. Не добавляй тарифы и не продавай банк. Максимум 2 предложения и один уточняющий вопрос."
+        )
+
+    elif intent == "transfer_fee_quote":
+        if calculation.get("calculated_fee") is not None:
+            fee_val = calculation["calculated_fee"]
+            fee_fmt = f"{fee_val:,}".replace(",", " ")
+            amt_fmt = f"{calculation.get('amount', 0):,}".replace(",", " ")
+            tgt_text = {"ФЛ": "физлицо", "ЮЛ": "юрлицо"}.get(calculation.get("transfer_target", ""), "получателя")
+            instr = (
+                f"Скажи клиенту, что перевод {amt_fmt} руб. на {tgt_text} в {bank or 'банке'} "
+                f"выйдет примерно {fee_fmt} руб. "
+                "Объясни ставку своими словами (из РАСЧЁТ КОМИССИИ). "
+                "Не упоминай открытие или ведение счёта. "
+                "В конце предложи сравнить с другим банком или уточни следующий шаг."
+            )
+        else:
+            tgt_text = {"ФЛ": "физлицо", "ЮЛ": "юрлицо"}.get(transfer_target or "", "")
+            instr = (
+                f"Клиент спрашивает стоимость перевода{f' {tgt_text}' if tgt_text else ''} в {bank or 'банке'}. "
+                "Расчёт пока неизвестен. Уточни недостающее: сумму перевода или банк. "
+                "Не говори про открытие/ведение счёта."
+            )
+
+    elif intent == "extra_fees":
+        instr = (
+            f"Расскажи про дополнительные платежи в {bank or 'банке'} — только из раздела ДАННЫЕ/РАСЧЁТ. "
+            "Не говори про открытие/ведение счёта. "
+            "В конце уточни, по какой сумме перевода интересно, если ещё не известно."
         )
 
     elif intent == "timing":

@@ -573,15 +573,12 @@ async def render_manager_text(plan: dict, *, user_text: str = "", dialog_ctx: st
     if action == "handoff":
         return _HANDOFF_TEXT
 
-    # High-precision answers are deterministic — LLM must not hallucinate facts.
+    # Critical / policy answers stay static — LLM must not drift here.
     if plan.get("intent") == "out_of_scope":
         return _render_out_of_scope_static(plan)
     if plan.get("intent") == "constraint":
         return _render_constraint_static(plan, slots)
-    if plan.get("intent") == "transfer_fee_quote":
-        return _render_transfer_fee_quote_static(plan)
-    if plan.get("intent") == "extra_fees":
-        return _render_extra_fees_static(plan)
+    # transfer_fee_quote and extra_fees: LLM writes naturally, validator enforces numbers.
 
     if action == "clarify":
         return _clarify_text(plan, seed=plan.get("_seed", ""))

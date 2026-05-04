@@ -24,14 +24,12 @@ from app.processing.domain_guard import (
     constraint_fallback,
     detect_constraint_topic,
     detect_domain,
-    is_realization_confirmed,
-    is_realization_denied,
     out_of_scope_reply,
 )
 from app.processing.plan_builder import _detect_objection
 from app.processing.rate_limit import RateLimitExceeded, check_rate_limit
 from app.processing.renderer import _build_handoff_bridge, answer_with_plan
-from app.processing.slots import DEFAULT_SLOTS, _detect_bank, _invalidate_last_context, extract_runtime_slots
+from app.processing.slots import DEFAULT_SLOTS, _detect_bank, _invalidate_last_context, extract_runtime_slots, get_active_task, update_active_task
 from app.processing.triggers import AGGRESSIVE_REPLIES
 from app.processing.utils import (
     _TypingScope,
@@ -46,9 +44,9 @@ from app.processing.utils import (
 )
 from app.services.dialog_planner import plan_dialog
 from app.services.escalation_detector import detect_escalation_signal
-from app.services.fact_retriever import retrieve_facts
+from app.services.fact_retriever import retrieve_facts, retrieve_planner_context
 from app.services.llm_enrichment import llm_objection_reply
-from app.services.policy_validator import planner_policy_check
+from app.services.policy_validator import active_task_consistency_check, planner_policy_check
 from app.services.sales_policy import OBJECTION_TYPE_MAP
 from app.services.transcription_service import transcribe_audio
 from app.storage.repositories.jobs_repo import has_newer_queued_job
@@ -78,12 +76,6 @@ _READY_FOLLOWUP_RE = re.compile(
     r"|принято|понял)\s*[.!?]?\s*$",
     re.I | re.U,
 )
-_AFFIRMATIVE_RE = re.compile(r"^\s*(да|ага|угу|верно|правильно|точно|да\s+да|ок|окей)\s*[.!?]?\s*$", re.I | re.U)
-_CLIENT_TYPE_PATTERNS = (
-    ("ЮЛ", re.compile(r"\b(юл|юр\s*лиц\w*|юридическ\w*\s+лиц\w*|ооо|компани\w*)\b", re.I | re.U)),
-    ("ИП", re.compile(r"\b(ип|индивидуальн\w*\s+предпринимател\w*)\b", re.I | re.U)),
-    ("ФЛ", re.compile(r"\b(фл|физ\s*лиц\w*|физическ\w*\s+лиц\w*|физик\w*)\b", re.I | re.U)),
-)
 _HINTS = {
     "maybe_pricing": re.compile(r"тариф|цен|стоимост|сколько\s+стоит|ведени|открыти|комисси|плат[её]ж", re.I | re.U),
     "maybe_docs": re.compile(r"документ|скан|паспорт|инн|решени\w*\s+суда|что\s+нужно|что\s+понадоб", re.I | re.U),
@@ -92,13 +84,6 @@ _HINTS = {
     "maybe_low_cost": re.compile(r"подешевле|дешевле|самый\s+деш[её]в|бюджет|эконом", re.I | re.U),
     "maybe_speed": re.compile(r"скорост|быстр|побыстрее|срочн", re.I | re.U),
 }
-
-
-def _recognize_client_type(text: str) -> str | None:
-    for value, pattern in _CLIENT_TYPE_PATTERNS:
-        if pattern.search(text or ""):
-            return value
-    return None
 
 
 def _merge_trailing_user_messages(msgs: list, current_text: str, *, max_items: int = 3) -> str:
@@ -140,18 +125,6 @@ def _normalize_decision(decision: dict | None) -> dict:
     return planner_policy_check(d)
 
 
-def _bank_selection_decision(confidence: float = 0.92) -> dict:
-    return {
-        "stage": "QUALIFY",
-        "action": "ANSWER",
-        "query_mode": "bank_selection",
-        "needs_kb": True,
-        "needs_handoff": False,
-        "confidence": confidence,
-        "handoff_reason": None,
-    }
-
-
 def _constraint_decision(topic: str, confidence: float = 0.99) -> dict:
     return {
         "stage": "CONSTRAINT",
@@ -185,43 +158,6 @@ def _build_rule_hints(text: str, slots: dict) -> dict[str, Any]:
     }
 
 
-async def _planner_kb_context(user_text: str, slots: dict, rule_hints: dict) -> list[str]:
-    """Broad deterministic KB glimpse for planner only.
-
-    The answer path still performs focused retrieval later. This context helps
-    the planner understand constraints and domain-specific nuance before it
-    chooses intent.
-    """
-    try:
-        if detect_constraint_topic(user_text):
-            mode = "constraint"
-        elif rule_hints.get("maybe_timing"):
-            mode = "timing_docs" if rule_hints.get("maybe_docs") else "timing"
-        elif rule_hints.get("maybe_docs"):
-            mode = "docs"
-        elif rule_hints.get("maybe_conditions"):
-            mode = "conditions"
-        elif rule_hints.get("known_bank"):
-            mode = "specific_bank"
-        elif slots.get("client_type"):
-            mode = "bank_selection"
-        else:
-            mode = "constraint"
-        result = await retrieve_facts(user_text, slots=slots, query_mode=mode)
-        chunks = result.get("source_chunks") or []
-        facts = result.get("facts") or {}
-        compact: list[str] = []
-        if facts.get("constraints"):
-            compact.extend([str(x) for x in facts.get("constraints", [])[:3]])
-        if facts.get("docs"):
-            compact.extend([str(x) for x in facts.get("docs", [])[:2]])
-        compact.extend([str(x) for x in chunks[:5]])
-        return [x for x in compact if x][:8]
-    except Exception:
-        logger.exception("planner KB context retrieval failed (ignored)")
-        return []
-
-
 async def run_business_analysis(session_id: int, user_text: str, had_unknown_any: bool, message: object):
     try:
         slots = await get_slots(session_id) or {}
@@ -244,80 +180,6 @@ async def run_business_analysis(session_id: int, user_text: str, had_unknown_any
             await maybe_escalate_from_signal(session_id, slots, signal, reason_hint="background_signal")
     except Exception:
         logger.exception("Background business analysis failed")
-
-
-async def _handle_pending_realization_status(session, message, slots: dict, user_text: str, processing_start: float) -> bool:
-    """Handle user reply to 'реализация имущества уже введена?' question."""
-    pending = slots.get("_pending_question_type")
-    if pending != "realization_status":
-        return False
-
-    from app.processing.renderer import _render_card_process_static
-
-    if is_realization_confirmed(user_text):
-        slots.pop("_pending_question_type", None)
-        await set_slots(session.id, slots)
-        reply = _render_card_process_static({}, confirmed=True)
-        await send_bot(
-            session, message.channel, message.external_user_id, reply, slots,
-            query_mode="constraint", processing_start=processing_start, client_msg_len=len(user_text),
-        )
-        return True
-
-    if is_realization_denied(user_text):
-        slots.pop("_pending_question_type", None)
-        await set_slots(session.id, slots)
-        reply = _render_card_process_static({}, confirmed=False)
-        await send_bot(
-            session, message.channel, message.external_user_id, reply, slots,
-            query_mode="constraint", processing_start=processing_start, client_msg_len=len(user_text),
-        )
-        return True
-
-    # User is confused or asked something unrelated — return to card topic
-    topic_reply = (
-        "Вы правы, это не про открытие основного счёта. "
-        "По карте: если реализация имущества введена, карту оформляет и подписывает "
-        "финансовый управляющий. Реализация уже введена?"
-    )
-    await send_bot(
-        session, message.channel, message.external_user_id, topic_reply, slots,
-        query_mode="service", processing_start=processing_start, client_msg_len=len(user_text),
-    )
-    return True
-
-
-async def _handle_pending_after_constraint(session, message, slots: dict, user_text: str, processing_start: float) -> bool:
-    pending = slots.get("_pending_question_type")
-    if pending not in ("client_type_after_constraint", "confirm_client_type_after_constraint"):
-        return False
-
-    ct = _recognize_client_type(user_text)
-    if not ct and pending == "confirm_client_type_after_constraint" and _AFFIRMATIVE_RE.match(user_text or ""):
-        ct = slots.get("_suggested_client_type") or slots.get("client_type")
-
-    if not ct:
-        # Still inside qualification after a constraint, but do not repeat the constraint.
-        await send_bot(
-            session, message.channel, message.external_user_id,
-            "Понял. Уточните, пожалуйста: основной счёт открываем для юрлица, ИП или физлица?",
-            slots, query_mode="service", processing_start=processing_start, client_msg_len=len(user_text),
-        )
-        return True
-
-    slots["client_type"] = ct
-    slots.pop("_pending_question_type", None)
-    slots.pop("_suggested_client_type", None)
-    slots["sales_stage"] = "QUALIFY"
-    await set_slots(session.id, slots)
-
-    decision = _bank_selection_decision()
-    text, had_unknown_any = await answer_with_plan(session.id, user_text, slots, decision)
-    await send_bot(
-        session, message.channel, message.external_user_id, text, slots,
-        query_mode="bank_selection", processing_start=processing_start, client_msg_len=len(user_text),
-    )
-    return True
 
 
 async def process_message(message):
@@ -408,12 +270,6 @@ async def process_message(message):
     extract_runtime_slots(user_text, slots)
     await set_slots(session.id, slots)
 
-    if await _handle_pending_realization_status(session, message, slots, user_text, processing_start):
-        return
-
-    if await _handle_pending_after_constraint(session, message, slots, user_text, processing_start):
-        return
-
     if _is_aggressive(user_text):
         logger.warning("Session {} | Aggression detected, sending warning and escalating.", session.id)
         await send_bot(session, message.channel, message.external_user_id, AGGRESSIVE_REPLIES[0], slots)
@@ -484,14 +340,19 @@ async def process_message(message):
             slots["_constraint_answered"] = True
             slots["sales_stage"] = "CONSTRAINT"
 
-            if constraint_topic in ("fl_realization_card_signed_by_financial_manager", "debtor_card_realization"):
-                # Card debtor: ask about realization status, not client type
-                slots["_pending_question_type"] = "realization_status"
-            elif not slots.get("client_type"):
-                slots["_pending_question_type"] = "client_type_after_constraint"
-            else:
-                slots["_pending_question_type"] = "confirm_client_type_after_constraint"
-                slots["_suggested_client_type"] = slots.get("client_type")
+            _card_topics = ("fl_realization_card_signed_by_financial_manager", "debtor_card_realization")
+            _pending_q = "realization_status" if constraint_topic in _card_topics else None
+            slots["_active_task"] = {
+                "intent": "constraint",
+                "constraint_topic": constraint_topic,
+                "pending_question": _pending_q,
+                "next_action": "explain_card_process" if _pending_q else None,
+                "bank_name": slots.get("_current_bank_mention") or slots.get("bank_name"),
+                "client_type": slots.get("client_type"),
+                "amount": None,
+                "transfer_target": None,
+                "last_answer_summary": None,
+            }
 
             await set_slots(session.id, slots)
             decision = _normalize_decision(_constraint_decision(constraint_topic))
@@ -501,14 +362,20 @@ async def process_message(message):
                 recent_dialog = _build_dialog_context(msgs_for_planner, max_items=8, max_chars=1800)
             except Exception:
                 recent_dialog = ""
+            active_task = get_active_task(slots)
             rule_hints = _build_rule_hints(user_text, slots)
-            kb_context = await _planner_kb_context(user_text, slots, rule_hints)
-            decision = await plan_dialog(user_text, slots=slots, recent_dialog=recent_dialog, kb_context=kb_context, rule_hints=rule_hints)
+            kb_context = await retrieve_planner_context(user_text, slots=slots, active_task=active_task)
+            decision = await plan_dialog(
+                user_text, slots=slots, active_task=active_task,
+                recent_dialog=recent_dialog, kb_context=kb_context, rule_hints=rule_hints,
+            )
+            at_ok, at_reason = active_task_consistency_check(decision, active_task)
+            if not at_ok:
+                logger.warning("Session {} | active_task consistency fail: {} — re-anchoring to active_task intent", session.id, at_reason)
+                if active_task.get("intent") == "transfer_fee_quote":
+                    decision["query_mode"] = "transfer_fee_quote"
+                    decision["needs_kb"] = True
             decision = _normalize_decision(decision)
-
-            # If planner is unsure but the user is still clearly inside the work domain, keep the funnel moving.
-            if decision.get("query_mode") in ("smalltalk", "service") and domain_decision.domain == "in_scope" and _needs_facts(user_text):
-                decision = _normalize_decision(_bank_selection_decision(confidence=0.65))
 
         logger.info("Session {} | Stage: {} | Action: {} | Mode: {}", session.id, decision["stage"], decision["action"], decision.get("query_mode"))
 
@@ -525,6 +392,8 @@ async def process_message(message):
         qmode = decision.get("query_mode", "service")
         await _maybe_send_pause_phrase(session.id, message.channel, message.external_user_id, qmode, slots)
         answer, had_unknown_any = await answer_with_plan(session.id, user_text, slots, decision)
+        update_active_task(slots, decision)
+        await set_slots(session.id, slots)
         await send_bot(
             session, message.channel, message.external_user_id, answer, slots,
             query_mode=qmode, processing_start=processing_start, client_msg_len=len(user_text),

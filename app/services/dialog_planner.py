@@ -1,7 +1,8 @@
-"""LLM dialog planner for semantic routing.
+"""LLM dialog planner — главный semantic router.
 
 The planner returns a strict JSON plan. It replaces broad semantic regex routing,
 while hard guards and CRM actions remain deterministic in application code.
+Receives: user_text, slots, active_task, recent_dialog, kb_context, scenario_hints.
 """
 from __future__ import annotations
 
@@ -23,52 +24,67 @@ ALLOWED_INTENTS = {
 PLANNER_PROMPT = """
 Ты — диалоговый планировщик для Telegram-консультанта компании «В плюсе».
 Ты НЕ пишешь ответ клиенту. Верни только JSON.
+Ты — главный semantic router. Код не делает routing вместо тебя.
 
 Роль компании: помощь арбитражным/финансовым управляющим в открытии и сопровождении счетов должников в процедурах банкротства.
-Бот консультирует по банкам, тарифам, документам, срокам, ограничениям, картам/счетам должников и передает теплый диалог менеджеру.
-Бот не продает товары и не отвечает на посторонние темы.
 
-ПРИОРИТЕТ ОПРЕДЕЛЕНИЯ INTENT — читай ВНИМАТЕЛЬНО:
-Не выбирай intent='constraint' только потому, что в KB есть ограничение.
-Сначала определи, что ХОЧЕТ клиент:
+ТВОЯ ЗАДАЧА — определить СМЫСЛ сообщения клиента:
 
-- выбрать банк → intent=bank_selection
-- узнать открытие/ведение → intent=pricing
-- рассчитать стоимость перевода по конкретной сумме → intent=transfer_fee_quote
-- узнать дополнительные комиссии/платежи кроме основных → intent=extra_fees
-- узнать бонус на остаток → intent=bonus
-- узнать документы → intent=docs
-- узнать сроки → intent=timing
-- подписание/ЭЦП → intent=signing
-- карты, доступ в ЛК → intent=access_cards
-- операции (пенсия, крупный перевод) → intent=operations
-- спросить можно/нельзя/регламентное ограничение → intent=constraint
-- широкий вопрос «какие условия» → intent=conditions
+ДОСТУПНЫЕ INTENT-Ы:
+- greeting / company_info / smalltalk — приветствие, представление
+- bank_selection — подбор банка
+- pricing — тарифы открытие/ведение
+- transfer_fee_quote — расчёт стоимости конкретного перевода (по сумме)
+- extra_fees — дополнительные платежи/комиссии кроме основных
+- bonus — бонус на остаток для АУ
+- docs — документы для открытия
+- timing — сроки открытия
+- timing_docs — сроки + документы
+- conditions — широкий вопрос «какие условия»
+- signing — подписание, ЭЦП
+- access_cards — доступ в интернет-банк, карты
+- operations — операции (пенсия, крупный перевод)
+- constraint — можно/нельзя/регламентное ограничение
+- objection — дорого / подумаю / у других дешевле
+- handoff — клиент готов оформлять
+- redirect_to_domain — вопрос вне домена
+- clarify — нужно уточнить вопрос
 
-ВАЖНО: Если пользователь спрашивает про комиссии, платежи, стоимость перевода, «сколько будет стоить», «дополнительные платежи» — это pricing / transfer_fee_quote / extra_fees, НЕ constraint.
-constraint_topic можно заполнить дополнительно, если в ответе нужно упомянуть регламентное ограничение.
+КЛЮЧЕВЫЕ ПРАВИЛА:
 
-Примеры:
-- "Сколько перевод 200 000 на физлицо?" → intent=transfer_fee_quote
-- "Есть ли доп платежи?" → intent=extra_fees
-- "Можно открыть спецсчёт без основного?" → intent=constraint, constraint_topic=special_account_without_main
-- "Можно карту должнику?" → intent=constraint, constraint_topic=fl_realization_card_signed_by_financial_manager
-- "Можно онлайн по ЭЦП?" → intent=signing
-- "Какие тарифы?" → intent=pricing
+1. ACTIVE_TASK: если клиент пишет follow-up к предыдущей теме, используй active_task.
+   - Если active_task.intent=transfer_fee_quote и клиент написал сумму → intent=transfer_fee_quote, amount=сумма из текста.
+   - Если active_task.intent=transfer_fee_quote и клиент написал другой банк → intent=transfer_fee_quote, bank_name=новый банк, amount из active_task.
+   - Если active_task.pending_question=realization_status и клиент написал "да введена"/"введена" → intent=constraint, next_action=explain_card_process.
+   - Если active_task.pending_question=client_type и клиент ответил типом клиента → intent=bank_selection, client_type=из ответа.
+   - Короткие follow-up: "у них сколько?", "а там?", "130 тыс", "для ЮЛ", "да введена" — всегда интерпретируй через active_task.
 
-Дополнительные правила:
-- Вне домена: domain="out_of_scope", intent="redirect_to_domain".
-- Если клиент готов оформлять, спрашивает «что дальше», «куда оплатить», «давайте», «оформляем», «мне подходит» — should_handoff=true.
-- Если в KB_CONTEXT есть ограничение/constraint, оно важнее тарифов и продажной логики — но НЕ меняй intent с fee/pricing на constraint.
-- Если вопрос про документы — intent="docs".
-- Если вопрос про сроки/как долго/когда откроется — intent="timing".
-- Если в одном сообщении сроки + документы — intent="timing_docs".
-- Если клиент отвечает на уточнение после constraint, продолжи воронку: client_type → bank_selection, а не повторяй constraint.
-- Не придумывай факты. must_use_facts заполняй только фактами из KB_CONTEXT.
-- Каждый план должен двигать диалог дальше через next_question, кроме STOP/HANDOFF.
-- client_type возвращай только если клиент явно указал (ЮЛ/ИП/ФЛ). НЕ выводи ФЛ по умолчанию из слов "должник", "банкрот".
-- Если в текущем сообщении упомянут банк (bank_name) — используй его. Не заменяй на банк из истории.
-- scenario_hints содержат подсказки из каталога сценариев — используй их как сильный сигнал.
+2. FEE vs CONSTRAINT:
+   - "сколько будет стоить перевод/комиссия/платёж" → transfer_fee_quote или extra_fees, НЕ constraint.
+   - "дополнительные платежи/скрытые/кроме основной" → extra_fees.
+   - "можно ли / нельзя ли / есть ограничение" → constraint.
+   - constraint_topic можно заполнить как доп. поле, но intent остаётся fee/pricing, если клиент спросил стоимость.
+
+3. CLIENT_TYPE:
+   - НЕ выводи client_type=ФЛ из слов "должник", "банкрот" — это описание должника, а не типа счёта.
+   - client_type устанавливай только если клиент явно назвал (ЮЛ/ИП/ФЛ).
+
+4. BANK_NAME:
+   - Банк из текущего сообщения имеет приоритет над историей.
+   - Если клиент назвал банк в тексте — используй его, не заменяй.
+
+5. HANDOFF:
+   - Если клиент говорит "что дальше", "оформляем", "подходит", "давайте", "куда оплатить", "готов начать", "позовите менеджера" → should_handoff=true.
+
+6. OUT_OF_SCOPE:
+   - Если вопрос явно не про счета/банкротство/процедуры/тарифы → domain=out_of_scope.
+
+7. SCENARIO_HINTS — это подсказки, но финальное решение принимаешь ты.
+
+8. CONFIDENCE:
+   - Если ты уверен → 0.8–1.0.
+   - Если follow-up без контекста → 0.6–0.8.
+   - Если вообще непонятно → 0.4, intent=clarify.
 
 Верни строго JSON без markdown:
 {
@@ -125,12 +141,6 @@ def _planner_to_decision(plan: Dict[str, Any]) -> Dict[str, Any]:
             "handoff_reason": "ready_to_open", "planner": plan,
         }
 
-    # Protect fee intents from becoming constraint even if constraint_topic is set
-    fee_intents = {"transfer_fee_quote", "extra_fees", "pricing", "bonus"}
-    if intent in fee_intents and plan.get("constraint_topic"):
-        # constraint_topic stays as additional info, but intent and qmode stay fee-focused
-        pass
-
     qmode_map = {
         "company_info":         "intro",
         "redirect_to_domain":   "out_of_scope",
@@ -153,39 +163,40 @@ def _planner_to_decision(plan: Dict[str, Any]) -> Dict[str, Any]:
         "access_cards":         "access_cards",
         "operations":           "operations",
     }
-    # Prefer explicit query_mode from planner if it's a known mode
+    # Prefer explicit query_mode from planner if valid
     explicit_qmode = plan.get("query_mode")
-    if explicit_qmode and explicit_qmode in {
+    valid_qmodes = {
         "transfer_fee_quote", "extra_fees", "bonus", "access_cards", "operations",
         "constraint", "pricing", "bank_selection", "docs", "timing", "timing_docs",
-        "conditions", "specific_bank", "process", "out_of_scope", "service", "smalltalk",
-    }:
+        "conditions", "specific_bank", "process", "out_of_scope", "service", "smalltalk", "intro",
+    }
+    if explicit_qmode and explicit_qmode in valid_qmodes:
         qmode = explicit_qmode
     else:
         qmode = qmode_map.get(intent, intent)
 
-    # Normalise: transfer_fee_quote / extra_fees must always map to themselves
+    # Hard normalisations
     if intent == "transfer_fee_quote":
         qmode = "transfer_fee_quote"
     elif intent == "extra_fees":
         qmode = "extra_fees"
 
     return {
-        "stage": plan.get("stage") or "PRESENTATION",
-        "action": "ANSWER" if intent != "clarify" else "CLARIFY",
-        "query_mode": qmode,
-        "needs_kb": qmode not in ("service", "smalltalk", "intro", "out_of_scope"),
+        "stage":         plan.get("stage") or "PRESENTATION",
+        "action":        "ANSWER" if intent != "clarify" else "CLARIFY",
+        "query_mode":    qmode,
+        "needs_kb":      qmode not in ("service", "smalltalk", "intro", "out_of_scope"),
         "needs_handoff": False,
-        "confidence": float(plan.get("confidence") or 0.65),
+        "confidence":    float(plan.get("confidence") or 0.65),
         "handoff_reason": None,
-        "planner": plan,
-        # Pass through new fields so plan_builder and renderer can use them
-        "scenario_topic":    plan.get("scenario_topic"),
-        "constraint_topic":  plan.get("constraint_topic"),
-        "next_action":       plan.get("next_action"),
-        "amount":            plan.get("amount"),
-        "transfer_target":   plan.get("transfer_target"),
-        "bank_name":         plan.get("bank_name"),
+        "planner":       plan,
+        # Forward new fields for plan_builder / renderer
+        "scenario_topic":   plan.get("scenario_topic"),
+        "constraint_topic": plan.get("constraint_topic"),
+        "next_action":      plan.get("next_action"),
+        "amount":           plan.get("amount"),
+        "transfer_target":  plan.get("transfer_target"),
+        "bank_name":        plan.get("bank_name"),
     }
 
 
@@ -193,11 +204,13 @@ async def plan_dialog(
     user_text: str,
     *,
     slots: Optional[dict] = None,
+    active_task: Optional[dict] = None,
     recent_dialog: str = "",
     kb_context: list[str] | None = None,
     rule_hints: Optional[dict] = None,
 ) -> Dict[str, Any]:
     slots = slots or {}
+    active_task = active_task or {}
 
     # Build scenario hints from catalog
     try:
@@ -209,27 +222,28 @@ async def plan_dialog(
     payload = {
         "user_message": user_text,
         "slots": {
-            "client_type": slots.get("client_type"),
-            "bank_name": slots.get("_current_bank_mention") or slots.get("bank_name") or slots.get("_last_bank"),
-            "last_mode": slots.get("_last_mode"),
-            "sales_stage": slots.get("sales_stage"),
-            "transfer_amount": slots.get("_transfer_amount"),
-            "transfer_target": slots.get("_transfer_target"),
+            "client_type":      slots.get("client_type"),
+            "bank_name":        slots.get("_current_bank_mention") or slots.get("bank_name") or slots.get("_last_bank"),
+            "last_mode":        slots.get("_last_mode"),
+            "sales_stage":      slots.get("sales_stage"),
+            "transfer_amount":  slots.get("_transfer_amount"),
+            "transfer_target":  slots.get("_transfer_target"),
         },
+        "active_task": active_task,
         "recent_dialog": recent_dialog[-1800:],
-        "kb_context": (kb_context or [])[:8],
-        "rule_hints": (rule_hints or {}) | {"scenario_hints": scenario_hints},
+        "kb_context":   (kb_context or [])[:8],
+        "rule_hints":   (rule_hints or {}) | {"scenario_hints": scenario_hints},
     }
     messages = [
         {"role": "system", "content": PLANNER_PROMPT},
-        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        {"role": "user",   "content": json.dumps(payload, ensure_ascii=False)},
     ]
     try:
         raw = await ask_llm(messages, max_tokens=_budget("ANALYZER"))
         plan = _extract_json(raw)
         decision = _planner_to_decision(plan)
         logger.info(
-            "Dialog planner decision | intent={} | domain={} | qmode={} | scenario_topic={} | constraint_topic={}",
+            "Dialog planner | intent={} | domain={} | qmode={} | scenario={} | constraint={}",
             plan.get("intent"), plan.get("domain"), decision.get("query_mode"),
             plan.get("scenario_topic"), plan.get("constraint_topic"),
         )

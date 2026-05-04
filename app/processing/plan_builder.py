@@ -380,52 +380,9 @@ def _plan_out_of_scope(base: dict, slots: dict, decision: dict) -> dict:
     return base
 
 
-# ---------------------------------------------------------------------------
-# Transfer fee quote helpers
-# ---------------------------------------------------------------------------
-_ALFA_TRANSFER_FL_SCALE = [
-    (150_000, 0.0,   "до 150 000 руб. — без комиссии"),
-    (None,    0.005, "свыше 150 000 руб. — 0.5%"),
-]
-
-_URALSIB_EXTRA_FEES = {
-    "control_fee": ("150 руб.", "за контроль каждой банкротной операции"),
-    "transfer_ul": ("35 руб.", "перевод на юрлицо"),
-    "transfer_fl": ("без комиссии до 100 000 руб.", "перевод на физлицо"),
-}
-
-_BANK_TRANSFER_FL_SCALE: dict[str, list] = {
-    "Альфа-Банк": _ALFA_TRANSFER_FL_SCALE,
-}
-
-_LARGE_TRANSFER_THRESHOLD = 30_000_000
-
-
-def _calc_transfer_fee(bank: str, amount: int | None, target: str | None) -> dict:
-    """Return fee calculation result for transfer_fee_quote."""
-    if not amount or not bank:
-        return {}
-    scale = _BANK_TRANSFER_FL_SCALE.get(bank)
-    if not scale or target != "ФЛ":
-        return {}
-    for threshold, rate, label in scale:
-        if threshold is None or amount <= threshold:
-            fee = int(amount * rate)
-            return {
-                "bank": bank,
-                "amount": amount,
-                "transfer_target": target,
-                "fee": fee,
-                "rate": rate,
-                "rate_label": label,
-                "calculated_fee": fee,
-            }
-    return {}
-
-
-def _plan_transfer_fee_quote(base: dict, facts: dict, slots: dict, decision: dict, client_type) -> dict:
+def _resolve_bank(slots: dict, decision: dict, facts: dict) -> str | None:
     planner = decision.get("planner") or {}
-    bank = (
+    return (
         slots.get("_current_bank_mention")
         or decision.get("bank_name")
         or planner.get("bank_name")
@@ -434,19 +391,36 @@ def _plan_transfer_fee_quote(base: dict, facts: dict, slots: dict, decision: dic
         or (facts.get("bank_profile") or {}).get("bank")
         or facts.get("bank")
     )
-    amount = (
+
+
+def _resolve_amount(slots: dict, decision: dict) -> int | None:
+    planner = decision.get("planner") or {}
+    raw = (
         slots.get("_transfer_amount")
         or decision.get("amount")
         or planner.get("amount")
     )
-    target = (
+    return int(raw) if raw is not None else None
+
+
+def _resolve_target(slots: dict, decision: dict) -> str | None:
+    planner = decision.get("planner") or {}
+    return (
         slots.get("_transfer_target")
         or decision.get("transfer_target")
         or planner.get("transfer_target")
     )
 
-    fee_calc = _calc_transfer_fee(bank, amount, target) if bank else {}
-    is_large = bool(amount and amount > _LARGE_TRANSFER_THRESHOLD)
+
+def _plan_transfer_fee_quote(base: dict, facts: dict, slots: dict, decision: dict, client_type) -> dict:
+    from app.domain.calculators import calculate_transfer_fee, LARGE_TRANSFER_THRESHOLD
+
+    bank   = _resolve_bank(slots, decision, facts)
+    amount = _resolve_amount(slots, decision)
+    target = _resolve_target(slots, decision)
+
+    calculation = calculate_transfer_fee(bank, amount, target) if bank and amount else {}
+    is_large = bool(amount and amount > LARGE_TRANSFER_THRESHOLD)
 
     base["action"]           = "answer"
     base["intent"]           = "transfer_fee_quote"
@@ -454,18 +428,18 @@ def _plan_transfer_fee_quote(base: dict, facts: dict, slots: dict, decision: dic
     base["client_type"]      = client_type
     base["amount"]           = amount
     base["transfer_target"]  = target
-    base["fee_details"]      = fee_calc
+    base["calculation"]      = calculation   # deterministic result for renderer/validator
+    base["fee_details"]      = calculation   # alias
     base["is_large_transfer"] = is_large
     base["items"]            = []
 
     if is_large:
         base["constraint_topic"] = "large_transfer_requires_2_day_notice_and_creditor_registry"
-        from app.processing.domain_guard import constraint_fallback
-        base["large_transfer_note"] = constraint_fallback("large_transfer_requires_2_day_notice_and_creditor_registry")
 
     if not bank:
         base["question_to_ask"] = "bank_name"
-        slots["_pending_question_type"] = "bank_name"
+    elif not amount:
+        base["question_to_ask"] = "amount"
     else:
         slots.pop("_pending_question_type", None)
         if bank:
@@ -475,37 +449,27 @@ def _plan_transfer_fee_quote(base: dict, facts: dict, slots: dict, decision: dic
 
 
 def _plan_extra_fees(base: dict, facts: dict, slots: dict, decision: dict, client_type) -> dict:
-    planner = decision.get("planner") or {}
-    bank = (
-        slots.get("_current_bank_mention")
-        or decision.get("bank_name")
-        or planner.get("bank_name")
-        or slots.get("bank_name")
-        or slots.get("_last_bank")
-        or (facts.get("bank_profile") or {}).get("bank")
-        or facts.get("bank")
-    )
-    bank_profile = facts.get("bank_profile") or {}
-    constraints  = bank_profile.get("constraints") or facts.get("constraints") or []
+    from app.domain.calculators import calculate_extra_fees
+
+    bank = _resolve_bank(slots, decision, facts)
+    bank_profile  = facts.get("bank_profile") or {}
+    constraints   = bank_profile.get("constraints") or facts.get("constraints") or []
     source_chunks = facts.get("source_chunks") or []
 
-    # Known extra fees for Уралсиб
-    extra_fee_details: dict = {}
-    if bank == "Уралсиб":
-        extra_fee_details = _URALSIB_EXTRA_FEES.copy()
+    extra_calc = calculate_extra_fees(bank) if bank else {}
 
-    base["action"]           = "answer"
-    base["intent"]           = "extra_fees"
-    base["bank"]             = bank
-    base["client_type"]      = client_type
-    base["extra_fee_details"] = extra_fee_details
-    base["constraints"]      = constraints
-    base["items"]            = []
-    base["source_chunks"]    = source_chunks[:4]
+    base["action"]       = "answer"
+    base["intent"]       = "extra_fees"
+    base["bank"]         = bank
+    base["client_type"]  = client_type
+    base["calculation"]  = extra_calc
+    base["extra_fee_details"] = extra_calc   # alias
+    base["constraints"]  = constraints
+    base["items"]        = []
+    base["source_chunks"] = source_chunks[:4]
 
     if not bank:
         base["question_to_ask"] = "bank_name"
-        slots["_pending_question_type"] = "bank_name"
     else:
         slots.pop("_pending_question_type", None)
         if bank:

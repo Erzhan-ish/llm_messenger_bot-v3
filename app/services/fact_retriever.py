@@ -514,3 +514,84 @@ async def retrieve_facts(
         "missing_fields": missing,
         "source_chunks": [getattr(ch, "text", "")[:300] for ch in top_chunks],
     }
+
+
+async def retrieve_planner_context(
+    user_text: str,
+    slots: Optional[dict] = None,
+    active_task: Optional[dict] = None,
+    scenario_hints: Optional[list] = None,
+) -> list[str]:
+    """Broad KB retrieval run BEFORE the planner, without pre-deciding intent.
+
+    Combines signals from: current message, active_task bank, slots, scenario hints.
+    Returns a compact list of fact strings passed to the planner as kb_context.
+    """
+    slots = slots or {}
+    active_task = active_task or {}
+
+    kb = get_kb()
+    if not kb:
+        return []
+
+    try:
+        # Determine bank to search: current message > active_task > slots
+        bank_focus = (
+            slots.get("_current_bank_mention")
+            or active_task.get("bank_name")
+            or slots.get("bank_name")
+            or slots.get("_last_bank")
+        )
+        client_type = slots.get("client_type")
+
+        # Broad allowed types — no semantic routing, just gather relevant chunks
+        broad_types = ["constraint", "pricing", "docs", "feature", "bonus", "selection", "internal_ops"]
+        bank_hints = _extract_bank_hints(bank_focus or user_text)
+
+        scored: Dict[Tuple[str, int], Tuple[float, Any]] = {}
+        for qv in _kb_query_variants(user_text):
+            enriched = qv
+            if client_type:
+                enriched += f" {client_type}"
+            if bank_focus:
+                enriched += f" {bank_focus}"
+
+            for ch, score in kb.search_with_scores(enriched, top_k=8, allowed_types=broad_types):
+                if getattr(ch, "is_internal", False):
+                    continue
+                key = (getattr(ch, "source", ""), getattr(ch, "chunk_id", -1))
+                boosted = float(score)
+                if bank_hints:
+                    chunk_bank = (getattr(ch, "bank", "") or "").lower()
+                    if any(h in chunk_bank for h in bank_hints):
+                        boosted *= 2.5
+                if key not in scored or boosted > scored[key][0]:
+                    scored[key] = (boosted, ch)
+
+        ranked = sorted(scored.values(), key=lambda x: x[0], reverse=True)
+        top_chunks = [ch for _, ch in ranked[:10]]
+
+        compact: list[str] = []
+        # Constraints first (most important for planner)
+        for ch in top_chunks:
+            if getattr(ch, "type", "") == "constraint":
+                fact = getattr(ch, "fact", None)
+                if fact and fact not in compact:
+                    compact.append(str(fact))
+        # Then docs
+        for ch in top_chunks:
+            if getattr(ch, "type", "") == "docs":
+                fact = getattr(ch, "fact", None)
+                if fact and fact not in compact:
+                    compact.append(str(fact))
+        # Then raw text chunks
+        for ch in top_chunks:
+            text = getattr(ch, "text", "")[:280]
+            if text and text not in compact:
+                compact.append(text)
+
+        return [x for x in compact if x][:8]
+
+    except Exception:
+        logger.exception("retrieve_planner_context failed (ignored)")
+        return []

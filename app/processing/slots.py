@@ -29,6 +29,8 @@ DEFAULT_SLOTS: Dict[str, Optional[object]] = {
     "_callback_requested":    False,
     "_last_plan_type":        None,
     "_last_bank_anchor":      None,   # банк, явно названный в последнем ответе бота
+    # Active task — carries current dialog intent across follow-up messages.
+    "_active_task":           None,
 }
 
 _EMAIL_RE      = re.compile(r"(?i)\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b")
@@ -321,3 +323,57 @@ def extract_runtime_slots(text: str, slots: Dict) -> Dict:
         slots["_transfer_target"] = "ЮЛ"
 
     return slots
+
+
+# ---------------------------------------------------------------------------
+# Active task helpers
+# ---------------------------------------------------------------------------
+
+def get_active_task(slots: Dict) -> Dict:
+    """Return current active_task dict or empty dict."""
+    return slots.get("_active_task") or {}
+
+
+def update_active_task(slots: Dict, decision: Dict) -> None:
+    """Persist the planner decision as the active task for follow-up resolution.
+
+    Called after a successful plan+render cycle so the next message knows
+    what we were talking about.
+    """
+    planner = decision.get("planner") or {}
+    intent = planner.get("intent") or decision.get("query_mode") or ""
+
+    # These intents carry multi-turn context worth preserving
+    trackable = {
+        "transfer_fee_quote", "extra_fees", "pricing", "docs", "timing",
+        "constraint", "bank_selection", "specific_bank", "conditions", "bonus",
+        "access_cards", "operations",
+    }
+
+    if intent not in trackable:
+        # Don't overwrite a real task with a transient service reply
+        return
+
+    task: Dict = {
+        "intent":            intent,
+        "scenario_topic":    decision.get("scenario_topic") or planner.get("scenario_topic"),
+        "constraint_topic":  decision.get("constraint_topic") or planner.get("constraint_topic"),
+        "bank_name": (
+            decision.get("bank_name")
+            or planner.get("bank_name")
+            or slots.get("_current_bank_mention")
+            or slots.get("bank_name")
+            or slots.get("_last_bank")
+        ),
+        "client_type":       planner.get("client_type") or slots.get("client_type"),
+        "amount":            decision.get("amount") or planner.get("amount") or slots.get("_transfer_amount"),
+        "transfer_target":   decision.get("transfer_target") or planner.get("transfer_target") or slots.get("_transfer_target"),
+        "pending_question":  planner.get("next_question"),
+        "next_action":       decision.get("next_action") or planner.get("next_action"),
+        "last_answer_summary": None,
+    }
+    slots["_active_task"] = task
+
+
+def clear_active_task(slots: Dict) -> None:
+    slots["_active_task"] = None
