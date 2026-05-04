@@ -1,614 +1,354 @@
-Ты работаешь с проектом llm_messenger_bot-v3.
+Ты работаешь с llm_messenger_bot-v3.
 
-Нужно упростить архитектуру под MVP и будущую большую модель 24B.
+Архитектура conversation_brain стала лучше: код больше не должен жёстко классифицировать сценарии. Но сейчас brain теряет контекст follow-up сообщений и иногда отвечает слишком общо.
 
-Главная формула:
-LLM думает над смыслом.
-Код проверяет, считает и выполняет.
+Цель:
+Сохранить формулу:
+LLM думает и пишет живой текст.
+Код хранит память, даёт чистые facts/action contracts, проверяет и выполняет.
 
-Текущая проблема:
-В message_processor.py слишком много смысловой логики в коде: regex для bank_selection, pricing, docs, timing, conditions, constraint, speed, low_cost и т.д.
-Из-за этого появляются баги:
-- клиент спрашивает про перевод → бот отвечает про открытие счёта;
-- клиент спрашивает про Уралсиб → бот отвечает про ТКБ;
-- клиент коротко отвечает “130 тыс” → бот теряет pending-задачу;
-- клиент спрашивает “у них сколько?” → бот не понимает, что это продолжение прошлого расчёта;
-- constraint начинает управлять всем диалогом;
-- код становится сложным и хрупким.
-
-Новая цель:
-Убрать из message_processor.py почти всю semantic-routing логику.
-Код НЕ должен заранее определять сценарий и категорию до LLM, кроме hard guards.
-LLM-planner должен определять смысл сообщения на основе:
-- текущего сообщения;
-- полной сессионной памяти;
-- active_task;
-- recent_dialog;
-- релевантного KB context;
-- scenario_hints как подсказки, не как финальное решение.
-
-Код должен:
-- сохранять контекст;
-- доставать факты из KB;
-- считать точные суммы;
-- проверять ответ;
-- выполнять handoff/CRM;
-- делать fallback при сбое LLM.
+Не возвращать старый regex-routing.
+Нужно усилить memory + answer_contract.
 
 ============================================================
-1. УПРОСТИТЬ MESSAGE_PROCESSOR
+1. Не повторять intro
 ============================================================
 
-Файл:
+Файлы:
+app/services/conversation_brain.py
+app/services/context_builder.py
 app/processing/message_processor.py
 
-Нужно удалить или перевести в hints почти всю semantic-routing логику:
-- _BANK_SELECTION_REQUEST_RE
-- _PRICE_QUERY_RE
-- _DOCS_QUERY_RE
-- _TIMING_QUERY_RE
-- _CONDITIONS_QUERY_RE
-- _LOW_COST_RE
-- _SPEED_RE
-- ручные ветки explicit_bank_selection
-- explicit_pricing
-- explicit_docs
-- explicit_timing
-- explicit_conditions
-- ручные query_mode override, кроме hard guards
+Проблема:
+Бот повторяет “Здравствуйте! Я Алексей...” в следующих ответах.
 
-Оставить в коде только hard guards:
-- /reset
-- duplicate/rate limit/debounce
-- save_message
-- merge rapid messages
-- audio transcription
-- stop/aggression
-- direct handoff phrases
-- already escalated
-- out_of_scope obvious guard
-- critical safety guard, если LLM недоступен
-- CRM/handoff execution
+Сделать:
+- В memory передавать `_introduced`.
+- После первого intro сохранять `_introduced=True`.
+- В prompt brain добавить:
 
-Все остальные regex должны стать rule_hints, а не decision.
+Если memory._introduced=true:
+- не начинай ответ с “Здравствуйте”;
+- не представляйся снова;
+- сразу отвечай по сути.
 
-Пример:
-Было:
-if _TIMING_QUERY_RE.search(user_text):
-    decision = {"query_mode": "timing", ...}
-
-Должно стать:
-rule_hints["maybe_timing"] = true
-
-Финальное решение делает только dialog_planner.
+Acceptance:
+Первый ответ может быть с представлением.
+Второй и следующие ответы не начинаются с “Здравствуйте, я Алексей”.
 
 ============================================================
-2. ВВЕСТИ ЕДИНЫЙ ACTIVE_TASK / MEMORY STATE
+2. Сохранять pending question после “ЮЛ или ФЛ?”
 ============================================================
 
-Файл:
-app/processing/slots.py
+Файлы:
+app/services/conversation_brain.py
 app/processing/message_processor.py
+app/services/context_builder.py
 
-Код должен сохранять не только slots, а активную задачу диалога.
+Проблема:
+После вопроса “ЮЛ или ФЛ?” клиент отвечает “ФЛ”, но brain не продолжает подбор для ФЛ.
 
-Добавить в slots:
-slots["_active_task"] = {
-    "intent": null,
-    "scenario_topic": null,
-    "constraint_topic": null,
-    "bank_name": null,
-    "client_type": null,
-    "amount": null,
-    "transfer_target": null,
-    "pending_question": null,
-    "next_action": null,
-    "last_answer_summary": null
-}
+Когда brain спрашивает:
+“Счёт подбираем для юрлица или физлица?”
+или
+“Для начала определим тип: ЮЛ или ФЛ?”
 
-Примеры active_task:
-
-После:
-“сколько будет стоить перевод 200 000 руб. на физлицо в Альфа-Банке?”
-
-Сохранить:
-{
-  "intent": "transfer_fee_quote",
-  "bank_name": "Альфа-Банк",
-  "amount": 200000,
-  "transfer_target": "ФЛ",
-  "pending_question": null
-}
-
-Если бот спросил:
-“На какую сумму планируете перевод?”
-
-Сохранить:
-{
-  "intent": "transfer_fee_quote",
-  "bank_name": "Альфа-Банк",
-  "transfer_target": "ФЛ",
-  "pending_question": "amount"
-}
-
-Тогда follow-up:
-“примерно 130 тыс”
-должен идти в planner вместе с active_task, а не в общий bank_selection.
-
-Важно:
-Код не должен сам решать по regex, что это amount follow-up.
-Код должен передать active_task в LLM-planner.
-LLM-planner должен вернуть:
-intent=transfer_fee_quote
-amount=130000
-bank_name=Альфа-Банк
-transfer_target=ФЛ
-
-Код потом проверяет и считает.
-
-============================================================
-3. LLM-PLANNER ДОЛЖЕН СТАТЬ ГЛАВНЫМ SEMANTIC ROUTER
-============================================================
-
-Файл:
-app/services/dialog_planner.py
-
-Planner должен принимать:
-
-plan_dialog(
-    user_text: str,
-    slots: dict,
-    active_task: dict | None,
-    recent_dialog: str,
-    kb_context: list[dict],
-    scenario_hints: list[dict],
-) -> dict
-
-Planner НЕ пишет ответ клиенту.
-Planner возвращает JSON.
-
-Обязательная schema:
+state_update должен сохранять:
 
 {
-  "domain": "in_scope|out_of_scope|unclear",
-  "stage": "GREETING|QUALIFY|PRESENTATION|OBJECTION|CONSTRAINT|DOCS|HANDOFF|OUT_OF_SCOPE",
-  "intent": "greeting|company_info|bank_selection|pricing|transfer_fee_quote|extra_fees|bonus|docs|timing|signing|access_cards|operations|constraint|objection|handoff|redirect_to_domain|clarify|conditions",
-  "query_mode": "same_or_more_specific",
-  "scenario_topic": "string|null",
-  "constraint_topic": "string|null",
-  "next_action": "string|null",
-  "client_type": "ФЛ|ЮЛ|ИП|null",
-  "bank_name": "ТКБ|Уралсиб|Альфа-Банк|Т-Банк|МКБ|Росбанк|null",
-  "amount": number|null,
-  "transfer_target": "ФЛ|ЮЛ|null",
-  "answer_focus": "short description",
-  "must_use_facts": [],
-  "missing_info": [],
-  "should_handoff": false,
-  "should_stop": false,
-  "next_question": "one short question",
-  "confidence": 0.0
+  "active_task": {
+    "type": "bank_selection",
+    "pending_question": "client_type",
+    "source": "partner_banks"
+  },
+  "last_topic": "partner_banks"
 }
 
-Главное правило planner-а:
-Ты определяешь смысл сообщения клиента.
-Код не будет заранее выбирать intent за тебя.
-Scenario_hints — это подсказки, но финальное решение принимаешь ты.
+Если пользователь отвечает:
+“ФЛ” / “физ лицо” / “физик”
 
-Prompt planner-а должен явно говорить:
+context_builder должен положить:
+current_entities.client_type = "ФЛ"
 
-- Бот консультирует АУ по счетам должников.
-- Не универсальный помощник.
-- Клиент может писать короткими follow-up: “у них сколько?”, “а там?”, “130 тыс”, “да”, “нет”, “для ЮЛ”.
-- Используй active_task, чтобы понять follow-up.
-- Если active_task.intent=transfer_fee_quote и клиент пишет сумму или другой банк — продолжай transfer_fee_quote.
-- Если клиент спрашивает комиссии/переводы/стоимость платежа — это НЕ constraint.
-- Если клиент спрашивает можно/нельзя/регламент/ограничение — это constraint.
-- constraint_topic может быть дополнительным полем, но intent не обязан быть constraint.
-- Если клиент готов оформлять / что дальше / подходит / давайте — should_handoff=true.
-- Если вопрос вне домена — domain=out_of_scope.
+Brain должен использовать active_task и ответить по ФЛ, а не повторять список банков.
+
+Expected:
+“Для физлица основной рабочий вариант — ТКБ: открытие 1500 руб., ведение бесплатно. Расходные операции лучше заранее согласовывать с юристами банка. Смотрим тарифы или документы?”
+
+Acceptance:
+User: “ФЛ”
+Bot: отвечает вариант для ФЛ, не общий список банков.
 
 ============================================================
-4. RETRIEVAL ДЕЛАТЬ ДО PLANNER
+3. Обработать короткое “какие?” через memory
 ============================================================
 
-Файл:
+Файлы:
+app/services/conversation_brain.py
+app/services/context_builder.py
+
+Проблема:
+User: “какие?”
+Bot повторяет список партнёрских банков.
+
+Если user_text короткий:
+- “какие?”
+- “какие именно?”
+- “что есть?”
+- “какой вариант?”
+
+И memory.active_task или memory.last_topic есть, brain обязан интерпретировать это как продолжение прошлой темы.
+
+Пример memory:
+{
+  "last_topic": "partner_banks",
+  "client_type": "ФЛ"
+}
+
+User:
+“какие?”
+
+Expected:
+“Для физлица сейчас основной вариант — ТКБ: открытие 1500 руб., ведение 0 руб. в месяц. Хотите, подскажу документы?”
+
+Prompt:
+Короткие вопросы вроде “какие?”, “а что есть?”, “дальше?” всегда трактуй через recent_dialog и active_task. Не начинай новую тему.
+
+Acceptance:
+“какие?” после “ФЛ” не повторяет партнёрские банки, а раскрывает варианты для ФЛ.
+
+============================================================
+4. Добавить answer_contract в fact_pack
+============================================================
+
+Файлы:
+app/services/context_builder.py
 app/services/fact_retriever.py
-app/processing/message_processor.py
 
-Сейчас часто сначала определяется query_mode, потом делается retrieval.
-Нужно поменять:
+Нужен не routing, а подсказка формата ответа.
 
-message
-→ slots/active_task
-→ broad KB retrieval
-→ LLM planner
-→ precise retrieval if needed
+Добавить в context:
 
-Сделать функцию:
-retrieve_planner_context(user_text, slots, active_task, scenario_hints) -> list[dict]
+answer_contract = {
+  "must_answer_current_question": true,
+  "do_not_repeat_intro": true,
+  "do_not_repeat_previous_answer": true,
+  "max_questions": 1,
+  "style": "natural_short"
+}
 
-Она должна доставать широкий контекст:
-- банк из текущего сообщения;
-- банк из active_task;
-- client_type из slots;
-- constraint candidates;
-- fee candidates;
-- docs/timing candidates;
-- scenario hints.
+Для partner_banks:
+answer_contract = {
+  "topic": "partner_banks",
+  "must_include": ["Альфа-Банк", "ТКБ", "Уралсиб"],
+  "should_include": ["Т-Банк, МКБ и Росбанк на паузе"],
+  "do_not_include": ["opening_fee", "monthly_fee"],
+  "next_question": "Счёт подбираем для юрлица или физлица?"
+}
 
-Не нужно сразу выбирать финальный query_mode кодом.
+Для FL bank selection:
+answer_contract = {
+  "topic": "bank_selection_fl",
+  "must_include": ["ТКБ", "открытие 1500", "ведение 0"],
+  "should_include": ["расходные операции согласуются юристами банка"],
+  "do_not_include": ["Альфа как вариант для ФЛ без факта", "общий список банков"]
+}
 
-После planner:
-retrieve_facts(decision.query_mode, decision, slots)
-уже делает точную выборку.
+Для card:
+answer_contract = {
+  "topic": "debtor_card",
+  "must_include": ["карта оформляется после введения реализации имущества", "подписывает финансовый управляющий"],
+  "do_not_include": ["наличные", "судебное решение о выдаче наличными"],
+  "next_question": "Реализация уже введена?"
+}
 
-============================================================
-5. SCENARIO CATALOG ОСТАЁТСЯ ТОЛЬКО HINTS
-============================================================
-
-Файл:
-app/domain/scenario_catalog.py
-
-Scenario catalog нужен, но он не должен принимать решение вместо LLM.
-
-Функция:
-build_scenario_hints(user_text) -> list[dict]
-
-Возвращает:
-[
-  {
-    "intent": "transfer_fee_quote",
-    "scenario_topic": "payment_transfer_fee",
-    "constraint_topic": null,
-    "next_action": "calculate_or_explain_transfer_fee",
-    "score": 2
-  }
-]
-
-Эти hints передаются в planner.
-
-Запрещено:
-if top_hint.intent == "pricing": decision = pricing
-
-Разрешено:
-rule_hints["scenario_hints"] = hints
-decision = await plan_dialog(..., scenario_hints=hints)
+Это НЕ старая классификация. Это контракт качества ответа для LLM.
 
 ============================================================
-6. КОД ПРОВЕРЯЕТ DECISION, НО НЕ ПОДМЕНЯЕТ ЕГО БЕЗ ПРИЧИНЫ
+5. Исправить card answer contract
 ============================================================
 
-Файл:
-app/services/policy_validator.py
+Файлы:
+app/services/context_builder.py
+app/services/conversation_brain.py
 
-Policy validator должен проверять, а не делать новый semantic routing.
+Проблема:
+Бот говорит “Нет проблем с картой”, хотя дальше ограничение.
 
-Проверки:
-1. domain=out_of_scope → redirect_to_domain.
-2. should_handoff=true → handoff, не продолжать консультацию.
-3. intent=transfer_fee_quote/extra_fees/pricing/bonus не перезаписывать в constraint только из-за constraint_topic.
-4. Если intent=constraint, constraint_topic обязателен.
-5. Если current_bank_mention есть, bank_name должен совпадать с текущим банком.
-6. Если active_task.intent=transfer_fee_quote и planner вернул bank_selection/pricing при follow-up “у них сколько/130 тыс” — это ошибка planner-а. Вернуть planner retry или исправить только в рамках active_task.
-7. Если confidence < 0.55 → clarify или handoff.
-8. Если should_stop=true → остановить диалог.
-9. Если answer потом содержит цену/банк не из facts → fallback.
+Для вопроса про карту должника fact_pack.card_rules.primary должен быть:
 
-Важно:
-Policy validator не должен превращаться в новый message_processor с кучей if/elif.
-Только safety checks и consistency checks.
+“Если у гражданина введена реализация имущества, новая банковская карта оформляется и подписывается исключительно финансовым управляющим.”
 
-============================================================
-7. КОД СЧИТАЕТ ДЕНЬГИ И ТОЧНЫЕ ФОРМУЛЫ
-============================================================
+Prompt:
+Если клиент спрашивает “можно карту сделать?”:
+- не говори “нет проблем”;
+- не отвечай про наличные;
+- объясни условие: после введения реализации имущества;
+- спроси, введена ли реализация.
 
-Файл:
-app/services/calculators.py
-или app/domain/calculators.py
+Expected:
+“Карту можно оформить после введения реализации имущества: подписывает её финансовый управляющий. Реализация уже введена?”
 
-Добавить deterministic calculators:
-
-calculate_transfer_fee(bank_name, amount, transfer_target, facts) -> dict
-
-Примеры:
-Альфа-Банк + ФЛ:
-- до 150 000 → 0%
-- свыше 150 000 → 0.5%
-
-Уралсиб + ФЛ:
-- до 100 000 → 0%
-- свыше 100 000 → 0.2%
-- + 150 руб. контроль банкротной операции, если применимо
-
-ТКБ + ФЛ:
-- использовать facts из KB
-
-Код считает:
-- calculated_fee
-- control_fee
-- total_fee если нужно
-- explanation_basis
-
-LLM не должен сам считать проценты.
+Acceptance:
+Нет фразы “нет проблем”.
+Нет фразы про судебное решение о наличных.
+Есть вопрос про реализацию имущества.
 
 ============================================================
-8. RENDERER ДАЁТ МОДЕЛИ БОЛЬШЕ СВОБОДЫ В ТЕКСТЕ
+6. Исправить follow-up “почему?”
+============================================================
+
+Файлы:
+app/services/conversation_brain.py
+
+Если last_topic или active_task связан с debtor_card / card_realization, а user_text:
+- почему?
+- а почему?
+- почему нельзя?
+- в чем причина?
+
+Brain должен объяснить причину, а не повторять ответ.
+
+Expected:
+“Потому что после введения реализации имуществом должника распоряжается финансовый управляющий, поэтому карту оформляет и подписывает именно он. До этой стадии карту на должника не оформляем.”
+
+Prompt:
+Если клиент спрашивает “почему?” после ограничения, объясни причину простыми словами. Не повторяй прошлый ответ дословно.
+
+Acceptance:
+“почему?” после карты → explanation, no duplicate.
+
+============================================================
+7. Validator должен ловить wrong-topic answers
 ============================================================
 
 Файл:
-app/processing/renderer.py
-app/llm/prompts/manager/render.md
+app/services/response_validator.py
 
-Убрать чрезмерные static templates для обычных ответов.
-LLM-render должен писать живой текст для:
-- greeting
-- company_info
-- bank_selection
-- pricing
-- docs
-- timing
-- bonus
-- conditions
-- objection
-- normal constraints explanation
+Добавить проверки по answer_contract:
 
-Кодовые static render оставить только для:
-- out_of_scope
-- aggression/stop
-- handoff bridge
-- provider failure fallback
-- calculator fallback, если LLM недоступен
-- critical legal constraint fallback, если confidence низкий
+- Если contract.do_not_include содержит “наличные”, а reply содержит “наличные” или “судебное решение о выдаче наличными” → validation_error=wrong_topic_fact.
+- Если contract.topic=partner_banks и reply содержит тарифы → validation_error=answered_tariffs_when_asked_bank_list.
+- Если contract.topic=bank_selection_fl и reply не содержит “ТКБ” → validation_error=missing_primary_fact.
+- Если memory._introduced=true и reply startswith “Здравствуйте” → validation_error=repeated_intro.
+- Если user_text == “почему?” и reply near_duplicate previous → validation_error=did_not_explain_reason.
 
-Даже для transfer_fee_quote можно делать так:
-Код считает fee.
-LLM формулирует живо.
-Но final validator проверяет, что сумма и банк не изменились.
+Repair prompt:
+“Исправь ответ: ты использовал не тот факт / повторил приветствие / не ответил на follow-up. Используй answer_contract.”
 
-Render input должен быть строгим:
+Acceptance:
+Ошибки не уходят пользователю, сначала repair.
+
+============================================================
+8. Улучшить state_update от conversation_brain
+============================================================
+
+Файл:
+app/services/conversation_brain.py
+
+Brain должен всегда возвращать state_update:
+
 {
-  "decision": planner_decision,
-  "facts": kb_facts,
-  "calculation": calculated_result,
-  "slots": slots,
-  "active_task": active_task,
-  "style_rules": ...
+  "last_topic": "...",
+  "active_task": {...},
+  "client_type": "...",
+  "pending_question": "...",
+  "last_answer_summary": "..."
 }
 
-Prompt render.md:
-- Напиши как живой менеджер.
-- 1–3 предложения.
-- Один вопрос в конце.
-- Отвечай только на текущий вопрос.
-- Не повторяй прошлый ответ.
-- Не меняй intent.
-- Не меняй банк.
-- Не меняй суммы.
-- Если calculation есть — используй её точно.
-- Если facts нет — не выдумывай, задай уточнение.
-- Не пиши “условия/документы/тарифы” как справочник.
-- Не используй списки, если клиент не просил.
-- Если клиент не готов открывать — не дави.
+После partner_banks вопроса:
+last_topic=partner_banks
+pending_question=client_type
+
+После ответа “ФЛ”:
+client_type=ФЛ
+last_topic=bank_selection_fl
+active_task.type=bank_selection
+active_task.client_type=ФЛ
+
+После card question:
+last_topic=debtor_card
+pending_question=realization_status
+
+После “почему?”:
+last_topic=debtor_card
+pending_question=realization_status сохраняется, если вопрос всё ещё актуален.
+
+Acceptance:
+В логах после каждого ответа виден state_update с last_topic и pending_question.
 
 ============================================================
-9. ACTIVE_TASK ОБНОВЛЯЕТСЯ ПОСЛЕ КАЖДОГО ОТВЕТА
+9. Prompt: меньше канцелярита и скрипта
 ============================================================
 
 Файл:
-app/processing/message_processor.py
-app/processing/state.py или slots.py
+app/services/conversation_brain.py
 
-После planner/answer обновлять:
+Добавить style rules:
 
-slots["_last_intent"] = decision.intent
-slots["_last_scenario_topic"] = decision.scenario_topic
-slots["_last_constraint_topic"] = decision.constraint_topic
-slots["_last_bank"] = decision.bank_name
-slots["_last_client_type"] = decision.client_type
-slots["_last_answer_summary"] = short summary
+- Не начинай с “Понятно” без причины.
+- Не пиши “Вы интересуетесь...” — отвечай прямо.
+- Не повторяй формулировку клиента.
+- Не говори “для начала давайте определим тип вашей организации”, лучше: “Счёт для юрлица или физлица?”
+- Не говори “у нас есть варианты со сниженными тарифами”, если нет конкретики.
+- Если знаешь конкретный вариант — назови его.
+- Пиши 1–3 предложения.
+- Один вопрос максимум.
 
-Если decision.intent == "transfer_fee_quote":
-slots["_active_task"] = {
-  "intent": "transfer_fee_quote",
-  "bank_name": decision.bank_name,
-  "amount": decision.amount,
-  "transfer_target": decision.transfer_target,
-  "pending_question": "amount" if amount missing else null,
-  "next_action": decision.next_action
-}
+Bad:
+“Вы интересуетесь нашими партнерскими банками.”
 
-Если decision.intent == "docs":
-active_task может быть docs.
-Если decision.intent == "constraint" and next_action requires follow-up:
-active_task = constraint_followup.
-
-Если should_handoff/stop/reset:
-clear active_task.
+Good:
+“Сейчас активные варианты — Альфа-Банк, ТКБ и Уралсиб. Для физлица чаще смотрим ТКБ. Счёт для физлица?”
 
 ============================================================
-10. PENDING/FOLLOW-UP РЕШАЕТ LLM, НО КОД ПЕРЕДАЁТ ПАМЯТЬ
+10. Tests
 ============================================================
 
-Запрещено писать много кода:
-if pending_question == transfer_amount and regex amount:
-    decision = transfer_fee_quote
+Добавить:
 
-Лучше:
-- код парсит простые entities: amount, current_bank_mention, client_type
-- кладёт в slots/current_entities
-- planner получает active_task + current_entities
-- planner сам решает смысл
+test_no_repeated_intro
+Context introduced=true
+Expected reply does not start with Здравствуйте.
 
-Код может сделать только consistency override:
-Если active_task.intent=transfer_fee_quote и planner вернул bank_selection на текст “130 тыс”, validator отправляет planner retry с ошибкой:
-“Ты потерял active_task. Клиент ответил суммой на pending вопрос. Верни transfer_fee_quote.”
+test_partner_banks_then_fl
+User: с какими банками?
+Bot asks ЮЛ/ФЛ
+User: ФЛ
+Expected: TKB FL pricing, not partner list.
 
-То есть модель думает, но код ловит явную несогласованность.
+test_short_which_followup
+After client_type=ФЛ
+User: какие?
+Expected: TKB option.
 
-============================================================
-11. УБРАТЬ ДВОЙНЫЕ LLM-ВЫЗОВЫ
-============================================================
+test_card_not_no_problem
+User: карту сделать?
+Expected: no “нет проблем”; asks realization.
 
-Целевой MVP:
-На обычный ответ максимум:
-1. LLM planner
-2. LLM renderer
+test_card_why_explains_reason
+After card answer
+User: почему?
+Expected: reason explanation, not duplicate.
 
-Не вызывать:
-- background analysis по умолчанию
-- summary по умолчанию
-- escalation detector после каждого ответа, если уже есть planner.should_handoff/should_stop
+test_validator_blocks_cash_when_card
+answer_contract.topic=debtor_card
+reply mentions cash withdrawal
+Expected validation_error.
 
-Настройки:
-ENABLE_BACKGROUND_ANALYSIS=false
-ENABLE_LLM_SUMMARY=false
-
-Если нужен summary, делать только при длинном диалоге и не в критическом пути ответа.
-
-============================================================
-12. HANDOFF ОСТАЁТСЯ В КОДЕ
-============================================================
-
-LLM planner может вернуть:
-should_handoff=true
-
-Но код делает:
-- stop consultation
-- bridge phrase
-- maybe_escalate
-- CRM task
-- slots["_escalation_sent"]=true
-
-Нельзя давать LLM самому продолжать консультацию после handoff.
-
-Триггеры в prompt planner:
-- что дальше
-- оформляем
-- подходит
-- давайте
-- куда оплатить
-- готов начать
-- позовите менеджера
-- хочу с человеком
-
-Код может иметь hard regex для прямого handoff, это нормально.
+test_validator_blocks_repeated_intro
+introduced=true
+reply starts with Здравствуйте
+Expected validation_error.
 
 ============================================================
-13. FACT VALIDATOR ОСТАЁТСЯ ЖЁСТКИМ
-============================================================
-
-После LLM-render:
-
-validate_answer_against_facts(answer, plan):
-- банк в ответе должен совпадать с decision.bank_name/current_bank_mention;
-- суммы должны быть из facts/calculation;
-- если calculation.calculated_fee=1000, ответ не может написать 1500;
-- если intent=transfer_fee_quote, ответ не должен говорить только opening/monthly;
-- если intent=docs, ответ не должен добавлять тарифы без запроса;
-- если domain=out_of_scope, ответ не должен отвечать по внешней теме;
-- если answer near duplicate last_bot_text → retry render or fallback.
-
-============================================================
-14. ОБНОВИТЬ TESTS
-============================================================
-
-Добавить e2e tests на новую формулу.
-
-1. test_llm_planner_is_semantic_router
-Проверить, что message_processor не делает final decision по _PRICE_QUERY_RE/_DOCS_QUERY_RE/_TIMING_QUERY_RE.
-Regex могут быть только hints.
-
-2. test_transfer_followup_bank_compare
-User:
-“сколько будет перевод 200 000 на физлицо в Альфе?”
-Bot: answer
-User:
-“а с Уралсибом у них сколько?”
-Expected:
-planner gets active_task
-intent=transfer_fee_quote
-bank_name=Уралсиб
-amount=200000
-transfer_target=ФЛ
-
-3. test_transfer_followup_amount_only
-User:
-“сколько перевод на физлицо в Альфе?”
-Bot: asks amount
-User:
-“примерно 130 тыс”
-Expected:
-intent=transfer_fee_quote
-bank_name=Альфа-Банк
-amount=130000
-transfer_target=ФЛ
-
-4. test_special_account_no_default_fl
-User:
-“спецсчёт в ТКБ, основного нет”
-Expected:
-client_type=null
-answer asks “юрлица, ИП или физлица”
-No “для физлица” unless user said it.
-
-5. test_only_asked_no_push
-User:
-“да не, основной не нужен, я только спросить хотел”
-Expected:
-low_intent / no pressure
-No repeated constraint.
-
-6. test_card_realization_followup
-User:
-“можно карту должнику при реализации?”
-Bot asks realization status
-User:
-“да введена”
-Expected:
-answer about financial manager signs card
-No bank_selection
-
-7. test_extra_fees_uralsib
-User:
-“Есть ли в Уралсибе доп платежи кроме комиссии?”
-Expected:
-intent=extra_fees
-bank_name=Уралсиб
-No ТКБ
-
-8. test_out_of_scope
-User:
-“RTX 3060 купить можно?”
-Expected:
-domain=out_of_scope
-redirect only
-
-9. test_handoff
-User:
-“Уралсиб подходит, что дальше?”
-Expected:
-should_handoff=true
-CRM/handoff code path
-
-10. test_renderer_freedom_but_fact_control
-LLM can phrase differently, but must preserve bank/amount/fee.
-
-============================================================
-15. FINAL ACCEPTANCE CRITERIA
+FINAL ACCEPTANCE
 ============================================================
 
 Готово, если:
-
-1. message_processor.py стал коротким orchestrator-ом, а не местом для semantic routing.
-2. Regex не принимают финальные решения по pricing/docs/timing/conditions/bank_selection.
-3. LLM-planner получает active_task, KB context, slots, recent_dialog, scenario_hints.
-4. LLM-planner определяет intent/scenario/query_mode.
-5. Код проверяет decision, но не пытается заново классифицировать всё.
-6. Код считает комиссии и точные формулы.
-7. LLM-render пишет живой текст и получает больше свободы.
-8. Validator ловит галлюцинации, неверные банки, неверные суммы, повторы.
-9. Follow-up “у них сколько?”, “130 тыс”, “для ЮЛ”, “да введена” обрабатываются через active_task + planner.
-10. Handoff/CRM остаются кодом.
-11. На обычный ответ максимум 2 LLM-вызова: planner + renderer.
-12. Проект готов к подключению большой 24B модели как planner+renderer.
+1. После “ФЛ” бот говорит конкретно про ТКБ для ФЛ.
+2. После “какие?” бот продолжает прошлую тему.
+3. Бот не повторяет приветствие.
+4. Карта не путается с наличными.
+5. “Почему?” объясняет причину, а не повторяет.
+6. Ответы звучат живо, без фраз “Вы интересуетесь...”.
