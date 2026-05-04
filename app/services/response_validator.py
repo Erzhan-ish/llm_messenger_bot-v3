@@ -1,25 +1,39 @@
 """Валидатор ответа conversation_brain.
 
 Проверяет корректность ответа перед отправкой клиенту.
-НЕ классифицирует — только проверяет факты.
+НЕ классифицирует — только проверяет факты и бизнес-правила.
 """
 from __future__ import annotations
 
 import re
 from typing import Optional
 
-_HANDOFF_EXPLICIT_RE = re.compile(
-    r"(оформляем|хочу\s+открыть|готов\s+начать|подключите\s+менеджера"
-    r"|позовите\s+(человека|менеджера)|куда\s+оплатить|выставляй(те)?\s+счёт"
-    r"|пришлю\s+документы|отправлю\s+документы|подходит.*что\s+дальше"
-    r"|готов\s+к\s+оформлению)",
-    re.I | re.U,
-)
-
 _STOP_WORDS = {
     "и", "а", "но", "что", "это", "как", "в", "на", "по", "для", "у", "я", "мы",
     "вы", "с", "к", "из", "же", "то", "так", "уже", "ещё", "при", "без",
 }
+
+# Мягкие фразы намерения открыть счёт (не попадают в hard handoff guard)
+_OPEN_ACCOUNT_SOFT_RE = re.compile(
+    r"(счет\s+откройте|откройте\s+(?:мне\s+)?счет"
+    r"|как\s+открыть\s+счет"
+    r"|давайте\s+открыть"
+    r"|откроем\s*[?!]"
+    r"|открываем\s*[?!]?"
+    r"|оформим\s*[?!]?"
+    r"|что\s+нужно\s+для\s+открытия)",
+    re.I | re.U,
+)
+
+# Недопустимые обещания действия без handoff
+_PROMISE_ACTION_RE = re.compile(
+    r"\b(откроем|давайте\s+откроем|открываем|сделаем\s+счет|оформляем\s+счет"
+    r"|мы\s+откроем|я\s+откр[ою]\w*|сейчас\s+откроем)\b",
+    re.I | re.U,
+)
+
+# Активные задачи, при которых "открыть" = продолжение сравнения, не намерение
+_COMPARISON_TASK_TYPES = {"transfer_fee_quote", "compare", "bank_selection", "pricing"}
 
 
 def _keywords(text: str) -> set[str]:
@@ -48,18 +62,13 @@ def _extract_numbers_from_text(text: str) -> set[int]:
     return nums
 
 
-def _bank_name_in_text(text: str, bank: str) -> bool:
-    if not bank or not text:
-        return True
-    return bank.lower() in text.lower()
-
-
 def validate_reply(
     reply: str,
     brain_result: dict,
     current_entities: dict,
     slots: dict,
     tool_results: Optional[dict] = None,
+    user_text: str = "",
 ) -> dict:
     """
     Проверить ответ brain.
@@ -74,24 +83,22 @@ def validate_reply(
     if prev_text and _is_near_duplicate(reply, prev_text):
         return {"is_valid": False, "reason": "near_duplicate_of_previous"}
 
-    # Если есть tool_result с комиссией — проверить что число есть в ответе
+    # Комиссия из tool_result должна быть в ответе
     if tool_results:
         fee_result = tool_results.get("calculate_transfer_fee") or {}
         fee = fee_result.get("calculated_fee")
         if fee is not None and fee > 0:
             reply_nums = _extract_numbers_from_text(reply)
             if fee not in reply_nums:
-                # Допускаем total_fee как альтернативу
                 total = fee_result.get("total_fee")
                 if total is None or total not in reply_nums:
                     return {"is_valid": False, "reason": f"fee_{fee}_missing_from_reply"}
 
-    # Если клиент упомянул банк — проверить что ответ не про другой банк
+    # Банк в ответе должен совпадать с упомянутым/ожидаемым
     mentioned_bank = current_entities.get("mentioned_bank")
     active_task = (slots.get("_active_task") or {})
     expected_bank = mentioned_bank or active_task.get("bank_name") or active_task.get("bank")
     if expected_bank:
-        # Получить все известные банки
         all_banks = ["Альфа-Банк", "ТКБ", "Уралсиб", "Т-Банк", "МКБ", "Росбанк"]
         other_banks = [b for b in all_banks if b != expected_bank]
         reply_lower = reply.lower()
@@ -99,11 +106,23 @@ def validate_reply(
             if other.lower() in reply_lower and expected_bank.lower() not in reply_lower:
                 return {"is_valid": False, "reason": f"wrong_bank_{other}_instead_of_{expected_bank}"}
 
-    # handoff требует явного намерения в тексте пользователя
+    # Handoff требует явного намерения
     handoff = (brain_result.get("handoff") or {})
-    if handoff.get("needed"):
-        # Проверить через slots._had_consent или явную фразу
+    action = brain_result.get("action") or "answer"
+    if handoff.get("needed") and action not in ("handoff", "request_data"):
         if not slots.get("_had_consent"):
             return {"is_valid": False, "reason": "handoff_without_explicit_consent"}
+
+    # Бот не должен обещать действие без handoff/request_data
+    if _PROMISE_ACTION_RE.search(reply):
+        if not handoff.get("needed") and action not in ("handoff", "request_data"):
+            return {"is_valid": False, "reason": "promised_action_without_handoff"}
+
+    # Фраза намерения открыть → должен быть handoff или request_data
+    if user_text and _OPEN_ACCOUNT_SOFT_RE.search(user_text):
+        active_task_type = active_task.get("type") or active_task.get("intent") or ""
+        is_comparison = active_task_type in _COMPARISON_TASK_TYPES
+        if not is_comparison and not handoff.get("needed") and action not in ("handoff", "request_data"):
+            return {"is_valid": False, "reason": "open_account_without_handoff_or_request_data"}
 
     return {"is_valid": True, "reason": None}

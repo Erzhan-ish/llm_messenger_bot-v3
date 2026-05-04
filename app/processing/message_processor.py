@@ -110,6 +110,15 @@ def _update_slots_from_state(slots: dict, state_update: dict) -> None:
         slots["_pending_question"] = state_update["pending_question"]
     if state_update.get("last_answer_summary") is not None:
         slots["_last_answer_summary"] = state_update["last_answer_summary"]
+    # sales_context: merge, не перезаписываем null-ами
+    sc = state_update.get("sales_context")
+    if sc and isinstance(sc, dict):
+        existing = slots.get("_sales_context") or {}
+        merged = {**existing}
+        for k, v in sc.items():
+            if v is not None:
+                merged[k] = v
+        slots["_sales_context"] = merged
 
 
 async def run_business_analysis(session_id: int, user_text: str, had_unknown_any: bool, message: object):
@@ -285,11 +294,12 @@ async def process_message(message):
         # MAIN PIPELINE: conversation_brain
         # -----------------------------------------------------------------------
 
-        # 1. Build context
+        # 1. Build context (includes fact_pack)
         ctx = await build_conversation_context(user_text, session.id, slots)
         recent_dialog = ctx["recent_dialog"]
         memory = ctx["memory"]
         current_entities = ctx["current_entities"]
+        fact_pack = ctx.get("fact_pack") or {}
 
         # 2. Retrieve KB facts (broad, no query_mode)
         kb_facts = await retrieve_context_for_brain(user_text, memory, current_entities)
@@ -298,56 +308,119 @@ async def process_message(message):
         await _maybe_send_pause_phrase(session.id, message.channel, message.external_user_id, "default", slots)
 
         # 4. Call brain (first pass)
-        brain_result = await run_conversation_brain(user_text, recent_dialog, memory, kb_facts)
+        brain_result = await run_conversation_brain(
+            user_text, recent_dialog, memory, kb_facts, fact_pack=fact_pack
+        )
 
-        # 5. Execute tool if requested
+        # 5. Handle stop action immediately
+        if brain_result.get("stop") or brain_result.get("action") == "stop":
+            logger.info("Session {} | Brain returned stop action", session.id)
+            return
+
+        # 6. Execute tool if requested
         tool_results: dict | None = None
         needs_tool = brain_result.get("needs_tool") or {}
         tool_name = needs_tool.get("name") or "none"
 
         if tool_name == "calculate_transfer_fee":
             tool_args = needs_tool.get("args") or {}
-            bank = tool_args.get("bank") or current_entities.get("mentioned_bank") or (slots.get("_active_task") or {}).get("bank_name") or slots.get("_last_bank")
-            amount = tool_args.get("amount") or current_entities.get("mentioned_amount") or slots.get("_transfer_amount")
-            recipient = tool_args.get("recipient") or current_entities.get("mentioned_recipient") or slots.get("_transfer_target")
+            bank = (tool_args.get("bank")
+                    or current_entities.get("mentioned_bank")
+                    or (slots.get("_active_task") or {}).get("bank_name")
+                    or slots.get("_last_bank"))
+            amount = (tool_args.get("amount")
+                      or current_entities.get("mentioned_amount")
+                      or slots.get("_transfer_amount"))
+            recipient = (tool_args.get("recipient")
+                         or current_entities.get("mentioned_recipient")
+                         or slots.get("_transfer_target"))
 
             if bank and amount:
                 from app.domain.calculators import calculate_transfer_fee
                 fee_result = calculate_transfer_fee(bank, amount, recipient)
                 tool_results = {"calculate_transfer_fee": fee_result}
-                logger.info("Session {} | tool calculate_transfer_fee | bank={} amount={} recipient={} fee={}", session.id, bank, amount, recipient, fee_result.get("calculated_fee"))
-
-                # 6. Re-call brain with tool results
+                logger.info(
+                    "Session {} | tool calculate_transfer_fee | bank={} amount={} recipient={} fee={}",
+                    session.id, bank, amount, recipient, fee_result.get("calculated_fee"),
+                )
+                # Re-call brain with tool results
                 brain_result = await run_conversation_brain(
-                    user_text, recent_dialog, memory, kb_facts, tool_results=tool_results
+                    user_text, recent_dialog, memory, kb_facts,
+                    tool_results=tool_results, fact_pack=fact_pack,
                 )
 
-        # 7. Extract reply
+        # 7. Handle brain handoff action
+        action = brain_result.get("action") or "answer"
+        handoff = brain_result.get("handoff") or {}
+
+        if action == "handoff" or handoff.get("needed"):
+            # Brain says handoff — validate consent signal
+            if slots.get("_had_consent") or _CONSENT_HARD_RE.search(user_text):
+                bridge_reply = cleanup_text(brain_result.get("reply") or "")
+                if not bridge_reply:
+                    bridge_reply = _build_handoff_bridge(slots, handoff.get("reason") or "ready_to_open")
+                state_update = brain_result.get("state_update") or {}
+                _update_slots_from_state(slots, state_update)
+                if current_entities.get("mentioned_bank"):
+                    slots["_last_bank"] = current_entities["mentioned_bank"]
+                slots.pop("_had_consent", None)
+                await set_slots(session.id, slots)
+                await maybe_escalate(session.id, slots, reason=handoff.get("reason") or "brain_handoff")
+                await send_bot(
+                    session, message.channel, message.external_user_id, bridge_reply, slots,
+                    processing_start=processing_start, client_msg_len=len(user_text),
+                )
+                return
+            else:
+                # Brain triggered handoff without hard consent — treat as request_data
+                action = "request_data"
+
+        # 8. Extract reply
         reply = cleanup_text(brain_result.get("reply") or "")
 
-        # 8. Validate reply
+        # 9. Validate reply
         if reply:
-            val = validate_reply(reply, brain_result, current_entities, slots, tool_results=tool_results)
+            val = validate_reply(
+                reply, brain_result, current_entities, slots,
+                tool_results=tool_results, user_text=user_text,
+            )
             if not val["is_valid"]:
-                logger.warning("Session {} | Reply validation failed: {} — calling repair", session.id, val["reason"])
+                logger.warning(
+                    "Session {} | Reply validation failed: {} — calling repair",
+                    session.id, val["reason"],
+                )
+                # Build repair hint from validation reason
+                repair_hint = val["reason"]
+                if repair_hint == "open_account_without_handoff_or_request_data":
+                    repair_hint = (
+                        "open_account_without_handoff: Клиент готов к оформлению. "
+                        "Не продолжай консультацию — попроси ИНН или название должника, "
+                        "скажи что подключишь менеджера."
+                    )
+                elif repair_hint == "promised_action_without_handoff":
+                    repair_hint = (
+                        "promised_action_without_handoff: Не обещай что ты сам откроешь счёт. "
+                        "Скажи 'поможем оформить', запроси данные или подключи менеджера."
+                    )
                 repaired = await conversation_brain_repair(
                     previous_reply=reply,
-                    validation_error=val["reason"],
+                    validation_error=repair_hint,
                     user_text=user_text,
                     memory=memory,
                     kb_facts=kb_facts,
                     tool_results=tool_results,
+                    fact_pack=fact_pack,
                 )
                 if repaired and repaired.strip():
                     reply = repaired
                     logger.info("Session {} | Repaired reply len={}", session.id, len(reply))
 
-        # 9. Fallback if still no reply
+        # 10. Fallback if still no reply
         if not reply or not reply.strip():
             logger.warning("Session {} | Brain returned no reply — using fallback", session.id)
             reply = "Секунду, уточняю информацию. Какой именно вопрос вас интересует?"
 
-        # 10. Dynamic greeting injection (only for first turn)
+        # 11. Dynamic greeting injection (only for first turn)
         if (
             not slots.get("_introduced")
             and slots.get("_turn_count", 0) <= 1
@@ -356,23 +429,13 @@ async def process_message(message):
                 reply = "Здравствуйте! Я Алексей, менеджер «В плюсе». " + reply
             slots["_introduced"] = True
 
-        # 11. Update memory from state_update
+        # 12. Update memory from state_update
         state_update = brain_result.get("state_update") or {}
         _update_slots_from_state(slots, state_update)
 
-        # 12. Track last_bank for handoff bridge
+        # 13. Track last_bank for handoff bridge
         if current_entities.get("mentioned_bank"):
             slots["_last_bank"] = current_entities["mentioned_bank"]
-
-        # 13. Check handoff (only from brain if explicit consent set)
-        handoff = brain_result.get("handoff") or {}
-        if handoff.get("needed") and slots.get("_had_consent"):
-            bridge = _build_handoff_bridge(slots, handoff.get("reason") or "ready_to_open")
-            slots.pop("_had_consent", None)
-            await set_slots(session.id, slots)
-            await maybe_escalate(session.id, slots, reason=handoff.get("reason") or "brain_handoff")
-            await send_bot(session, message.channel, message.external_user_id, bridge, slots, processing_start=processing_start, client_msg_len=len(user_text))
-            return
 
         slots.pop("_had_consent", None)
         await set_slots(session.id, slots)

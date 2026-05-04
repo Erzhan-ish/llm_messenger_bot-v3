@@ -1,6 +1,7 @@
 """Context builder — собирает контекст для conversation_brain.
 
 Извлекает простые сущности из текста (банк, сумма, тип клиента).
+Строит structured fact_pack по темам — без определения intent.
 НЕ определяет intent — это задача brain.
 """
 from __future__ import annotations
@@ -40,6 +41,97 @@ _RECIPIENT_UL_RE = re.compile(
     re.I | re.U,
 )
 
+# Card-related keyword detection (for fact_pack priority)
+_CARD_KEYWORDS_RE = re.compile(
+    r"\b(карт[аеуиой]|карточк\w*|сделать\s+карт|карт[уа]\s+должник\w*|карт[уа]\s+выдат|карт[уа]\s+открыт)\b",
+    re.I | re.U,
+)
+_CASH_KEYWORDS_RE = re.compile(
+    r"\b(наличн\w*|снят[ьи]\s+наличн|снятие|кэш)\b",
+    re.I | re.U,
+)
+_BANK_LIST_KEYWORDS_RE = re.compile(
+    r"\b(банк[и]|партнёр\w*|партнер\w*|сотруднич\w*|работает\w*|работаем|список\s+банк|какие\s+банк|с\s+какими\s+банк)\b",
+    re.I | re.U,
+)
+_LOW_COST_KEYWORDS_RE = re.compile(
+    r"\b(подешевле|дешевле|недорого|самый\s+деш[её]в\w*|минимальн\w*\s+(?:цен|тариф|стоимост)|бюджетн\w*)\b",
+    re.I | re.U,
+)
+
+# ---------------------------------------------------------------------------
+# Static pricing data (deterministic, not from KB)
+# ---------------------------------------------------------------------------
+_BANK_PRICING_YUL = [
+    {
+        "bank": "Альфа-Банк",
+        "opening_fee": 800,
+        "monthly_fee": 800,
+        "notes": "контроль банкротных операций 0 руб.",
+    },
+    {
+        "bank": "ТКБ",
+        "opening_fee": 2800,
+        "monthly_fee": 2090,
+        "notes": "переводы на ЮЛ 33 руб. электронно",
+    },
+    {
+        "bank": "Уралсиб",
+        "opening_fee": 3500,
+        "monthly_fee": 1600,
+        "notes": "150 руб. контроль банкротной операции",
+    },
+]
+
+_BANK_PRICING_FL = [
+    {
+        "bank": "ТКБ",
+        "opening_fee": 1500,
+        "monthly_fee": 0,
+        "notes": "расходные операции согласуются юристами банка",
+    },
+    {
+        "bank": "Уралсиб",
+        "opening_fee": None,
+        "monthly_fee": 0,
+        "transfer_fl_free_up_to": 100_000,
+        "notes": "переводы ФЛ до 100 тыс бесплатно, свыше — 0.2%; 150 руб. контроль банкротной операции",
+    },
+]
+
+_CARD_RULES = {
+    "realization_card": (
+        "Если введена реализация имущества, карта оформляется и подписывается "
+        "финансовым управляющим, не самим должником."
+    ),
+    "cash_withdrawal": (
+        "Снятие наличных возможно только после судебного решения о выдаче наличными."
+    ),
+    "before_realization": (
+        "До введения реализации имущества карту должнику оформить нельзя. "
+        "Сначала нужно дождаться судебного решения о введении реализации."
+    ),
+}
+
+_ADVANCE_OPENING = {
+    "allowed": True,
+    "fact": (
+        "Открыть счёт заранее можно; пока нет движений, ведение не списывается, "
+        "но стоимость открытия придётся оплатить при закрытии."
+    ),
+}
+
+_PARTNER_BANKS = {
+    "active": ["Альфа-Банк", "ТКБ", "Уралсиб"],
+    "paused": ["Т-Банк", "МКБ", "Росбанк"],
+    "fl_active": ["ТКБ", "Уралсиб"],
+    "yul_active": ["Альфа-Банк", "ТКБ", "Уралсиб"],
+}
+
+
+# ---------------------------------------------------------------------------
+# Entity extraction
+# ---------------------------------------------------------------------------
 
 def _extract_mentioned_bank(text: str) -> Optional[str]:
     lower = text.lower()
@@ -97,6 +189,93 @@ def extract_entities(text: str) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Fact pack builder
+# ---------------------------------------------------------------------------
+
+def build_fact_pack(
+    user_text: str,
+    memory: dict,
+    current_entities: dict,
+) -> dict:
+    """Собрать структурированный контракт фактов для brain.
+
+    НЕ определяет intent. Просто организует известные факты по темам
+    с приоритизацией по ключевым словам текста клиента.
+    """
+    client_type = (
+        current_entities.get("mentioned_client_type")
+        or memory.get("client_type")
+    )
+    text_lower = user_text.lower()
+    asks_card = bool(_CARD_KEYWORDS_RE.search(user_text))
+    asks_cash = bool(_CASH_KEYWORDS_RE.search(user_text))
+    asks_banks = bool(_BANK_LIST_KEYWORDS_RE.search(user_text))
+    asks_low_cost = bool(_LOW_COST_KEYWORDS_RE.search(user_text))
+
+    pack: dict = {}
+
+    # --- Банки-партнёры (всегда) ---
+    pack["partner_banks"] = _PARTNER_BANKS.copy()
+
+    # --- Тарифы для ЮЛ ---
+    if client_type in ("ЮЛ", "ИП") or not client_type:
+        pack["bank_pricing_yul"] = _BANK_PRICING_YUL
+
+    # --- Тарифы для ФЛ ---
+    if client_type == "ФЛ" or not client_type:
+        pack["bank_pricing_fl"] = _BANK_PRICING_FL
+
+    # --- Правила карты с приоритизацией ---
+    if asks_card and not asks_cash:
+        # Клиент спрашивает только про карту → primary=карта при реализации
+        pack["card_rules"] = {
+            "primary": _CARD_RULES["realization_card"],
+            "secondary": _CARD_RULES["before_realization"],
+            "related": [_CARD_RULES["cash_withdrawal"]],
+            "_note": "Клиент спрашивает про карту, не про наличные. Используй primary, не related.",
+        }
+    elif asks_cash and not asks_card:
+        # Клиент спрашивает про наличные
+        pack["card_rules"] = {
+            "primary": _CARD_RULES["cash_withdrawal"],
+            "related": [_CARD_RULES["realization_card"]],
+        }
+    else:
+        # Общий случай
+        pack["card_rules"] = {
+            "realization_card": _CARD_RULES["realization_card"],
+            "before_realization": _CARD_RULES["before_realization"],
+            "cash_withdrawal": _CARD_RULES["cash_withdrawal"],
+        }
+
+    # --- Заблаговременное открытие счёта ---
+    pack["advance_opening"] = _ADVANCE_OPENING
+
+    # --- Подсказка по "подешевле" ---
+    if asks_low_cost:
+        pack["_pricing_hint"] = (
+            "Клиент хочет 'подешевле'. Для ЮЛ сравни: "
+            "Альфа-Банк (открытие 800, ведение 800) — самый дешёвый старт; "
+            "Уралсиб (открытие 3500, ведение 1600) — выгоднее по ведению чем ТКБ; "
+            "ТКБ (открытие 2800, ведение 2090) — дешевле старт чем Уралсиб, но дороже ведение. "
+            "Помоги клиенту выбрать между дешёвым стартом и дешёвым ведением."
+        )
+
+    # --- Подсказка по списку банков ---
+    if asks_banks:
+        pack["_banks_hint"] = (
+            "Клиент спрашивает список банков. Отвечай списком: активные + на паузе. "
+            "НЕ добавляй тарифы, если клиент не просил. Уточни тип клиента (ЮЛ/ФЛ/ИП)."
+        )
+
+    return pack
+
+
+# ---------------------------------------------------------------------------
+# Main context builder
+# ---------------------------------------------------------------------------
+
 async def build_conversation_context(
     user_text: str,
     session_id: int,
@@ -125,12 +304,16 @@ async def build_conversation_context(
         "pending_question": slots.get("_pending_question"),
         "client_type": slots.get("client_type"),
         "last_answer_summary": slots.get("_last_answer_summary"),
+        "sales_context": slots.get("_sales_context"),
     }
+
+    fact_pack = build_fact_pack(user_text, memory, current_entities)
 
     return {
         "user_text": user_text,
         "recent_dialog": recent_dialog,
         "memory": memory,
         "current_entities": current_entities,
+        "fact_pack": fact_pack,
         "tools": ["calculate_transfer_fee", "search_kb"],
     }

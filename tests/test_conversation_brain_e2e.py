@@ -319,5 +319,208 @@ class TestE2EScenarios(unittest.TestCase):
         self.assertIsNotNone(_CONSENT_HARD_RE.search("готов начать"))
 
 
+# ---------------------------------------------------------------------------
+# Unit-тесты build_fact_pack
+# ---------------------------------------------------------------------------
+class TestBuildFactPack(unittest.TestCase):
+    def _pack(self, user_text, memory=None, entities=None):
+        from app.services.context_builder import build_fact_pack
+        return build_fact_pack(user_text, memory or {}, entities or {})
+
+    def test_always_has_partner_banks(self):
+        pack = self._pack("сколько стоит открытие?")
+        self.assertIn("partner_banks", pack)
+        self.assertIn("active", pack["partner_banks"])
+
+    def test_card_question_gets_card_primary(self):
+        """Вопрос про карту → primary = realization_card, _note говорит не про наличные."""
+        pack = self._pack("можно ему карту сделать?")
+        card_rules = pack.get("card_rules", {})
+        self.assertIn("primary", card_rules)
+        self.assertIn("_note", card_rules)
+        self.assertIn("карт", card_rules["primary"].lower())
+
+    def test_cash_question_gets_cash_primary(self):
+        """Вопрос про наличные → primary = cash_withdrawal."""
+        pack = self._pack("как снять наличные?")
+        card_rules = pack.get("card_rules", {})
+        self.assertIn("primary", card_rules)
+        self.assertIn("наличн", card_rules["primary"].lower())
+
+    def test_card_not_cash_separate_primary(self):
+        """Карта и наличные дают разные primary."""
+        pack_card = self._pack("сделайте карту")
+        pack_cash = self._pack("снять наличные")
+        self.assertNotEqual(
+            pack_card["card_rules"].get("primary"),
+            pack_cash["card_rules"].get("primary"),
+        )
+
+    def test_low_cost_adds_pricing_hint(self):
+        pack = self._pack("хочу подешевле")
+        self.assertIn("_pricing_hint", pack)
+        self.assertIn("Альфа", pack["_pricing_hint"])
+
+    def test_banks_list_adds_banks_hint(self):
+        pack = self._pack("с какими банками работаете?")
+        self.assertIn("_banks_hint", pack)
+
+    def test_yul_pricing_present_for_unknown_type(self):
+        """Если тип клиента неизвестен, оба набора тарифов присутствуют."""
+        pack = self._pack("сколько стоит счёт?")
+        self.assertIn("bank_pricing_yul", pack)
+        self.assertIn("bank_pricing_fl", pack)
+
+    def test_fl_client_type_excludes_yul_pricing(self):
+        """Для ФЛ bank_pricing_yul отсутствует."""
+        pack = self._pack("физлицо, сколько стоит?", entities={"mentioned_client_type": "ФЛ"})
+        self.assertNotIn("bank_pricing_yul", pack)
+        self.assertIn("bank_pricing_fl", pack)
+
+    def test_yul_client_type_excludes_fl_pricing(self):
+        """Для ЮЛ bank_pricing_fl отсутствует."""
+        pack = self._pack("ООО, сколько?", entities={"mentioned_client_type": "ЮЛ"})
+        self.assertIn("bank_pricing_yul", pack)
+        self.assertNotIn("bank_pricing_fl", pack)
+
+
+# ---------------------------------------------------------------------------
+# Новые e2e тесты (план v2, раздел 11)
+# ---------------------------------------------------------------------------
+class TestNewE2EScenarios(unittest.TestCase):
+    """Проверяют логику из плана v2 через pipeline или прямые проверки."""
+
+    def _run(self, coro):
+        return asyncio.get_event_loop().run_until_complete(coro)
+
+    def setUp(self):
+        from app.outbound.dispatcher import OutboundDispatcher
+        self.sent: list[str] = []
+
+        async def mock_send(channel: str, external_user_id: str, text: str):
+            self.sent.append(text)
+
+        async def mock_typing(channel: str, external_user_id: str):
+            pass
+
+        OutboundDispatcher.send = mock_send
+        OutboundDispatcher.send_typing = mock_typing
+
+    def _make_msg(self, text: str, user_id: str = None) -> dict:
+        return {
+            "channel": "telegram",
+            "external_user_id": user_id or f"test_{int(time.time()*1000)}",
+            "message_id": f"msg_{int(time.time()*1000)}",
+            "message_type": "text",
+            "text": text,
+        }
+
+    async def _setup_db(self):
+        from app.storage.db import engine, Base
+        from app.main import _ensure_user_columns
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            try:
+                await conn.run_sync(_ensure_user_columns)
+            except Exception:
+                pass
+
+    # TEST 8: card question → fact_pack primary = realization_card (not cash)
+    def test_8_card_question_not_cash_withdrawal(self):
+        """fact_pack для 'карту сделать' → primary содержит реализацию, не суд."""
+        from app.services.context_builder import build_fact_pack
+        pack = build_fact_pack("можно ему карту сделать?", {}, {})
+        card_rules = pack.get("card_rules", {})
+        primary = card_rules.get("primary", "")
+        # primary должен говорить о реализации, не о наличных/суде
+        self.assertIn("реализац", primary.lower(), f"primary не про реализацию: {primary}")
+        self.assertNotIn("суд", primary.lower(), f"primary говорит про суд: {primary}")
+
+    # TEST 9: card followup "что делать до реализации"
+    def test_9_card_followup_before_realization(self):
+        """fact_pack для 'что делать пока нет реализации' → secondary/before_realization присутствует."""
+        from app.services.context_builder import build_fact_pack
+        pack = build_fact_pack("что делать пока нет реализации?", {}, {})
+        card_rules = pack.get("card_rules", {})
+        # general case — все три правила присутствуют
+        all_text = " ".join(str(v) for v in card_rules.values()).lower()
+        self.assertIn("реализац", all_text, "card_rules не содержит информацию о реализации")
+
+    # TEST 10: open_account_request → validator требует handoff или request_data
+    def test_10_open_account_request_triggers_handoff_or_request_data(self):
+        """'счет откройте мне' → validator отклоняет ответ без handoff."""
+        from app.services.response_validator import validate_reply
+        result = validate_reply(
+            reply="Конечно, откроем вам счёт прямо сейчас!",
+            brain_result={"handoff": {"needed": False}, "action": "answer"},
+            current_entities={},
+            slots={},
+            user_text="счет откройте мне",
+        )
+        self.assertFalse(result["is_valid"])
+        # Причина должна быть про handoff или promised_action
+        self.assertTrue(
+            "handoff" in result["reason"] or "promised_action" in result["reason"],
+            f"Неожиданная причина: {result['reason']}",
+        )
+
+    # TEST 11: partner banks list complete — все активные банки в partner_banks
+    def test_11_partner_banks_list_complete(self):
+        """partner_banks.active содержит все три банка."""
+        from app.services.context_builder import build_fact_pack
+        pack = build_fact_pack("с какими банками работаете?", {}, {})
+        active = pack["partner_banks"]["active"]
+        for bank in ["Альфа-Банк", "ТКБ", "Уралсиб"]:
+            self.assertIn(bank, active, f"{bank} отсутствует в active banks")
+
+    # TEST 12: low_cost_yul uses all tariffs — _pricing_hint содержит все банки
+    def test_12_low_cost_yul_uses_all_tariffs(self):
+        """_pricing_hint для 'подешевле' содержит все активные банки ЮЛ."""
+        from app.services.context_builder import build_fact_pack
+        pack = build_fact_pack("хочу подешевле для ООО", {}, {"mentioned_client_type": "ЮЛ"})
+        hint = pack.get("_pricing_hint", "")
+        for bank in ["Альфа", "ТКБ", "Уралсиб"]:
+            self.assertIn(bank, hint, f"{bank} отсутствует в _pricing_hint")
+
+    # TEST 13: account tariffs compact — bank_pricing_yul содержит нужные поля
+    def test_13_account_tariffs_compact(self):
+        """bank_pricing_yul содержит opening_fee, monthly_fee для всех трёх банков."""
+        from app.services.context_builder import build_fact_pack
+        pack = build_fact_pack("тарифы на счёт", {}, {})
+        yul = pack.get("bank_pricing_yul", [])
+        self.assertEqual(len(yul), 3, f"Ожидалось 3 банка ЮЛ, получено {len(yul)}")
+        for entry in yul:
+            self.assertIn("bank", entry)
+            self.assertIn("opening_fee", entry)
+            self.assertIn("monthly_fee", entry)
+
+    # TEST 14: no promised action without handoff — validator отклоняет "откроем"
+    def test_14_no_promised_action_without_handoff(self):
+        """Ответ с 'откроем' без handoff → validator отклоняет."""
+        from app.services.response_validator import validate_reply
+        result = validate_reply(
+            reply="Хорошо, откроем вам счёт в Альфа-Банке.",
+            brain_result={"handoff": {"needed": False}, "action": "answer"},
+            current_entities={},
+            slots={},
+            user_text="хочу открыть счёт",
+        )
+        self.assertFalse(result["is_valid"])
+        self.assertEqual(result["reason"], "promised_action_without_handoff")
+
+    # TEST 15: promised action WITH handoff → valid
+    def test_15_promised_action_with_handoff_is_valid(self):
+        """С handoff.needed=true 'откроем' в ответе допустимо."""
+        from app.services.response_validator import validate_reply
+        result = validate_reply(
+            reply="Да, откроем счёт. Нужен ИНН должника.",
+            brain_result={"handoff": {"needed": True}, "action": "handoff"},
+            current_entities={},
+            slots={"_had_consent": True},
+            user_text="хочу открыть",
+        )
+        self.assertTrue(result["is_valid"], f"Ожидался valid, reason={result['reason']}")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
