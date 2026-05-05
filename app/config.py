@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     OLLAMA_ANALYZER_MAX_TOKENS: int = 400
     OLLAMA_ENRICHMENT_MAX_TOKENS: int = 400
     OLLAMA_ESCALATION_MAX_TOKENS: int = 500
+    TIMEWEB_BRAIN_MAX_TOKENS: int = 450
+    OLLAMA_BRAIN_MAX_TOKENS: int = 450
     OLLAMA_NUM_CTX: int = 4096
 
     # MVP stability switches

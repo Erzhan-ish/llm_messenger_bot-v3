@@ -129,7 +129,13 @@ handoff.needed=true ТОЛЬКО при явных фразах:
 - price_priority: low_opening|low_monthly|null
 - ready_to_open: true|false
 
-Верни строго JSON без markdown-обёртки:
+ВАЖНО — ФОРМАТ ВЫВОДА:
+- Не копируй CONTEXT_DO_NOT_COPY в ответ.
+- Не возвращай user_message, recent_dialog, memory, kb_facts или fact_pack.
+- Верни только поля из OUTPUT_SCHEMA.
+- Никакого текста вне JSON. Никакого markdown (без ```).
+
+<OUTPUT_SCHEMA>
 {
   "reply": "текст клиенту или null (если нужен tool)",
   "action": "answer|ask_clarification|request_data|handoff|stop",
@@ -158,6 +164,7 @@ handoff.needed=true ТОЛЬКО при явных фразах:
   "stop": false,
   "confidence": 0.0
 }
+</OUTPUT_SCHEMA>
 """.strip()
 
 REPAIR_PROMPT = """
@@ -177,16 +184,109 @@ REPAIR_PROMPT = """
 """.strip()
 
 
+_BRAIN_RESULT_KEYS = frozenset({"reply", "action", "needs_tool", "state_update", "handoff", "stop"})
+_INPUT_CONTEXT_KEYS = frozenset({"user_message", "recent_dialog", "memory", "kb_facts", "fact_pack"})
+
+_REPAIR_JSON_PROMPT = (
+    "Ты вернул невалидный JSON или скопировал входной контекст.\n"
+    "Верни только один JSON-объект по схеме: "
+    "{reply, action, needs_tool, state_update, handoff, stop, confidence}.\n"
+    "Не копируй user_message, recent_dialog, memory, kb_facts, fact_pack.\n"
+    "Никакого markdown, никакого текста вне JSON."
+)
+
+
+def _looks_like_brain_result(obj: object) -> bool:
+    if not isinstance(obj, dict):
+        return False
+    if not (_BRAIN_RESULT_KEYS & obj.keys()):
+        return False
+    # Reject input context objects that leaked brain keys
+    if _INPUT_CONTEXT_KEYS & obj.keys() and not ("reply" in obj or "action" in obj):
+        return False
+    return True
+
+
 def _extract_json(raw: str) -> dict:
+    """Устойчивый парсер brain JSON с тремя fallback стратегиями."""
     raw = (raw or "").strip()
-    m = re.search(r"\{.*\}", raw, flags=re.S)
-    if not m:
-        raise ValueError(f"no JSON in brain response: {raw[:200]!r}")
-    return json.loads(m.group(0))
+
+    # 1. Direct parse
+    try:
+        obj = json.loads(raw)
+        if _looks_like_brain_result(obj):
+            return obj
+    except json.JSONDecodeError:
+        pass
+
+    # 2. Fenced ```json block
+    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, flags=re.S)
+    if m:
+        try:
+            obj = json.loads(m.group(1))
+            if _looks_like_brain_result(obj):
+                return obj
+        except json.JSONDecodeError:
+            pass
+
+    # 3. Scan all { positions and collect valid brain-result candidates
+    decoder = json.JSONDecoder()
+    candidates: list[dict] = []
+    idx = 0
+    while idx < len(raw):
+        pos = raw.find("{", idx)
+        if pos == -1:
+            break
+        try:
+            obj, _ = decoder.raw_decode(raw, pos)
+            if _looks_like_brain_result(obj):
+                candidates.append(obj)
+        except json.JSONDecodeError:
+            pass
+        idx = pos + 1
+
+    if candidates:
+        # Prefer the object that has reply or action directly
+        for c in candidates:
+            if "reply" in c or "action" in c:
+                return c
+        return candidates[0]
+
+    raise ValueError(f"no valid brain JSON: {raw[:200]!r}")
+
+
+def normalize_brain_result(obj: dict) -> dict:
+    """Нормализовать структуру brain result — заполнить все недостающие поля."""
+    # handoff: bool → dict
+    handoff = obj.get("handoff")
+    if isinstance(handoff, bool):
+        obj["handoff"] = {"needed": handoff, "reason": None}
+    elif not isinstance(handoff, dict):
+        obj["handoff"] = {"needed": False, "reason": None}
+    else:
+        obj["handoff"].setdefault("needed", False)
+        obj["handoff"].setdefault("reason", None)
+
+    # needs_tool: None / "none" / bare string → dict
+    needs_tool = obj.get("needs_tool")
+    if needs_tool is None or needs_tool == "none":
+        obj["needs_tool"] = {"name": "none", "args": {}}
+    elif isinstance(needs_tool, str):
+        obj["needs_tool"] = {"name": needs_tool, "args": {}}
+    elif isinstance(needs_tool, dict):
+        obj["needs_tool"].setdefault("name", "none")
+        obj["needs_tool"].setdefault("args", {})
+
+    obj.setdefault("confidence", 0.0)
+    obj.setdefault("action", "answer")
+    obj.setdefault("reply", None)
+    obj.setdefault("stop", False)
+    obj.setdefault("state_update", {})
+    return obj
 
 
 def _default_brain_response() -> dict:
-    return {
+    return normalize_brain_result({
         "reply": None,
         "action": "answer",
         "needs_tool": {"name": "none", "args": {}},
@@ -201,7 +301,29 @@ def _default_brain_response() -> dict:
         "handoff": {"needed": False, "reason": None},
         "stop": False,
         "confidence": 0.0,
-    }
+    })
+
+
+async def _repair_brain_json(raw: str) -> dict | None:
+    """Попросить LLM исправить невалидный JSON brain result."""
+    messages = [
+        {"role": "system", "content": _REPAIR_JSON_PROMPT},
+        {"role": "user", "content": f"Исправь:\n{raw[:3000]}"},
+    ]
+    try:
+        repaired_raw = await ask_llm(messages, max_tokens=_budget("BRAIN"))
+        return normalize_brain_result(_extract_json(repaired_raw))
+    except Exception:
+        logger.exception("_repair_brain_json failed")
+        return None
+
+
+def _build_user_message(payload: dict) -> str:
+    return (
+        "<CONTEXT_DO_NOT_COPY>\n"
+        + json.dumps(payload, ensure_ascii=False)
+        + "\n</CONTEXT_DO_NOT_COPY>"
+    )
 
 
 async def run_conversation_brain(
@@ -224,11 +346,16 @@ async def run_conversation_brain(
 
     messages = [
         {"role": "system", "content": BRAIN_SYSTEM_PROMPT},
-        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        {"role": "user", "content": _build_user_message(payload)},
     ]
     try:
-        raw = await ask_llm(messages, max_tokens=_budget("RENDER"))
-        result = _extract_json(raw)
+        raw = await ask_llm(messages, max_tokens=_budget("BRAIN"))
+        try:
+            result = _extract_json(raw)
+        except ValueError:
+            logger.warning("ConversationBrain | JSON parse failed — trying repair")
+            result = await _repair_brain_json(raw) or _default_brain_response()
+        result = normalize_brain_result(result)
         logger.info(
             "ConversationBrain | action={} | reply_len={} | needs_tool={} | handoff={} | conf={}",
             result.get("action"),
@@ -252,7 +379,7 @@ async def conversation_brain_repair(
     tool_results: dict | None = None,
     fact_pack: dict | None = None,
 ) -> str | None:
-    """Попросить LLM исправить неверный ответ."""
+    """Попросить LLM исправить неверный текст ответа."""
     payload = {
         "previous_reply": previous_reply,
         "error": validation_error,
@@ -267,7 +394,7 @@ async def conversation_brain_repair(
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]
     try:
-        raw = await ask_llm(messages, max_tokens=_budget("RENDER"))
+        raw = await ask_llm(messages, max_tokens=_budget("BRAIN"))
         from app.processing.utils import cleanup_text
         return cleanup_text(raw)
     except Exception:

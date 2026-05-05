@@ -664,5 +664,99 @@ class TestPlanV11(unittest.TestCase):
         self.assertTrue(ctx["memory"].get("_introduced"))
 
 
+# ---------------------------------------------------------------------------
+# Тесты плана v12: устойчивый JSON-парсер и нормализация
+# ---------------------------------------------------------------------------
+class TestBrainJsonParsing(unittest.TestCase):
+
+    def setUp(self):
+        from app.services.conversation_brain import _extract_json, normalize_brain_result, _looks_like_brain_result
+        self._extract = _extract_json
+        self._normalize = normalize_brain_result
+        self._looks = _looks_like_brain_result
+
+    # test_extract_json_valid_raw
+    def test_extract_json_valid_raw(self):
+        """Чистый JSON → парсится напрямую."""
+        raw = '{"reply": "Привет", "action": "answer", "handoff": {"needed": false}}'
+        obj = self._extract(raw)
+        self.assertEqual(obj["reply"], "Привет")
+
+    # test_extract_json_fenced_json
+    def test_extract_json_fenced_json(self):
+        """```json ... ``` — парсится через fenced block."""
+        raw = 'Вот ответ:\n```json\n{"reply": "ТКБ", "action": "answer"}\n```'
+        obj = self._extract(raw)
+        self.assertEqual(obj["reply"], "ТКБ")
+
+    # test_extract_json_ignores_input_context
+    def test_extract_json_ignores_input_context(self):
+        """Объект с user_message/recent_dialog без reply/action → не является brain result."""
+        ctx_obj = {"user_message": "привет", "recent_dialog": [], "memory": {}, "fact_pack": {}}
+        self.assertFalse(self._looks(ctx_obj))
+
+    # test_extract_json_scans_multiple_objects_and_selects_brain_result
+    def test_extract_json_scans_multiple_objects_selects_brain(self):
+        """Если в raw два объекта, берём brain result (с reply/action)."""
+        input_ctx = '{"user_message": "test", "recent_dialog": []}'
+        brain_out = '{"reply": "Альфа-Банк", "action": "answer", "handoff": {"needed": false}}'
+        raw = input_ctx + "\n" + brain_out
+        obj = self._extract(raw)
+        self.assertEqual(obj["reply"], "Альфа-Банк")
+
+    # test_normalize_brain_result_defaults
+    def test_normalize_brain_result_defaults(self):
+        """normalize_brain_result заполняет все дефолтные поля."""
+        obj = self._normalize({"reply": "Привет"})
+        self.assertEqual(obj["action"], "answer")
+        self.assertEqual(obj["confidence"], 0.0)
+        self.assertFalse(obj["stop"])
+        self.assertIsInstance(obj["needs_tool"], dict)
+        self.assertEqual(obj["needs_tool"]["name"], "none")
+        self.assertIsInstance(obj["handoff"], dict)
+        self.assertFalse(obj["handoff"]["needed"])
+
+    # test_handoff_bool_normalized
+    def test_handoff_bool_normalized(self):
+        """handoff: true → {"needed": true, "reason": null}."""
+        obj = self._normalize({"reply": "OK", "handoff": True})
+        self.assertIsInstance(obj["handoff"], dict)
+        self.assertTrue(obj["handoff"]["needed"])
+        self.assertIsNone(obj["handoff"]["reason"])
+
+    # test_needs_tool_none_normalized
+    def test_needs_tool_none_normalized(self):
+        """needs_tool: None → {"name": "none", "args": {}}."""
+        obj = self._normalize({"reply": "OK", "needs_tool": None})
+        self.assertEqual(obj["needs_tool"], {"name": "none", "args": {}})
+
+    # test_needs_tool_string_normalized
+    def test_needs_tool_string_normalized(self):
+        """needs_tool: "calculate_transfer_fee" → dict."""
+        obj = self._normalize({"reply": "OK", "needs_tool": "calculate_transfer_fee"})
+        self.assertEqual(obj["needs_tool"]["name"], "calculate_transfer_fee")
+
+    # test_safe_fallback_uralsib_conditions
+    def test_safe_fallback_uralsib_conditions(self):
+        """_build_context_fallback с банком Уралсиб → содержит тарифы из fact_pack."""
+        from app.services.context_builder import build_fact_pack
+        from app.processing.message_processor import _build_context_fallback
+        fact_pack = build_fact_pack("условия", {}, {"mentioned_bank": "Уралсиб"})
+        result = _build_context_fallback(
+            fact_pack,
+            {"mentioned_bank": "Уралсиб"},
+            {"client_type": "ЮЛ"},
+        )
+        self.assertIn("Уралсиб", result)
+        self.assertIn("3500", result)
+
+    # test_safe_fallback_generic_when_no_bank
+    def test_safe_fallback_generic_when_no_bank(self):
+        """_build_context_fallback без банка → generic фраза."""
+        from app.processing.message_processor import _build_context_fallback
+        result = _build_context_fallback({}, {}, {})
+        self.assertIn("уточняю", result.lower())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

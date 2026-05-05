@@ -75,6 +75,33 @@ _READY_FOLLOWUP_RE = re.compile(
 )
 
 
+def _build_context_fallback(fact_pack: dict, current_entities: dict, slots: dict) -> str:
+    """Fallback на основе известных фактов, а не generic-фраза."""
+    bank = current_entities.get("mentioned_bank") or slots.get("_last_bank")
+    client_type = slots.get("client_type")
+    if bank:
+        pricing_key = "bank_pricing_fl" if client_type == "ФЛ" else "bank_pricing_yul"
+        for entry in (fact_pack.get(pricing_key) or []):
+            if entry.get("bank") == bank:
+                parts: list[str] = []
+                opening = entry.get("opening_fee")
+                monthly = entry.get("monthly_fee")
+                notes = entry.get("notes", "")
+                if opening is not None:
+                    parts.append(f"открытие {opening} руб.")
+                if monthly is not None:
+                    parts.append(f"ведение {monthly} руб. в месяц")
+                if notes:
+                    parts.append(notes)
+                if parts:
+                    ct = "для ФЛ" if client_type == "ФЛ" else "для юрлица"
+                    return (
+                        f"По {bank} {ct}: {', '.join(parts)}. "
+                        f"Разобрать документы или сроки?"
+                    )
+    return "Секунду, уточняю информацию. Какой именно вопрос вас интересует?"
+
+
 def _merge_trailing_user_messages(msgs: list, current_text: str, *, max_items: int = 3) -> str:
     collected: list[str] = []
     for m in reversed(msgs or []):
@@ -444,8 +471,8 @@ async def process_message(message):
 
         # 10. Fallback if still no reply
         if not reply or not reply.strip():
-            logger.warning("Session {} | Brain returned no reply — using fallback", session.id)
-            reply = "Секунду, уточняю информацию. Какой именно вопрос вас интересует?"
+            logger.warning("Session {} | Brain returned no reply — using context fallback", session.id)
+            reply = _build_context_fallback(fact_pack, current_entities, slots)
 
         # 11. Dynamic greeting injection (only for first turn)
         if (
