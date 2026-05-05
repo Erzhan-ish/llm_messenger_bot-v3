@@ -1,9 +1,9 @@
 {
-  "version": 4,
+  "version": 5,
   "meta": {
     "source_path": "knowledge_base.txt",
-    "source_mtime": 1777969670.5371907,
-    "source_sha256": "04f6051005291a17a327aa63f581c55b0a3e0dff804fe4bed0b907cf9401be0f"
+    "source_mtime": 1777974291.4753664,
+    "source_sha256": "731dca78e467ac64861a53b92fe6f562e5c6091a113985ae1af0b6a2af4f21fd"
   },
   "chunks": [
     {
@@ -28,8 +28,11 @@
       ],
       "fact": "ООО «В плюсе» — партнер банков Альфа-Банк, ТКБ, Уралсиб, МКБ, Т-Банк и Росбанк. Компания помогает арбитражным управляющим открывать и сопровождать счета должников в процедурах банкротства.",
       "positioning": null,
-      "search_text": "company_info about ооо «в плюсе» — партнер банков альфа-банк, ткб, уралсиб, мкб, т-банк и росбанк. компания помогает арбитражным управляющим открывать и сопровождать счета должников в процедурах банкротства. company_info about partners",
-      "is_internal": false
+      "search_text": "company_info about ооо «в плюсе» — партнер банков альфа-банк, ткб, уралсиб, мкб, т-банк и росбанк. компания помогает арбитражным управляющим открывать и сопровождать счета должников в процедурах банкротства. partner_banks company_info about partners",
+      "is_internal": false,
+      "scenario_id": "partner_banks",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 2,
@@ -54,8 +57,11 @@
       ],
       "fact": "Компания предоставляет льготные тарифы по сравнению с прямым обращением в банк и помогает с бюрократией, документами, коммуникацией с банками и финмониторингом.",
       "positioning": null,
-      "search_text": "feature benefits компания предоставляет льготные тарифы по сравнению с прямым обращением в банк и помогает с бюрократией, документами, коммуникацией с банками и финмониторингом. feature benefits tariffs service",
-      "is_internal": false
+      "search_text": "feature benefits компания предоставляет льготные тарифы по сравнению с прямым обращением в банк и помогает с бюрократией, документами, коммуникацией с банками и финмониторингом. partner_banks feature benefits tariffs service",
+      "is_internal": false,
+      "scenario_id": "partner_banks",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 3,
@@ -86,8 +92,11 @@
       ],
       "fact": "Альфа-Банк открывает счета только юридическим лицам.",
       "positioning": null,
-      "search_text": "availability альфа-банк альфа-банк открывает счета только юридическим лицам. юл альфа alfabank alpha availability bank yul active",
-      "is_internal": false
+      "search_text": "availability альфа-банк альфа-банк открывает счета только юридическим лицам. partner_banks юл альфа alfabank alpha availability bank yul active",
+      "is_internal": false,
+      "scenario_id": "partner_banks",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 4,
@@ -118,8 +127,11 @@
       ],
       "fact": "ТКБ открывает счета юридическим лицам.",
       "positioning": null,
-      "search_text": "availability ткб ткб открывает счета юридическим лицам. юл ткб транскапиталбанк transcapitalbank availability bank yul active",
-      "is_internal": false
+      "search_text": "availability ткб ткб открывает счета юридическим лицам. partner_banks юл ткб транскапиталбанк transcapitalbank availability bank yul active",
+      "is_internal": false,
+      "scenario_id": "partner_banks",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 5,
@@ -150,8 +162,11 @@
       ],
       "fact": "ТКБ открывает счета физическим лицам.",
       "positioning": null,
-      "search_text": "availability ткб ткб открывает счета физическим лицам. фл ткб транскапиталбанк transcapitalbank availability bank fl active",
-      "is_internal": false
+      "search_text": "availability ткб ткб открывает счета физическим лицам. partner_banks фл ткб транскапиталбанк transcapitalbank availability bank fl active",
+      "is_internal": false,
+      "scenario_id": "partner_banks",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 6,
@@ -182,8 +197,11 @@
       ],
       "fact": "Уралсиб открывает счета юридическим лицам в сегменте «Малый бизнес».",
       "positioning": null,
-      "search_text": "availability уралсиб уралсиб открывает счета юридическим лицам в сегменте «малый бизнес». юл уралсиб uralsib availability bank yul active small_business",
-      "is_internal": false
+      "search_text": "availability уралсиб уралсиб открывает счета юридическим лицам в сегменте «малый бизнес». partner_banks юл уралсиб uralsib availability bank yul active small_business",
+      "is_internal": false,
+      "scenario_id": "partner_banks",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 7,
@@ -214,8 +232,11 @@
       ],
       "fact": "Уралсиб в сегменте «Средний бизнес» временно не открывает счета.",
       "positioning": null,
-      "search_text": "availability уралсиб уралсиб в сегменте «средний бизнес» временно не открывает счета. юл уралсиб uralsib availability bank yul pause medium_business",
-      "is_internal": false
+      "search_text": "availability уралсиб уралсиб в сегменте «средний бизнес» временно не открывает счета. partner_banks юл уралсиб uralsib availability bank yul pause medium_business",
+      "is_internal": false,
+      "scenario_id": "partner_banks",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 8,
@@ -247,8 +268,11 @@
       ],
       "fact": "Т-Банк открывает счета только юридическим лицам, но сейчас открытие временно приостановлено.",
       "positioning": null,
-      "search_text": "availability т-банк т-банк открывает счета только юридическим лицам, но сейчас открытие временно приостановлено. юл т-банк тинькофф tbank tinkoff availability bank yul pause",
-      "is_internal": false
+      "search_text": "availability т-банк т-банк открывает счета только юридическим лицам, но сейчас открытие временно приостановлено. partner_banks юл т-банк тинькофф tbank tinkoff availability bank yul pause",
+      "is_internal": false,
+      "scenario_id": "partner_banks",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 9,
@@ -278,8 +302,11 @@
       ],
       "fact": "МКБ открывает счета только юридическим лицам, но сейчас открытие временно приостановлено.",
       "positioning": null,
-      "search_text": "availability мкб мкб открывает счета только юридическим лицам, но сейчас открытие временно приостановлено. юл мкб mkb availability bank yul pause",
-      "is_internal": false
+      "search_text": "availability мкб мкб открывает счета только юридическим лицам, но сейчас открытие временно приостановлено. partner_banks юл мкб mkb availability bank yul pause",
+      "is_internal": false,
+      "scenario_id": "partner_banks",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 10,
@@ -309,8 +336,11 @@
       ],
       "fact": "Росбанк открывает счета юридическим лицам, но сейчас открытие временно приостановлено.",
       "positioning": null,
-      "search_text": "availability росбанк росбанк открывает счета юридическим лицам, но сейчас открытие временно приостановлено. юл росбанк rosbank availability bank yul pause",
-      "is_internal": false
+      "search_text": "availability росбанк росбанк открывает счета юридическим лицам, но сейчас открытие временно приостановлено. partner_banks юл росбанк rosbank availability bank yul pause",
+      "is_internal": false,
+      "scenario_id": "partner_banks",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 11,
@@ -341,8 +371,11 @@
       ],
       "fact": "Открытие счета для юридического лица в Альфа-Банке стоит 800 руб.",
       "positioning": null,
-      "search_text": "pricing альфа-банк opening_fee 800 руб. открытие счета для юридического лица в альфа-банке стоит 800 руб. юл альфа alfabank alpha pricing opening_fee yul active",
-      "is_internal": false
+      "search_text": "pricing альфа-банк opening_fee 800 руб. открытие счета для юридического лица в альфа-банке стоит 800 руб. alfabank_yul_conditions юл альфа alfabank alpha pricing opening_fee yul active",
+      "is_internal": false,
+      "scenario_id": "alfabank_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 12,
@@ -373,8 +406,11 @@
       ],
       "fact": "Ведение счета для юридического лица в Альфа-Банке стоит 800 руб.",
       "positioning": null,
-      "search_text": "pricing альфа-банк monthly_fee 800 руб. ведение счета для юридического лица в альфа-банке стоит 800 руб. юл альфа alfabank alpha pricing monthly_fee yul active",
-      "is_internal": false
+      "search_text": "pricing альфа-банк monthly_fee 800 руб. ведение счета для юридического лица в альфа-банке стоит 800 руб. alfabank_yul_conditions юл альфа alfabank alpha pricing monthly_fee yul active",
+      "is_internal": false,
+      "scenario_id": "alfabank_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 13,
@@ -405,8 +441,11 @@
       ],
       "fact": "Контроль банкротных операций в Альфа-Банке бесплатен.",
       "positioning": null,
-      "search_text": "pricing альфа-банк bankruptcy_control_fee 0 руб. контроль банкротных операций в альфа-банке бесплатен. юл альфа alfabank alpha pricing control_fee yul active",
-      "is_internal": false
+      "search_text": "pricing альфа-банк bankruptcy_control_fee 0 руб. контроль банкротных операций в альфа-банке бесплатен. alfabank_yul_conditions юл альфа alfabank alpha pricing control_fee yul active",
+      "is_internal": false,
+      "scenario_id": "alfabank_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 14,
@@ -437,8 +476,11 @@
       ],
       "fact": "Перевод на юридическое лицо в Альфа-Банке стоит 35 руб.",
       "positioning": null,
-      "search_text": "pricing альфа-банк transfer_to_yul_fee 35 руб. перевод на юридическое лицо в альфа-банке стоит 35 руб. юл альфа alfabank alpha pricing transfer_fee yul active",
-      "is_internal": false
+      "search_text": "pricing альфа-банк transfer_to_yul_fee 35 руб. перевод на юридическое лицо в альфа-банке стоит 35 руб. alfabank_yul_conditions юл альфа alfabank alpha pricing transfer_fee yul active",
+      "is_internal": false,
+      "scenario_id": "alfabank_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 15,
@@ -470,8 +512,11 @@
       ],
       "fact": "Переводы на физических лиц, возврат задатков и вознаграждение АУ на ФЛ в Альфа-Банке стоят 0% до 150 000 руб. и 0.5% свыше 150 000 руб.",
       "positioning": null,
-      "search_text": "pricing альфа-банк transfer_to_fl_fee до 150 000 руб. — 0%; свыше 150 000 руб. — 0.5% переводы на физических лиц, возврат задатков и вознаграждение ау на фл в альфа-банке стоят 0% до 150 000 руб. и 0.5% свыше 150 000 руб. юл альфа alfabank alpha pricing transfer_fee fl yul active",
-      "is_internal": false
+      "search_text": "pricing альфа-банк transfer_to_fl_fee до 150 000 руб. — 0%; свыше 150 000 руб. — 0.5% переводы на физических лиц, возврат задатков и вознаграждение ау на фл в альфа-банке стоят 0% до 150 000 руб. и 0.5% свыше 150 000 руб. alfabank_yul_conditions юл альфа alfabank alpha pricing transfer_fee fl yul active",
+      "is_internal": false,
+      "scenario_id": "alfabank_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 16,
@@ -502,8 +547,11 @@
       ],
       "fact": "Вознаграждение АУ на юридическое лицо в Альфа-Банке стоит 35 руб.",
       "positioning": null,
-      "search_text": "pricing альфа-банк au_reward_to_yul_fee 35 руб. вознаграждение ау на юридическое лицо в альфа-банке стоит 35 руб. юл альфа alfabank alpha pricing au_reward yul active",
-      "is_internal": false
+      "search_text": "pricing альфа-банк au_reward_to_yul_fee 35 руб. вознаграждение ау на юридическое лицо в альфа-банке стоит 35 руб. alfabank_yul_conditions юл альфа alfabank alpha pricing au_reward yul active",
+      "is_internal": false,
+      "scenario_id": "alfabank_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 17,
@@ -534,8 +582,11 @@
       ],
       "fact": "Открытие счета для юридического лица в ТКБ снижено с базовых 25 000 руб. до 2 800 руб.",
       "positioning": null,
-      "search_text": "pricing ткб opening_fee 2 800 руб. открытие счета для юридического лица в ткб снижено с базовых 25 000 руб. до 2 800 руб. юл ткб транскапиталбанк transcapitalbank pricing opening_fee yul active",
-      "is_internal": false
+      "search_text": "pricing ткб opening_fee 2 800 руб. открытие счета для юридического лица в ткб снижено с базовых 25 000 руб. до 2 800 руб. tkb_yul_conditions юл ткб транскапиталбанк transcapitalbank pricing opening_fee yul active",
+      "is_internal": false,
+      "scenario_id": "tkb_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 18,
@@ -566,8 +617,11 @@
       ],
       "fact": "Ведение счета для юридического лица в ТКБ стоит 2 090 руб.",
       "positioning": null,
-      "search_text": "pricing ткб monthly_fee 2 090 руб. ведение счета для юридического лица в ткб стоит 2 090 руб. юл ткб транскапиталбанк transcapitalbank pricing monthly_fee yul active",
-      "is_internal": false
+      "search_text": "pricing ткб monthly_fee 2 090 руб. ведение счета для юридического лица в ткб стоит 2 090 руб. tkb_yul_conditions юл ткб транскапиталбанк transcapitalbank pricing monthly_fee yul active",
+      "is_internal": false,
+      "scenario_id": "tkb_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 19,
@@ -598,8 +652,11 @@
       ],
       "fact": "Переводы на юридических лиц в ТКБ стоят 33 руб. электронно и 400 руб. на бумажном носителе.",
       "positioning": null,
-      "search_text": "pricing ткб transfer_to_yul_fee 33 руб. электронно; 400 руб. на бумажном носителе переводы на юридических лиц в ткб стоят 33 руб. электронно и 400 руб. на бумажном носителе. юл ткб транскапиталбанк transcapitalbank pricing transfer_fee yul active",
-      "is_internal": false
+      "search_text": "pricing ткб transfer_to_yul_fee 33 руб. электронно; 400 руб. на бумажном носителе переводы на юридических лиц в ткб стоят 33 руб. электронно и 400 руб. на бумажном носителе. tkb_yul_conditions юл ткб транскапиталбанк transcapitalbank pricing transfer_fee yul active",
+      "is_internal": false,
+      "scenario_id": "tkb_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 20,
@@ -631,8 +688,11 @@
       ],
       "fact": "Переводы на физических лиц в ТКБ тарифицируются по сумме и дополнительно включают 33 руб. за платежку.",
       "positioning": null,
-      "search_text": "pricing ткб transfer_to_fl_fee до 150 000 руб. — 0.5% + 33 руб.; 150 001–500 000 руб. — 1% + 33 руб.; 500 001–1 500 000 руб. — 1.7% + 33 руб.; 1 500 001–5 000 000 руб. — 3.5% + 33 руб.; свыше 5 000 000 руб. — 4% + 33 руб. переводы на физических лиц в ткб тарифицируются по сумме и дополнительно включают 33 руб. за платежку. юл ткб транскапиталбанк transcapitalbank pricing transfer_fee fl yul active",
-      "is_internal": false
+      "search_text": "pricing ткб transfer_to_fl_fee до 150 000 руб. — 0.5% + 33 руб.; 150 001–500 000 руб. — 1% + 33 руб.; 500 001–1 500 000 руб. — 1.7% + 33 руб.; 1 500 001–5 000 000 руб. — 3.5% + 33 руб.; свыше 5 000 000 руб. — 4% + 33 руб. переводы на физических лиц в ткб тарифицируются по сумме и дополнительно включают 33 руб. за платежку. tkb_yul_conditions юл ткб транскапиталбанк transcapitalbank pricing transfer_fee fl yul active",
+      "is_internal": false,
+      "scenario_id": "tkb_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 21,
@@ -663,8 +723,11 @@
       ],
       "fact": "Вознаграждение АУ на юридическое лицо в ТКБ стоит 33 руб.",
       "positioning": null,
-      "search_text": "pricing ткб au_reward_to_yul_fee 33 руб. вознаграждение ау на юридическое лицо в ткб стоит 33 руб. юл ткб транскапиталбанк transcapitalbank pricing au_reward yul active",
-      "is_internal": false
+      "search_text": "pricing ткб au_reward_to_yul_fee 33 руб. вознаграждение ау на юридическое лицо в ткб стоит 33 руб. tkb_yul_conditions юл ткб транскапиталбанк transcapitalbank pricing au_reward yul active",
+      "is_internal": false,
+      "scenario_id": "tkb_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 22,
@@ -685,7 +748,12 @@
       "aliases": [
         "ткб",
         "транскапиталбанк",
-        "transcapitalbank"
+        "transcapitalbank",
+        "согласование",
+        "юристы",
+        "банка",
+        "расходные",
+        "операции"
       ],
       "tags": [
         "feature",
@@ -695,8 +763,11 @@
       ],
       "fact": "Все расходные операции по физическим лицам в ТКБ проходят согласование через юристов банка, документы нужно присылать заранее.",
       "positioning": null,
-      "search_text": "feature ткб operations_review все расходные операции по физическим лицам в ткб проходят согласование через юристов банка, документы нужно присылать заранее. фл ткб транскапиталбанк transcapitalbank feature operations_review fl active",
-      "is_internal": false
+      "search_text": "feature ткб operations_review все расходные операции по физическим лицам в ткб проходят согласование через юристов банка, документы нужно присылать заранее. tkb_fl_conditions фл ткб транскапиталбанк transcapitalbank согласование юристы банка расходные операции feature operations_review fl active",
+      "is_internal": false,
+      "scenario_id": "tkb_fl_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 23,
@@ -727,8 +798,11 @@
       ],
       "fact": "Открытие счета для физического лица в ТКБ снижено до 1 500 руб.",
       "positioning": null,
-      "search_text": "pricing ткб opening_fee 1 500 руб. открытие счета для физического лица в ткб снижено до 1 500 руб. фл ткб транскапиталбанк transcapitalbank pricing opening_fee fl active",
-      "is_internal": false
+      "search_text": "pricing ткб opening_fee 1 500 руб. открытие счета для физического лица в ткб снижено до 1 500 руб. tkb_fl_conditions фл ткб транскапиталбанк transcapitalbank pricing opening_fee fl active",
+      "is_internal": false,
+      "scenario_id": "tkb_fl_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 24,
@@ -759,8 +833,11 @@
       ],
       "fact": "Ведение счета для физического лица в ТКБ бесплатно.",
       "positioning": null,
-      "search_text": "pricing ткб monthly_fee 0 руб. ведение счета для физического лица в ткб бесплатно. фл ткб транскапиталбанк transcapitalbank pricing monthly_fee fl active",
-      "is_internal": false
+      "search_text": "pricing ткб monthly_fee 0 руб. ведение счета для физического лица в ткб бесплатно. tkb_fl_conditions фл ткб транскапиталбанк transcapitalbank pricing monthly_fee fl active",
+      "is_internal": false,
+      "scenario_id": "tkb_fl_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 25,
@@ -792,8 +869,11 @@
       ],
       "fact": "Внешние платежи для физического лица в ТКБ стоят 1.2% от суммы, минимум 50 руб. и максимум 1 500 руб.",
       "positioning": null,
-      "search_text": "pricing ткб external_transfer_fee 1.2% от суммы; минимум 50 руб.; максимум 1 500 руб. внешние платежи для физического лица в ткб стоят 1.2% от суммы, минимум 50 руб. и максимум 1 500 руб. фл ткб транскапиталбанк transcapitalbank pricing transfer_fee external fl active",
-      "is_internal": false
+      "search_text": "pricing ткб external_transfer_fee 1.2% от суммы; минимум 50 руб.; максимум 1 500 руб. внешние платежи для физического лица в ткб стоят 1.2% от суммы, минимум 50 руб. и максимум 1 500 руб. tkb_fl_conditions фл ткб транскапиталбанк transcapitalbank pricing transfer_fee external fl active",
+      "is_internal": false,
+      "scenario_id": "tkb_fl_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 26,
@@ -825,8 +905,11 @@
       ],
       "fact": "Внутрибанковские переводы для физического лица в ТКБ без комиссии.",
       "positioning": null,
-      "search_text": "pricing ткб internal_transfer_fee 0 руб. внутрибанковские переводы для физического лица в ткб без комиссии. фл ткб транскапиталбанк transcapitalbank pricing transfer_fee internal fl active",
-      "is_internal": false
+      "search_text": "pricing ткб internal_transfer_fee 0 руб. внутрибанковские переводы для физического лица в ткб без комиссии. tkb_fl_conditions фл ткб транскапиталбанк transcapitalbank pricing transfer_fee internal fl active",
+      "is_internal": false,
+      "scenario_id": "tkb_fl_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 27,
@@ -856,8 +939,11 @@
       ],
       "fact": "Открытие счета для юридического лица в Уралсибе стоит 3 500 руб.",
       "positioning": null,
-      "search_text": "pricing уралсиб opening_fee 3 500 руб. открытие счета для юридического лица в уралсибе стоит 3 500 руб. юл уралсиб uralsib pricing opening_fee yul active",
-      "is_internal": false
+      "search_text": "pricing уралсиб opening_fee 3 500 руб. открытие счета для юридического лица в уралсибе стоит 3 500 руб. uralsib_yul_conditions юл уралсиб uralsib pricing opening_fee yul active",
+      "is_internal": false,
+      "scenario_id": "uralsib_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 28,
@@ -887,8 +973,11 @@
       ],
       "fact": "Ведение счета для юридического лица в Уралсибе стоит 1 600 руб.",
       "positioning": null,
-      "search_text": "pricing уралсиб monthly_fee 1 600 руб. ведение счета для юридического лица в уралсибе стоит 1 600 руб. юл уралсиб uralsib pricing monthly_fee yul active",
-      "is_internal": false
+      "search_text": "pricing уралсиб monthly_fee 1 600 руб. ведение счета для юридического лица в уралсибе стоит 1 600 руб. uralsib_yul_conditions юл уралсиб uralsib pricing monthly_fee yul active",
+      "is_internal": false,
+      "scenario_id": "uralsib_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 29,
@@ -918,8 +1007,11 @@
       ],
       "fact": "Контроль банкротных операций в Уралсибе стоит 150 руб. за каждую операцию.",
       "positioning": null,
-      "search_text": "pricing уралсиб bankruptcy_control_fee 150 руб. контроль банкротных операций в уралсибе стоит 150 руб. за каждую операцию. юл уралсиб uralsib pricing control_fee yul active",
-      "is_internal": false
+      "search_text": "pricing уралсиб bankruptcy_control_fee 150 руб. контроль банкротных операций в уралсибе стоит 150 руб. за каждую операцию. uralsib_yul_conditions юл уралсиб uralsib pricing control_fee yul active",
+      "is_internal": false,
+      "scenario_id": "uralsib_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 30,
@@ -949,8 +1041,11 @@
       ],
       "fact": "Перевод на юридическое лицо в Уралсибе стоит 35 руб., дополнительно взимается 150 руб. за контроль банкротной операции.",
       "positioning": null,
-      "search_text": "pricing уралсиб transfer_to_yul_fee 35 руб. + 150 руб. за контроль перевод на юридическое лицо в уралсибе стоит 35 руб., дополнительно взимается 150 руб. за контроль банкротной операции. юл уралсиб uralsib pricing transfer_fee yul active",
-      "is_internal": false
+      "search_text": "pricing уралсиб transfer_to_yul_fee 35 руб. + 150 руб. за контроль перевод на юридическое лицо в уралсибе стоит 35 руб., дополнительно взимается 150 руб. за контроль банкротной операции. uralsib_yul_conditions юл уралсиб uralsib pricing transfer_fee yul active",
+      "is_internal": false,
+      "scenario_id": "uralsib_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 31,
@@ -981,8 +1076,11 @@
       ],
       "fact": "Переводы на физических лиц в Уралсибе до 100 000 руб. без комиссии, свыше 100 000 руб. — 0.2%.",
       "positioning": null,
-      "search_text": "pricing уралсиб transfer_to_fl_fee до 100 000 руб. — без комиссии; свыше 100 000 руб. — 0.2% переводы на физических лиц в уралсибе до 100 000 руб. без комиссии, свыше 100 000 руб. — 0.2%. юл уралсиб uralsib pricing transfer_fee fl yul active",
-      "is_internal": false
+      "search_text": "pricing уралсиб transfer_to_fl_fee до 100 000 руб. — без комиссии; свыше 100 000 руб. — 0.2% переводы на физических лиц в уралсибе до 100 000 руб. без комиссии, свыше 100 000 руб. — 0.2%. uralsib_yul_conditions юл уралсиб uralsib pricing transfer_fee fl yul active",
+      "is_internal": false,
+      "scenario_id": "uralsib_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 32,
@@ -1012,8 +1110,11 @@
       ],
       "fact": "Снятие наличных в Уралсибе зависит от суммы и составляет от 1.5% до 10%.",
       "positioning": null,
-      "search_text": "pricing уралсиб cash_withdrawal_fee до 100 000 руб. — 1.5%; 100 000–500 000 руб. — 2%; 500 000–1 500 000 руб. — 3%; 1 500 000–3 000 000 руб. — 5%; свыше 3 000 000 руб. — 10% снятие наличных в уралсибе зависит от суммы и составляет от 1.5% до 10%. юл уралсиб uralsib pricing cash_withdrawal yul active",
-      "is_internal": false
+      "search_text": "pricing уралсиб cash_withdrawal_fee до 100 000 руб. — 1.5%; 100 000–500 000 руб. — 2%; 500 000–1 500 000 руб. — 3%; 1 500 000–3 000 000 руб. — 5%; свыше 3 000 000 руб. — 10% снятие наличных в уралсибе зависит от суммы и составляет от 1.5% до 10%. uralsib_yul_conditions юл уралсиб uralsib pricing cash_withdrawal yul active",
+      "is_internal": false,
+      "scenario_id": "uralsib_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 33,
@@ -1045,8 +1146,11 @@
       ],
       "fact": "Открытие счета для юридического лица в Т-Банке стоит 3 900 руб., но открытие сейчас приостановлено.",
       "positioning": null,
-      "search_text": "pricing т-банк opening_fee 3 900 руб. открытие счета для юридического лица в т-банке стоит 3 900 руб., но открытие сейчас приостановлено. юл т-банк тинькофф tbank tinkoff pricing opening_fee yul pause",
-      "is_internal": false
+      "search_text": "pricing т-банк opening_fee 3 900 руб. открытие счета для юридического лица в т-банке стоит 3 900 руб., но открытие сейчас приостановлено. tbank_yul_conditions юл т-банк тинькофф tbank tinkoff pricing opening_fee yul pause",
+      "is_internal": false,
+      "scenario_id": "tbank_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 34,
@@ -1078,8 +1182,11 @@
       ],
       "fact": "Ведение счета для юридического лица в Т-Банке стоит 1 800 руб., но открытие сейчас приостановлено.",
       "positioning": null,
-      "search_text": "pricing т-банк monthly_fee 1 800 руб. ведение счета для юридического лица в т-банке стоит 1 800 руб., но открытие сейчас приостановлено. юл т-банк тинькофф tbank tinkoff pricing monthly_fee yul pause",
-      "is_internal": false
+      "search_text": "pricing т-банк monthly_fee 1 800 руб. ведение счета для юридического лица в т-банке стоит 1 800 руб., но открытие сейчас приостановлено. tbank_yul_conditions юл т-банк тинькофф tbank tinkoff pricing monthly_fee yul pause",
+      "is_internal": false,
+      "scenario_id": "tbank_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 35,
@@ -1111,8 +1218,11 @@
       ],
       "fact": "Перевод на юридическое лицо в Т-Банке стоит 36 руб., но открытие сейчас приостановлено.",
       "positioning": null,
-      "search_text": "pricing т-банк transfer_to_yul_fee 36 руб. перевод на юридическое лицо в т-банке стоит 36 руб., но открытие сейчас приостановлено. юл т-банк тинькофф tbank tinkoff pricing transfer_fee yul pause",
-      "is_internal": false
+      "search_text": "pricing т-банк transfer_to_yul_fee 36 руб. перевод на юридическое лицо в т-банке стоит 36 руб., но открытие сейчас приостановлено. tbank_yul_conditions юл т-банк тинькофф tbank tinkoff pricing transfer_fee yul pause",
+      "is_internal": false,
+      "scenario_id": "tbank_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 36,
@@ -1142,8 +1252,11 @@
       ],
       "fact": "Внутрибанковские переводы в МКБ требуют рукописного заявления и личного визита арбитражного управляющего.",
       "positioning": null,
-      "search_text": "feature мкб internal_transfers_process внутрибанковские переводы в мкб требуют рукописного заявления и личного визита арбитражного управляющего. юл мкб mkb feature process yul pause",
-      "is_internal": false
+      "search_text": "feature мкб internal_transfers_process внутрибанковские переводы в мкб требуют рукописного заявления и личного визита арбитражного управляющего. mkb_yul_conditions юл мкб mkb feature process yul pause",
+      "is_internal": false,
+      "scenario_id": "mkb_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 37,
@@ -1173,8 +1286,11 @@
       ],
       "fact": "Платежи в МКБ проводятся вручную; после создания платежа в личном кабинете нужно уведомлять менеджеров банка по email.",
       "positioning": null,
-      "search_text": "feature мкб payments_process платежи в мкб проводятся вручную; после создания платежа в личном кабинете нужно уведомлять менеджеров банка по email. юл мкб mkb feature process yul pause",
-      "is_internal": false
+      "search_text": "feature мкб payments_process платежи в мкб проводятся вручную; после создания платежа в личном кабинете нужно уведомлять менеджеров банка по email. mkb_yul_conditions юл мкб mkb feature process yul pause",
+      "is_internal": false,
+      "scenario_id": "mkb_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 38,
@@ -1197,8 +1313,11 @@
       ],
       "fact": "Бонусное вознаграждение рассчитывается по формуле ((∑S × P) / D) × O × 0,93. Баланс для расчета фиксируется ежедневно в 09:00 по МСК.",
       "positioning": null,
-      "search_text": "bonus formula бонусное вознаграждение рассчитывается по формуле ((∑s × p) / d) × o × 0,93. баланс для расчета фиксируется ежедневно в 09:00 по мск. bonus formula",
-      "is_internal": false
+      "search_text": "bonus formula бонусное вознаграждение рассчитывается по формуле ((∑s × p) / d) × o × 0,93. баланс для расчета фиксируется ежедневно в 09:00 по мск. bonus_formula bonus formula",
+      "is_internal": false,
+      "scenario_id": "bonus_formula",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 39,
@@ -1221,8 +1340,11 @@
       ],
       "fact": "По программе «Приведи друга» выплачивается от 0,2% до 1% годовых от остатков привлеченных коллег.",
       "positioning": null,
-      "search_text": "bonus referral по программе «приведи друга» выплачивается от 0,2% до 1% годовых от остатков привлеченных коллег. bonus referral",
-      "is_internal": false
+      "search_text": "bonus referral по программе «приведи друга» выплачивается от 0,2% до 1% годовых от остатков привлеченных коллег. bonus_referral bonus referral",
+      "is_internal": false,
+      "scenario_id": "bonus_referral",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 40,
@@ -1249,8 +1371,11 @@
       ],
       "fact": "Бонус в Уралсибе для ЮЛ (малый бизнес): до 10 млн руб. — 4%; 10–50 млн — 4.5%; 50–250 млн — 5.5%; 250–500 млн — 6%; 500–750 млн — 6.5%; 750 млн–1 млрд — 7.5%; свыше 1 млрд руб. — 8.5%.",
       "positioning": null,
-      "search_text": "bonus уралсиб bonus_rate бонус в уралсибе для юл (малый бизнес): до 10 млн руб. — 4%; 10–50 млн — 4.5%; 50–250 млн — 5.5%; 250–500 млн — 6%; 500–750 млн — 6.5%; 750 млн–1 млрд — 7.5%; свыше 1 млрд руб. — 8.5%. юл bonus yul active uralsib",
-      "is_internal": false
+      "search_text": "bonus уралсиб bonus_rate бонус в уралсибе для юл (малый бизнес): до 10 млн руб. — 4%; 10–50 млн — 4.5%; 50–250 млн — 5.5%; 250–500 млн — 6%; 500–750 млн — 6.5%; 750 млн–1 млрд — 7.5%; свыше 1 млрд руб. — 8.5%. uralsib_yul_conditions юл bonus yul active uralsib",
+      "is_internal": false,
+      "scenario_id": "uralsib_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 41,
@@ -1277,8 +1402,11 @@
       ],
       "fact": "Бонус в ТКБ для ЮЛ: до 10 млн руб. — 4.5%; 10–50 млн — 5%; 50–250 млн — 6%; 250–500 млн — 6.5%; 500–750 млн — 7%; 750 млн–1 млрд — 8%; свыше 1 млрд руб. — 9%.",
       "positioning": null,
-      "search_text": "bonus ткб bonus_rate бонус в ткб для юл: до 10 млн руб. — 4.5%; 10–50 млн — 5%; 50–250 млн — 6%; 250–500 млн — 6.5%; 500–750 млн — 7%; 750 млн–1 млрд — 8%; свыше 1 млрд руб. — 9%. юл bonus yul active tkb",
-      "is_internal": false
+      "search_text": "bonus ткб bonus_rate бонус в ткб для юл: до 10 млн руб. — 4.5%; 10–50 млн — 5%; 50–250 млн — 6%; 250–500 млн — 6.5%; 500–750 млн — 7%; 750 млн–1 млрд — 8%; свыше 1 млрд руб. — 9%. tkb_yul_conditions юл bonus yul active tkb",
+      "is_internal": false,
+      "scenario_id": "tkb_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 42,
@@ -1305,8 +1433,11 @@
       ],
       "fact": "Бонус в ТКБ для ФЛ: до 5 млн руб. — 4%; 5–10 млн — 4.5%; 10–25 млн — 5%; 25–50 млн — 5.5%; свыше 50 млн руб. — 6%.",
       "positioning": null,
-      "search_text": "bonus ткб bonus_rate бонус в ткб для фл: до 5 млн руб. — 4%; 5–10 млн — 4.5%; 10–25 млн — 5%; 25–50 млн — 5.5%; свыше 50 млн руб. — 6%. фл bonus fl active tkb",
-      "is_internal": false
+      "search_text": "bonus ткб bonus_rate бонус в ткб для фл: до 5 млн руб. — 4%; 5–10 млн — 4.5%; 10–25 млн — 5%; 25–50 млн — 5.5%; свыше 50 млн руб. — 6%. tkb_fl_conditions фл bonus fl active tkb",
+      "is_internal": false,
+      "scenario_id": "tkb_fl_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 43,
@@ -1333,8 +1464,11 @@
       ],
       "fact": "Бонус в Альфа-Банке для ЮЛ: до 10 млн руб. — 4%; 10–50 млн — 4.5%; 50–250 млн — 5.5%; 250–500 млн — 6%; 500–750 млн — 6.5%; 750 млн–1 млрд — 7.5%; свыше 1 млрд руб. — 8.5%.",
       "positioning": null,
-      "search_text": "bonus альфа-банк bonus_rate бонус в альфа-банке для юл: до 10 млн руб. — 4%; 10–50 млн — 4.5%; 50–250 млн — 5.5%; 250–500 млн — 6%; 500–750 млн — 6.5%; 750 млн–1 млрд — 7.5%; свыше 1 млрд руб. — 8.5%. юл bonus yul active alfabank",
-      "is_internal": false
+      "search_text": "bonus альфа-банк bonus_rate бонус в альфа-банке для юл: до 10 млн руб. — 4%; 10–50 млн — 4.5%; 50–250 млн — 5.5%; 250–500 млн — 6%; 500–750 млн — 6.5%; 750 млн–1 млрд — 7.5%; свыше 1 млрд руб. — 8.5%. alfabank_yul_conditions юл bonus yul active alfabank",
+      "is_internal": false,
+      "scenario_id": "alfabank_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 44,
@@ -1368,8 +1502,11 @@
       ],
       "fact": "Капитализации нет ни в одном из банков-партнеров.",
       "positioning": null,
-      "search_text": "constraint capitalization капитализации нет ни в одном из банков-партнеров. капитализация проценты на остаток начисление процентов накопление доход на остаток constraint capitalization",
-      "is_internal": false
+      "search_text": "constraint capitalization капитализации нет ни в одном из банков-партнеров. capitalization_none капитализация проценты на остаток начисление процентов накопление доход на остаток constraint capitalization",
+      "is_internal": false,
+      "scenario_id": "capitalization_none",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 45,
@@ -1395,7 +1532,12 @@
         "без",
         "расчетного",
         "спецсчет",
-        "отдельно"
+        "отдельно",
+        "задатковый",
+        "залоговый",
+        "счет",
+        "без",
+        "основного"
       ],
       "tags": [
         "constraint",
@@ -1404,8 +1546,11 @@
       ],
       "fact": "Открыть только специальный счет без открытия основного счета нельзя.",
       "positioning": null,
-      "search_text": "constraint special_account_without_main открыть только специальный счет без открытия основного счета нельзя. спецсчет без основного только спецсчет специальный без расчетного спецсчет отдельно constraint special_account main_account",
-      "is_internal": false
+      "search_text": "constraint special_account_without_main открыть только специальный счет без открытия основного счета нельзя. special_account_without_main объяснить что спецсчёт открывается только вместе с основным. спецсчет без основного только спецсчет специальный без расчетного спецсчет отдельно задатковый залоговый счет без основного constraint special_account main_account",
+      "is_internal": false,
+      "scenario_id": "special_account_without_main",
+      "answer_hint": "Объяснить что спецсчёт открывается только вместе с основным.",
+      "next_question": null
     },
     {
       "chunk_id": 46,
@@ -1444,8 +1589,11 @@
       ],
       "fact": "Подписание документов на открытие счета онлайн невозможно.",
       "positioning": null,
-      "search_text": "constraint online_signing подписание документов на открытие счета онлайн невозможно. онлайн подписание удаленное подписание электронная подпись эцп подписать по интернету дистанционно подписать без визита подписать constraint online_signing",
-      "is_internal": false
+      "search_text": "constraint online_signing подписание документов на открытие счета онлайн невозможно. online_signing онлайн подписание удаленное подписание электронная подпись эцп подписать по интернету дистанционно подписать без визита подписать constraint online_signing",
+      "is_internal": false,
+      "scenario_id": "online_signing",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 47,
@@ -1488,8 +1636,11 @@
       ],
       "fact": "Подписание документов арбитражным управляющим происходит лично в любом регионе РФ, где есть ближайшее отделение банка-партнера.",
       "positioning": null,
-      "search_text": "constraint personal_signing подписание документов арбитражным управляющим происходит лично в любом регионе рф, где есть ближайшее отделение банка-партнера. лично подписать визит в банк приехать в банк нужно приходить личное присутствие подписание лично приезжать в офис банка constraint signing personal_visit",
-      "is_internal": false
+      "search_text": "constraint personal_signing подписание документов арбитражным управляющим происходит лично в любом регионе рф, где есть ближайшее отделение банка-партнера. personal_signing лично подписать визит в банк приехать в банк нужно приходить личное присутствие подписание лично приезжать в офис банка constraint signing personal_visit",
+      "is_internal": false,
+      "scenario_id": "personal_signing",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 48,
@@ -1525,8 +1676,11 @@
       ],
       "fact": "Счета умершим физическим лицам не открываются.",
       "positioning": null,
-      "search_text": "constraint deceased_fl счета умершим физическим лицам не открываются. фл умерший умершему покойный скончался смерть после смерти умер человек constraint fl deceased",
-      "is_internal": false
+      "search_text": "constraint deceased_fl счета умершим физическим лицам не открываются. deceased_fl мягко объяснить что счёт умершему не откроем. предложить уточнить детали. фл умерший умершему покойный скончался смерть после смерти умер человек constraint fl deceased",
+      "is_internal": false,
+      "scenario_id": "deceased_fl",
+      "answer_hint": "Мягко объяснить что счёт умершему не откроем. Предложить уточнить детали.",
+      "next_question": null
     },
     {
       "chunk_id": 49,
@@ -1563,8 +1717,11 @@
       ],
       "fact": "Если ликвидация юридического лица еще в процессе, счет открыть можно. Если должник уже ликвидирован, открыть счет можно только в тех банках, где раньше у него были счета.",
       "positioning": null,
-      "search_text": "constraint liquidated_yul если ликвидация юридического лица еще в процессе, счет открыть можно. если должник уже ликвидирован, открыть счет можно только в тех банках, где раньше у него были счета. юл ликвидация ликвидирован ликвидируемое компания закрыта в процессе ликвидации уже ликвидирован constraint yul liquidation",
-      "is_internal": false
+      "search_text": "constraint liquidated_yul если ликвидация юридического лица еще в процессе, счет открыть можно. если должник уже ликвидирован, открыть счет можно только в тех банках, где раньше у него были счета. liquidated_yul юл ликвидация ликвидирован ликвидируемое компания закрыта в процессе ликвидации уже ликвидирован constraint yul liquidation",
+      "is_internal": false,
+      "scenario_id": "liquidated_yul",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 50,
@@ -1602,8 +1759,11 @@
       ],
       "fact": "Счета нерезидентам открыть можно, но требуется выписка из торговой палаты с апостилем по месту регистрации.",
       "positioning": null,
-      "search_text": "constraint non_resident счета нерезидентам открыть можно, но требуется выписка из торговой палаты с апостилем по месту регистрации. нерезидент иностранец иностранная компания иностранная организация нерезидент рф зарубежная компания апостиль торговая палата constraint non_resident yul",
-      "is_internal": false
+      "search_text": "constraint non_resident счета нерезидентам открыть можно, но требуется выписка из торговой палаты с апостилем по месту регистрации. non_resident нерезидент иностранец иностранная компания иностранная организация нерезидент рф зарубежная компания апостиль торговая палата constraint non_resident yul",
+      "is_internal": false,
+      "scenario_id": "non_resident",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 51,
@@ -1642,8 +1802,11 @@
       ],
       "fact": "Подписание по доверенности возможно только для юридических лиц при наличии оригинала бумажной нотариальной доверенности.",
       "positioning": null,
-      "search_text": "constraint power_of_attorney подписание по доверенности возможно только для юридических лиц при наличии оригинала бумажной нотариальной доверенности. юл доверенность по доверенности доверитель представитель нотариальная доверенность доверенное лицо подписать по доверенности constraint yul power_of_attorney",
-      "is_internal": false
+      "search_text": "constraint power_of_attorney подписание по доверенности возможно только для юридических лиц при наличии оригинала бумажной нотариальной доверенности. power_of_attorney юл доверенность по доверенности доверитель представитель нотариальная доверенность доверенное лицо подписать по доверенности constraint yul power_of_attorney",
+      "is_internal": false,
+      "scenario_id": "power_of_attorney",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 52,
@@ -1683,8 +1846,11 @@
       ],
       "fact": "Если в регионе клиента нет отделения банка-партнера, нужно уточнить, бывает ли он в командировках в крупных городах или ближайших регионах, где есть отделение.",
       "positioning": null,
-      "search_text": "constraint no_branch если в регионе клиента нет отделения банка-партнера, нужно уточнить, бывает ли он в командировках в крупных городах или ближайших регионах, где есть отделение. нет отделения нет офиса нет банка в городе регион другой город командировка ближайший офис филиал constraint branch geography",
-      "is_internal": false
+      "search_text": "constraint no_branch если в регионе клиента нет отделения банка-партнера, нужно уточнить, бывает ли он в командировках в крупных городах или ближайших регионах, где есть отделение. no_branch нет отделения нет офиса нет банка в городе регион другой город командировка ближайший офис филиал constraint branch geography",
+      "is_internal": false,
+      "scenario_id": "no_branch",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 53,
@@ -1725,8 +1891,11 @@
       ],
       "fact": "Если счет нужен не сразу, его можно открыть заранее. Пока движений по счету нет, комиссия за ведение не взимается, но стоимость открытия при закрытии без поступлений оплатить придется.",
       "positioning": null,
-      "search_text": "constraint early_opening если счет нужен не сразу, его можно открыть заранее. пока движений по счету нет, комиссия за ведение не взимается, но стоимость открытия при закрытии без поступлений оплатить придется. открыть заранее счет заранее нет движений пустой счет без операций комиссия без поступлений ведение без движений constraint opening timing",
-      "is_internal": false
+      "search_text": "constraint early_opening если счет нужен не сразу, его можно открыть заранее. пока движений по счету нет, комиссия за ведение не взимается, но стоимость открытия при закрытии без поступлений оплатить придется. early_opening открыть заранее счет заранее нет движений пустой счет без операций комиссия без поступлений ведение без движений constraint opening timing",
+      "is_internal": false,
+      "scenario_id": "early_opening",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 54,
@@ -1766,8 +1935,11 @@
       ],
       "fact": "Если кредитору-физлицу нужно перевести крупную сумму свыше лимитов, банк нужно предупредить за два дня и предоставить реестр кредиторов; тогда комиссия составит 0.2%.",
       "positioning": null,
-      "search_text": "constraint large_transfer_to_fl если кредитору-физлицу нужно перевести крупную сумму свыше лимитов, банк нужно предупредить за два дня и предоставить реестр кредиторов; тогда комиссия составит 0.2%. крупный перевод большая сумма перевод физлицу лимит перевода реестр кредиторов предупредить банк свыше лимита constraint transfer fl large_amount",
-      "is_internal": false
+      "search_text": "constraint large_transfer_to_fl если кредитору-физлицу нужно перевести крупную сумму свыше лимитов, банк нужно предупредить за два дня и предоставить реестр кредиторов; тогда комиссия составит 0.2%. large_transfer_fl крупный перевод большая сумма перевод физлицу лимит перевода реестр кредиторов предупредить банк свыше лимита constraint transfer fl large_amount",
+      "is_internal": false,
+      "scenario_id": "large_transfer_fl",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 55,
@@ -1806,8 +1978,11 @@
       ],
       "fact": "Снять наличные по банкротным средствам можно только после вынесения судебного решения о выдаче наличными.",
       "positioning": null,
-      "search_text": "constraint cash_withdrawal_bankruptcy снять наличные по банкротным средствам можно только после вынесения судебного решения о выдаче наличными. снять наличные наличные с банкротного счета обналичить вывести наличными судебное решение наличные выдача наличными constraint cash court_order",
-      "is_internal": false
+      "search_text": "constraint cash_withdrawal_bankruptcy снять наличные по банкротным средствам можно только после вынесения судебного решения о выдаче наличными. cash_withdrawal_bankruptcy не путать с вопросом про карту. нужно судебное решение о выдаче наличными. есть ли уже судебное решение о выдаче наличными? снять наличные наличные с банкротного счета обналичить вывести наличными судебное решение наличные выдача наличными constraint cash court_order",
+      "is_internal": false,
+      "scenario_id": "cash_withdrawal_bankruptcy",
+      "answer_hint": "Не путать с вопросом про карту. Нужно судебное решение о выдаче наличными.",
+      "next_question": "Есть ли уже судебное решение о выдаче наличными?"
     },
     {
       "chunk_id": 56,
@@ -1851,8 +2026,11 @@
       ],
       "fact": "Если открывается счет для гражданина-банкрота или ИП, финансовому управляющему не подключается доступ в интернет-банк.",
       "positioning": null,
-      "search_text": "constraint internet_bank_fl_ip если открывается счет для гражданина-банкрота или ип, финансовому управляющему не подключается доступ в интернет-банк. фл ип интернет банк онлайн банк личный кабинет доступ в банк приложение банка мобильный банк доступ финансового управляющего constraint internet_bank fl_ip",
-      "is_internal": false
+      "search_text": "constraint internet_bank_fl_ip если открывается счет для гражданина-банкрота или ип, финансовому управляющему не подключается доступ в интернет-банк. internet_bank_fl_ip фл ип интернет банк онлайн банк личный кабинет доступ в банк приложение банка мобильный банк доступ финансового управляющего constraint internet_bank fl_ip",
+      "is_internal": false,
+      "scenario_id": "internet_bank_fl_ip",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 57,
@@ -1890,8 +2068,11 @@
       ],
       "fact": "Если в отношении ИП введена реструктуризация долгов, банк не исполняет платежи без письменного согласия финансового управляющего.",
       "positioning": null,
-      "search_text": "constraint restructuring_ip если в отношении ип введена реструктуризация долгов, банк не исполняет платежи без письменного согласия финансового управляющего. ип реструктуризация ип реструктуризация долгов ип согласие финансового управляющего платежи без согласия constraint ip restructuring",
-      "is_internal": false
+      "search_text": "constraint restructuring_ip если в отношении ип введена реструктуризация долгов, банк не исполняет платежи без письменного согласия финансового управляющего. restructuring_ip ип реструктуризация ип реструктуризация долгов ип согласие финансового управляющего платежи без согласия constraint ip restructuring",
+      "is_internal": false,
+      "scenario_id": "restructuring_ip",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 58,
@@ -1919,7 +2100,11 @@
         "карточка",
         "должника",
         "реализация",
-        "имущества"
+        "имущества",
+        "карта",
+        "банкрота",
+        "карту",
+        "должнику"
       ],
       "tags": [
         "constraint",
@@ -1929,8 +2114,11 @@
       ],
       "fact": "Если у гражданина введена реализация имущества, новая банковская карточка оформляется и подписывается исключительно финансовым управляющим.",
       "positioning": null,
-      "search_text": "constraint implementation_fl_card если у гражданина введена реализация имущества, новая банковская карточка оформляется и подписывается исключительно финансовым управляющим. фл карта карту банковская карта оформить карту карточка должника реализация имущества constraint fl card implementation",
-      "is_internal": false
+      "search_text": "constraint implementation_fl_card если у гражданина введена реализация имущества, новая банковская карточка оформляется и подписывается исключительно финансовым управляющим. debtor_card_realization не путать с наличными. если клиент спрашивает про карту при реализации имущества — объяснить роль финансового управляющего. не упоминать наличные. реализация имущества уже введена? фл карта карту банковская карта оформить карту карточка должника реализация имущества карта банкрота карту должнику constraint fl card implementation",
+      "is_internal": false,
+      "scenario_id": "debtor_card_realization",
+      "answer_hint": "Не путать с наличными. Если клиент спрашивает про карту при реализации имущества — объяснить роль финансового управляющего. Не упоминать наличные.",
+      "next_question": "Реализация имущества уже введена?"
     },
     {
       "chunk_id": 59,
@@ -1974,8 +2162,11 @@
       ],
       "fact": "Если у юридического лица введено внешнее управление или конкурсное производство, действующие корпоративные карты должны быть заблокированы без права выпуска новых.",
       "positioning": null,
-      "search_text": "constraint external_management_cards если у юридического лица введено внешнее управление или конкурсное производство, действующие корпоративные карты должны быть заблокированы без права выпуска новых. юл внешнее управление конкурсное производство корпоративные карты заблокировать карты новые карты юрлицо карты при банкротстве юл constraint yul cards external_management bankruptcy",
-      "is_internal": false
+      "search_text": "constraint external_management_cards если у юридического лица введено внешнее управление или конкурсное производство, действующие корпоративные карты должны быть заблокированы без права выпуска новых. external_management_cards юл внешнее управление конкурсное производство корпоративные карты заблокировать карты новые карты юрлицо карты при банкротстве юл constraint yul cards external_management bankruptcy",
+      "is_internal": false,
+      "scenario_id": "external_management_cards",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 60,
@@ -2001,8 +2192,11 @@
       ],
       "fact": "Если финансовый управляющий дает распоряжение выдать банкроту-пенсионеру пенсию, банк вправе выполнить такую выдачу.",
       "positioning": null,
-      "search_text": "constraint pension_payment_fl если финансовый управляющий дает распоряжение выдать банкроту-пенсионеру пенсию, банк вправе выполнить такую выдачу. фл constraint fl pension",
-      "is_internal": false
+      "search_text": "constraint pension_payment_fl если финансовый управляющий дает распоряжение выдать банкроту-пенсионеру пенсию, банк вправе выполнить такую выдачу. pension_payment_fl фл constraint fl pension",
+      "is_internal": false,
+      "scenario_id": "pension_payment_fl",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 61,
@@ -2018,15 +2212,26 @@
       "topic": "payroll_project",
       "value_num": null,
       "value_text": null,
-      "aliases": [],
+      "aliases": [
+        "зарплатный",
+        "проект",
+        "зарплата",
+        "бесплатные",
+        "переводы",
+        "зарплатные",
+        "карты"
+      ],
       "tags": [
         "constraint",
         "payroll_project"
       ],
       "fact": "Зарплатного проекта для банкротов с бесплатными переводами нет.",
       "positioning": null,
-      "search_text": "constraint payroll_project зарплатного проекта для банкротов с бесплатными переводами нет. constraint payroll_project",
-      "is_internal": false
+      "search_text": "constraint payroll_project зарплатного проекта для банкротов с бесплатными переводами нет. payroll_project_none зарплатный проект зарплата бесплатные переводы зарплатные карты constraint payroll_project",
+      "is_internal": false,
+      "scenario_id": "payroll_project_none",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 62,
@@ -2066,8 +2271,11 @@
       ],
       "fact": "Если компания находится в красной зоне, открытие счета возможно только как исключение после индивидуального рассмотрения.",
       "positioning": null,
-      "search_text": "constraint red_zone_company если компания находится в красной зоне, открытие счета возможно только как исключение после индивидуального рассмотрения. юл красная зона рисковая компания отказ банка индивидуальное рассмотрение сложный клиент проблемная компания constraint yul red_zone exception",
-      "is_internal": false
+      "search_text": "constraint red_zone_company если компания находится в красной зоне, открытие счета возможно только как исключение после индивидуального рассмотрения. red_zone_company юл красная зона рисковая компания отказ банка индивидуальное рассмотрение сложный клиент проблемная компания constraint yul red_zone exception",
+      "is_internal": false,
+      "scenario_id": "red_zone_company",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 63,
@@ -2094,8 +2302,11 @@
       ],
       "fact": "Если компания действующая и не находится в процедуре банкротства, открыть счет можно в Уралсибе по стандартной тарифной сетке.",
       "positioning": null,
-      "search_text": "constraint active_company если компания действующая и не находится в процедуре банкротства, открыть счет можно в уралсибе по стандартной тарифной сетке. юл constraint yul active_company uralsib",
-      "is_internal": false
+      "search_text": "constraint active_company если компания действующая и не находится в процедуре банкротства, открыть счет можно в уралсибе по стандартной тарифной сетке. active_company_uralsib юл constraint yul active_company uralsib",
+      "is_internal": false,
+      "scenario_id": "active_company_uralsib",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 64,
@@ -2121,8 +2332,11 @@
       ],
       "fact": "Для открытия счета в ТКБ для ФЛ нужны заявка в Битрикс24, скан паспорта АУ, решение суда и копия паспорта должника или справка из МВД.",
       "positioning": null,
-      "search_text": "docs ткб для открытия счета в ткб для фл нужны заявка в битрикс24, скан паспорта ау, решение суда и копия паспорта должника или справка из мвд. фл docs tkb fl",
-      "is_internal": false
+      "search_text": "docs ткб для открытия счета в ткб для фл нужны заявка в битрикс24, скан паспорта ау, решение суда и копия паспорта должника или справка из мвд. docs_tkb_fl фл docs tkb fl",
+      "is_internal": false,
+      "scenario_id": "docs_tkb_fl",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 65,
@@ -2148,8 +2362,11 @@
       ],
       "fact": "Для открытия счета юридическому лицу в ТКБ нужны заявка в Битрикс24, скан паспорта АУ и решение суда.",
       "positioning": null,
-      "search_text": "docs ткб для открытия счета юридическому лицу в ткб нужны заявка в битрикс24, скан паспорта ау и решение суда. юл docs tkb yul",
-      "is_internal": false
+      "search_text": "docs ткб для открытия счета юридическому лицу в ткб нужны заявка в битрикс24, скан паспорта ау и решение суда. docs_tkb_yul юл docs tkb yul",
+      "is_internal": false,
+      "scenario_id": "docs_tkb_yul",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 66,
@@ -2175,8 +2392,11 @@
       ],
       "fact": "Для открытия счета юридическому лицу в Т-Банке нужны заявка в Битрикс24, скан паспорта АУ и решение суда.",
       "positioning": null,
-      "search_text": "docs т-банк для открытия счета юридическому лицу в т-банке нужны заявка в битрикс24, скан паспорта ау и решение суда. юл docs tbank yul",
-      "is_internal": false
+      "search_text": "docs т-банк для открытия счета юридическому лицу в т-банке нужны заявка в битрикс24, скан паспорта ау и решение суда. docs_tbank_yul юл docs tbank yul",
+      "is_internal": false,
+      "scenario_id": "docs_tbank_yul",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 67,
@@ -2202,8 +2422,11 @@
       ],
       "fact": "Для открытия счета в Альфа-Банке по ЮЛ сканы документов от АУ не нужны, достаточно названия или ИНН должника и перечня счетов.",
       "positioning": null,
-      "search_text": "docs альфа-банк для открытия счета в альфа-банке по юл сканы документов от ау не нужны, достаточно названия или инн должника и перечня счетов. юл docs alfabank yul",
-      "is_internal": false
+      "search_text": "docs альфа-банк для открытия счета в альфа-банке по юл сканы документов от ау не нужны, достаточно названия или инн должника и перечня счетов. docs_alfabank_yul юл docs alfabank yul",
+      "is_internal": false,
+      "scenario_id": "docs_alfabank_yul",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 68,
@@ -2229,8 +2452,11 @@
       ],
       "fact": "Для открытия счета в Уралсибе по ЮЛ сканы документов от АУ не нужны, достаточно названия или ИНН должника и перечня счетов.",
       "positioning": null,
-      "search_text": "docs уралсиб для открытия счета в уралсибе по юл сканы документов от ау не нужны, достаточно названия или инн должника и перечня счетов. юл docs uralsib yul",
-      "is_internal": false
+      "search_text": "docs уралсиб для открытия счета в уралсибе по юл сканы документов от ау не нужны, достаточно названия или инн должника и перечня счетов. docs_uralsib_yul юл docs uralsib yul",
+      "is_internal": false,
+      "scenario_id": "docs_uralsib_yul",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 69,
@@ -2256,8 +2482,11 @@
       ],
       "fact": "Для открытия счета в МКБ по ЮЛ сканы документов от АУ не нужны, достаточно названия или ИНН должника и перечня счетов.",
       "positioning": null,
-      "search_text": "docs мкб для открытия счета в мкб по юл сканы документов от ау не нужны, достаточно названия или инн должника и перечня счетов. юл docs mkb yul",
-      "is_internal": false
+      "search_text": "docs мкб для открытия счета в мкб по юл сканы документов от ау не нужны, достаточно названия или инн должника и перечня счетов. docs_mkb_yul юл docs mkb yul",
+      "is_internal": false,
+      "scenario_id": "docs_mkb_yul",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 70,
@@ -2285,8 +2514,11 @@
       ],
       "fact": "Для открытия счета АО или ЗАО дополнительно нужен актуальный реестр акционеров или официальное письмо от конкурсного управляющего.",
       "positioning": null,
-      "search_text": "docs росбанк для открытия счета ао или зао дополнительно нужен актуальный реестр акционеров или официальное письмо от конкурсного управляющего. юл docs rosbank yul ao zao",
-      "is_internal": false
+      "search_text": "docs росбанк для открытия счета ао или зао дополнительно нужен актуальный реестр акционеров или официальное письмо от конкурсного управляющего. docs_rosbank_yul юл docs rosbank yul ao zao",
+      "is_internal": false,
+      "scenario_id": "docs_rosbank_yul",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 71,
@@ -2309,8 +2541,11 @@
       ],
       "fact": "Для открытия счета организации-нерезиденту требуется выписка из торговой палаты с апостилем и переводом.",
       "positioning": null,
-      "search_text": "docs non_resident для открытия счета организации-нерезиденту требуется выписка из торговой палаты с апостилем и переводом. docs non_resident",
-      "is_internal": false
+      "search_text": "docs non_resident для открытия счета организации-нерезиденту требуется выписка из торговой палаты с апостилем и переводом. docs_non_resident docs non_resident",
+      "is_internal": false,
+      "scenario_id": "docs_non_resident",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 72,
@@ -2328,7 +2563,15 @@
       "topic": null,
       "value_num": null,
       "value_text": null,
-      "aliases": [],
+      "aliases": [
+        "физлицо",
+        "физическое",
+        "лицо",
+        "фл",
+        "банкрот",
+        "гражданин",
+        "физик"
+      ],
       "tags": [
         "selection",
         "fl",
@@ -2337,8 +2580,11 @@
       ],
       "fact": null,
       "positioning": "Для физического лица ТКБ — рабочий вариант: открытие 1 500 руб., ведение 0 руб., внешние платежи 1.2%, внутрибанковские переводы 0 руб. Важная особенность: расходные операции согласуются через юристов банка.",
-      "search_text": "selection ткб для физического лица ткб — рабочий вариант: открытие 1 500 руб., ведение 0 руб., внешние платежи 1.2%, внутрибанковские переводы 0 руб. важная особенность: расходные операции согласуются через юристов банка. фл selection fl tkb active",
-      "is_internal": false
+      "search_text": "selection ткб для физического лица ткб — рабочий вариант: открытие 1 500 руб., ведение 0 руб., внешние платежи 1.2%, внутрибанковские переводы 0 руб. важная особенность: расходные операции согласуются через юристов банка. bank_selection_fl фл физлицо физическое лицо фл банкрот гражданин физик selection fl tkb active",
+      "is_internal": false,
+      "scenario_id": "bank_selection_fl",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 73,
@@ -2356,7 +2602,14 @@
       "topic": null,
       "value_num": null,
       "value_text": null,
-      "aliases": [],
+      "aliases": [
+        "юрлицо",
+        "юридическое",
+        "лицо",
+        "юл",
+        "ооо",
+        "ип"
+      ],
       "tags": [
         "selection",
         "yul",
@@ -2365,8 +2618,11 @@
       ],
       "fact": null,
       "positioning": "Для юридического лица Альфа-Банк — один из самых бюджетных вариантов: открытие 800 руб., ведение 800 руб., контроль банкротных операций 0 руб., перевод на ЮЛ 35 руб.",
-      "search_text": "selection альфа-банк для юридического лица альфа-банк — один из самых бюджетных вариантов: открытие 800 руб., ведение 800 руб., контроль банкротных операций 0 руб., перевод на юл 35 руб. юл selection yul alfabank active",
-      "is_internal": false
+      "search_text": "selection альфа-банк для юридического лица альфа-банк — один из самых бюджетных вариантов: открытие 800 руб., ведение 800 руб., контроль банкротных операций 0 руб., перевод на юл 35 руб. bank_selection_yul юл юрлицо юридическое лицо юл ооо ип selection yul alfabank active",
+      "is_internal": false,
+      "scenario_id": "bank_selection_yul",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 74,
@@ -2384,7 +2640,14 @@
       "topic": null,
       "value_num": null,
       "value_text": null,
-      "aliases": [],
+      "aliases": [
+        "юрлицо",
+        "юридическое",
+        "лицо",
+        "юл",
+        "ооо",
+        "ип"
+      ],
       "tags": [
         "selection",
         "yul",
@@ -2393,8 +2656,11 @@
       ],
       "fact": null,
       "positioning": "Для юридического лица Уралсиб — рабочий вариант малого бизнеса: открытие 3 500 руб., ведение 1 600 руб., переводы на ЮЛ 35 руб., переводы на ФЛ до 100 000 руб. без комиссии, но есть 150 руб. за контроль каждой банкротной операции.",
-      "search_text": "selection уралсиб для юридического лица уралсиб — рабочий вариант малого бизнеса: открытие 3 500 руб., ведение 1 600 руб., переводы на юл 35 руб., переводы на фл до 100 000 руб. без комиссии, но есть 150 руб. за контроль каждой банкротной операции. юл selection yul uralsib active",
-      "is_internal": false
+      "search_text": "selection уралсиб для юридического лица уралсиб — рабочий вариант малого бизнеса: открытие 3 500 руб., ведение 1 600 руб., переводы на юл 35 руб., переводы на фл до 100 000 руб. без комиссии, но есть 150 руб. за контроль каждой банкротной операции. bank_selection_yul юл юрлицо юридическое лицо юл ооо ип selection yul uralsib active",
+      "is_internal": false,
+      "scenario_id": "bank_selection_yul",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 75,
@@ -2412,7 +2678,14 @@
       "topic": null,
       "value_num": null,
       "value_text": null,
-      "aliases": [],
+      "aliases": [
+        "юрлицо",
+        "юридическое",
+        "лицо",
+        "юл",
+        "ооо",
+        "ип"
+      ],
       "tags": [
         "selection",
         "yul",
@@ -2421,8 +2694,11 @@
       ],
       "fact": null,
       "positioning": "Для юридического лица ТКБ — вариант с открытием 2 800 руб. и ведением 2 090 руб.; переводы на ЮЛ стоят 33 руб. электронно, а переводы на ФЛ тарифицируются процентом от суммы плюс 33 руб. за платежку.",
-      "search_text": "selection ткб для юридического лица ткб — вариант с открытием 2 800 руб. и ведением 2 090 руб.; переводы на юл стоят 33 руб. электронно, а переводы на фл тарифицируются процентом от суммы плюс 33 руб. за платежку. юл selection yul tkb active",
-      "is_internal": false
+      "search_text": "selection ткб для юридического лица ткб — вариант с открытием 2 800 руб. и ведением 2 090 руб.; переводы на юл стоят 33 руб. электронно, а переводы на фл тарифицируются процентом от суммы плюс 33 руб. за платежку. bank_selection_yul юл юрлицо юридическое лицо юл ооо ип selection yul tkb active",
+      "is_internal": false,
+      "scenario_id": "bank_selection_yul",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 76,
@@ -2449,8 +2725,11 @@
       ],
       "fact": null,
       "positioning": "Для юридического лица Т-Банк исторически имел открытие 3 900 руб., ведение 1 800 руб. и переводы на ЮЛ 36 руб., но сейчас открытие временно приостановлено.",
-      "search_text": "selection т-банк для юридического лица т-банк исторически имел открытие 3 900 руб., ведение 1 800 руб. и переводы на юл 36 руб., но сейчас открытие временно приостановлено. юл selection yul tbank pause",
-      "is_internal": false
+      "search_text": "selection т-банк для юридического лица т-банк исторически имел открытие 3 900 руб., ведение 1 800 руб. и переводы на юл 36 руб., но сейчас открытие временно приостановлено. tbank_yul_conditions юл selection yul tbank pause",
+      "is_internal": false,
+      "scenario_id": "tbank_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 77,
@@ -2477,8 +2756,11 @@
       ],
       "fact": null,
       "positioning": "Для юридического лица МКБ сейчас недоступен для открытия. Особенности банка: внутрибанковские переводы требуют рукописного заявления и визита, а платежи проводятся вручную с уведомлением по email.",
-      "search_text": "selection мкб для юридического лица мкб сейчас недоступен для открытия. особенности банка: внутрибанковские переводы требуют рукописного заявления и визита, а платежи проводятся вручную с уведомлением по email. юл selection yul mkb pause",
-      "is_internal": false
+      "search_text": "selection мкб для юридического лица мкб сейчас недоступен для открытия. особенности банка: внутрибанковские переводы требуют рукописного заявления и визита, а платежи проводятся вручную с уведомлением по email. mkb_yul_conditions юл selection yul mkb pause",
+      "is_internal": false,
+      "scenario_id": "mkb_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 78,
@@ -2505,8 +2787,11 @@
       ],
       "fact": null,
       "positioning": "Для юридического лица Росбанк сейчас недоступен для открытия. Исторически он подходит для ЮЛ, но для АО и ЗАО требует дополнительный реестр акционеров или письмо от конкурсного управляющего.",
-      "search_text": "selection росбанк для юридического лица росбанк сейчас недоступен для открытия. исторически он подходит для юл, но для ао и зао требует дополнительный реестр акционеров или письмо от конкурсного управляющего. юл selection yul rosbank pause",
-      "is_internal": false
+      "search_text": "selection росбанк для юридического лица росбанк сейчас недоступен для открытия. исторически он подходит для юл, но для ао и зао требует дополнительный реестр акционеров или письмо от конкурсного управляющего. rosbank_yul_conditions юл selection yul rosbank pause",
+      "is_internal": false,
+      "scenario_id": "rosbank_yul_conditions",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 79,
@@ -2524,7 +2809,16 @@
       "topic": "comparison_low_cost",
       "value_num": null,
       "value_text": null,
-      "aliases": [],
+      "aliases": [
+        "подешевле",
+        "дешевле",
+        "самый",
+        "дешевый",
+        "минимальная",
+        "стоимость",
+        "недорого",
+        "бюджетно"
+      ],
       "tags": [
         "selection",
         "yul",
@@ -2533,8 +2827,11 @@
       ],
       "fact": null,
       "positioning": "Для юридических лиц по стоимости открытия сейчас выгоднее всего выглядит Альфа-Банк (800 руб.), затем ТКБ (2 800 руб.), затем Уралсиб (3 500 руб.). Т-Банк, МКБ и Росбанк сейчас неактивны для нового открытия.",
-      "search_text": "selection comparison_low_cost для юридических лиц по стоимости открытия сейчас выгоднее всего выглядит альфа-банк (800 руб.), затем ткб (2 800 руб.), затем уралсиб (3 500 руб.). т-банк, мкб и росбанк сейчас неактивны для нового открытия. юл selection yul comparison opening_cost",
-      "is_internal": false
+      "search_text": "selection comparison_low_cost для юридических лиц по стоимости открытия сейчас выгоднее всего выглядит альфа-банк (800 руб.), затем ткб (2 800 руб.), затем уралсиб (3 500 руб.). т-банк, мкб и росбанк сейчас неактивны для нового открытия. bank_selection_yul_low_cost юл подешевле дешевле самый дешевый минимальная стоимость недорого бюджетно selection yul comparison opening_cost",
+      "is_internal": false,
+      "scenario_id": "bank_selection_yul_low_cost",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 80,
@@ -2552,7 +2849,14 @@
       "topic": "comparison_default",
       "value_num": null,
       "value_text": null,
-      "aliases": [],
+      "aliases": [
+        "физлицо",
+        "физическое",
+        "лицо",
+        "фл",
+        "банкрот",
+        "гражданин"
+      ],
       "tags": [
         "selection",
         "fl",
@@ -2561,642 +2865,14 @@
       ],
       "fact": null,
       "positioning": "Для физических лиц в партнерской сетке рабочий вариант — ТКБ: открытие 1 500 руб., ведение 0 руб., но расходные операции нужно заранее согласовывать с юристами банка.",
-      "search_text": "selection comparison_default для физических лиц в партнерской сетке рабочий вариант — ткб: открытие 1 500 руб., ведение 0 руб., но расходные операции нужно заранее согласовывать с юристами банка. фл selection fl comparison default",
-      "is_internal": false
+      "search_text": "selection comparison_default для физических лиц в партнерской сетке рабочий вариант — ткб: открытие 1 500 руб., ведение 0 руб., но расходные операции нужно заранее согласовывать с юристами банка. bank_selection_fl фл физлицо физическое лицо фл банкрот гражданин selection fl comparison default",
+      "is_internal": false,
+      "scenario_id": "bank_selection_fl",
+      "answer_hint": null,
+      "next_question": null
     },
     {
       "chunk_id": 81,
-      "text": "Полное открытие счета обычно занимает около недели с момента заявки; после подписания документов в банке открытие занимает до двух дней.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "timelines",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [
-        "сколько",
-        "дней",
-        "когда",
-        "откроют",
-        "сроки",
-        "открытия",
-        "как",
-        "быстро",
-        "время",
-        "открытия",
-        "за",
-        "сколько",
-        "дней",
-        "открывается",
-        "срок",
-        "счета"
-      ],
-      "tags": [
-        "internal_ops",
-        "timelines"
-      ],
-      "fact": "Полное открытие счета обычно занимает около недели с момента заявки; после подписания документов в банке открытие занимает до двух дней.",
-      "positioning": null,
-      "search_text": "internal_ops timelines полное открытие счета обычно занимает около недели с момента заявки; после подписания документов в банке открытие занимает до двух дней. сколько дней когда откроют сроки открытия как быстро время открытия за сколько дней открывается срок счета internal_ops timelines",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 82,
-      "text": "Приоритеты заявок: не срочный — в течение месяца, стандартный — в течение двух недель, срочный — в течение недели, горящий — в течение трех дней, катастрофа — сегодня.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "priorities",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "priorities"
-      ],
-      "fact": "Приоритеты заявок: не срочный — в течение месяца, стандартный — в течение двух недель, срочный — в течение недели, горящий — в течение трех дней, катастрофа — сегодня.",
-      "positioning": null,
-      "search_text": "internal_ops priorities приоритеты заявок: не срочный — в течение месяца, стандартный — в течение двух недель, срочный — в течение недели, горящий — в течение трех дней, катастрофа — сегодня. internal_ops priorities",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 83,
-      "text": "Если заявка получила статус «Просрочено», изменить дату открытия счета может только сотрудник отдела контроля качества.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "overdue_priority",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "priority",
-        "overdue"
-      ],
-      "fact": "Если заявка получила статус «Просрочено», изменить дату открытия счета может только сотрудник отдела контроля качества.",
-      "positioning": null,
-      "search_text": "internal_ops overdue_priority если заявка получила статус «просрочено», изменить дату открытия счета может только сотрудник отдела контроля качества. internal_ops priority overdue",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 84,
-      "text": "Если на открываемом счете уже есть средства, заявка получает приоритет «Срочно», и у клиента нужно запросить выписку об остатках.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "funds_available",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "priority",
-        "urgent",
-        "funds"
-      ],
-      "fact": "Если на открываемом счете уже есть средства, заявка получает приоритет «Срочно», и у клиента нужно запросить выписку об остатках.",
-      "positioning": null,
-      "search_text": "internal_ops funds_available если на открываемом счете уже есть средства, заявка получает приоритет «срочно», и у клиента нужно запросить выписку об остатках. internal_ops priority urgent funds",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 85,
-      "text": "Если торги проходят через неделю и счет нужен срочно, заявку нужно согласовать с руководителем отдела продаж и отправить с пометкой о срочности.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "urgent_auction",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "urgent",
-        "auction"
-      ],
-      "fact": "Если торги проходят через неделю и счет нужен срочно, заявку нужно согласовать с руководителем отдела продаж и отправить с пометкой о срочности.",
-      "positioning": null,
-      "search_text": "internal_ops urgent_auction если торги проходят через неделю и счет нужен срочно, заявку нужно согласовать с руководителем отдела продаж и отправить с пометкой о срочности. internal_ops urgent auction",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 86,
-      "text": "На стадии согласования встречи с банком менеджер обязан лично связаться с клиентом и подтвердить факт согласования встречи банком.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "stage_meeting_prep",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "meeting",
-        "stage"
-      ],
-      "fact": "На стадии согласования встречи с банком менеджер обязан лично связаться с клиентом и подтвердить факт согласования встречи банком.",
-      "positioning": null,
-      "search_text": "internal_ops stage_meeting_prep на стадии согласования встречи с банком менеджер обязан лично связаться с клиентом и подтвердить факт согласования встречи банком. internal_ops meeting stage",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 87,
-      "text": "Стадия «Сегодня встреча / Ждем АУ» требует повышенного контроля; менеджер обязан связаться с АУ и контролировать посещение банка.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "stage_meeting_today",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "meeting",
-        "stage"
-      ],
-      "fact": "Стадия «Сегодня встреча / Ждем АУ» требует повышенного контроля; менеджер обязан связаться с АУ и контролировать посещение банка.",
-      "positioning": null,
-      "search_text": "internal_ops stage_meeting_today стадия «сегодня встреча / ждем ау» требует повышенного контроля; менеджер обязан связаться с ау и контролировать посещение банка. internal_ops meeting stage",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 88,
-      "text": "Если заявка отложена по уважительной причине, ее можно перевести в статус «Долгосрок» максимум на один месяц.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "stage_longterm",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "longterm",
-        "stage"
-      ],
-      "fact": "Если заявка отложена по уважительной причине, ее можно перевести в статус «Долгосрок» максимум на один месяц.",
-      "positioning": null,
-      "search_text": "internal_ops stage_longterm если заявка отложена по уважительной причине, ее можно перевести в статус «долгосрок» максимум на один месяц. internal_ops longterm stage",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 89,
-      "text": "Этап получения реквизитов и доступов является критическим; закрывать заявку без подтверждения смены временного пароля нельзя.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "stage_requisites",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "requisites",
-        "access"
-      ],
-      "fact": "Этап получения реквизитов и доступов является критическим; закрывать заявку без подтверждения смены временного пароля нельзя.",
-      "positioning": null,
-      "search_text": "internal_ops stage_requisites этап получения реквизитов и доступов является критическим; закрывать заявку без подтверждения смены временного пароля нельзя. internal_ops requisites access",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 90,
-      "text": "Когда документы готовы, менеджер обязан уточнить у клиента, можно ли передать его телефон банку для согласования встречи.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "bank_call_consent",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "meeting",
-        "consent"
-      ],
-      "fact": "Когда документы готовы, менеджер обязан уточнить у клиента, можно ли передать его телефон банку для согласования встречи.",
-      "positioning": null,
-      "search_text": "internal_ops bank_call_consent когда документы готовы, менеджер обязан уточнить у клиента, можно ли передать его телефон банку для согласования встречи. internal_ops meeting consent",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 91,
-      "text": "Если банк не позвонил клиенту для назначения встречи, сотрудник бэк-офиса должен срочно связаться с менеджером банка.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "no_call_from_bank",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "bank_communication",
-        "meeting"
-      ],
-      "fact": "Если банк не позвонил клиенту для назначения встречи, сотрудник бэк-офиса должен срочно связаться с менеджером банка.",
-      "positioning": null,
-      "search_text": "internal_ops no_call_from_bank если банк не позвонил клиенту для назначения встречи, сотрудник бэк-офиса должен срочно связаться с менеджером банка. internal_ops bank_communication meeting",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 92,
-      "text": "Если данные о времени встречи от банка и клиента расходятся, бэк-офис обязан срочно уточнить корректную информацию.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "date_mismatch",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "bank_communication",
-        "mismatch"
-      ],
-      "fact": "Если данные о времени встречи от банка и клиента расходятся, бэк-офис обязан срочно уточнить корректную информацию.",
-      "positioning": null,
-      "search_text": "internal_ops date_mismatch если данные о времени встречи от банка и клиента расходятся, бэк-офис обязан срочно уточнить корректную информацию. internal_ops bank_communication mismatch",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 93,
-      "text": "Если клиент переносит встречу, заявка возвращается на стадию согласования, а менеджер фиксирует новую дату.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "meeting_reschedule_client",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "meeting",
-        "reschedule_client"
-      ],
-      "fact": "Если клиент переносит встречу, заявка возвращается на стадию согласования, а менеджер фиксирует новую дату.",
-      "positioning": null,
-      "search_text": "internal_ops meeting_reschedule_client если клиент переносит встречу, заявка возвращается на стадию согласования, а менеджер фиксирует новую дату. internal_ops meeting reschedule_client",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 94,
-      "text": "Если банк переносит встречу, менеджер должен срочно связаться с клиентом и договориться о новой дате.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "meeting_reschedule_bank",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "meeting",
-        "reschedule_bank"
-      ],
-      "fact": "Если банк переносит встречу, менеджер должен срочно связаться с клиентом и договориться о новой дате.",
-      "positioning": null,
-      "search_text": "internal_ops meeting_reschedule_bank если банк переносит встречу, менеджер должен срочно связаться с клиентом и договориться о новой дате. internal_ops meeting reschedule_bank",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 95,
-      "text": "Если в день подписания документов возникла проблема, клиент не должен уходить из отделения, а менеджер должен решать вопрос через бэк-офис на месте.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "signing_issue",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "signing",
-        "issue"
-      ],
-      "fact": "Если в день подписания документов возникла проблема, клиент не должен уходить из отделения, а менеджер должен решать вопрос через бэк-офис на месте.",
-      "positioning": null,
-      "search_text": "internal_ops signing_issue если в день подписания документов возникла проблема, клиент не должен уходить из отделения, а менеджер должен решать вопрос через бэк-офис на месте. internal_ops signing issue",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 96,
-      "text": "Если через 1–2 дня после подписания документов клиент не получил реквизиты и доступы, менеджер обязан срочно сообщить о проблеме.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "delay_access",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "access",
-        "delay"
-      ],
-      "fact": "Если через 1–2 дня после подписания документов клиент не получил реквизиты и доступы, менеджер обязан срочно сообщить о проблеме.",
-      "positioning": null,
-      "search_text": "internal_ops delay_access если через 1–2 дня после подписания документов клиент не получил реквизиты и доступы, менеджер обязан срочно сообщить о проблеме. internal_ops access delay",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 97,
-      "text": "Если клиент ушел из банка без подписания документов из-за плохого обслуживания, заявка переводится в статус сбоя и подключается руководство.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "negative_experience",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "negative",
-        "issue",
-        "escalation"
-      ],
-      "fact": "Если клиент ушел из банка без подписания документов из-за плохого обслуживания, заявка переводится в статус сбоя и подключается руководство.",
-      "positioning": null,
-      "search_text": "internal_ops negative_experience если клиент ушел из банка без подписания документов из-за плохого обслуживания, заявка переводится в статус сбоя и подключается руководство. internal_ops negative issue escalation",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 98,
-      "text": "Если срочная заявка была подана сразу в несколько банков, после успешного открытия счета в одном банке остальные заявки нужно аннулировать.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "duplicate_requests",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "duplicates"
-      ],
-      "fact": "Если срочная заявка была подана сразу в несколько банков, после успешного открытия счета в одном банке остальные заявки нужно аннулировать.",
-      "positioning": null,
-      "search_text": "internal_ops duplicate_requests если срочная заявка была подана сразу в несколько банков, после успешного открытия счета в одном банке остальные заявки нужно аннулировать. internal_ops duplicates",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 99,
-      "text": "Если в новой заявке не хватает данных, а менеджер не отвечает бэк-офису в течение часа, об этом нужно срочно сообщить руководителю отдела продаж.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "missing_data",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "missing_data",
-        "escalation"
-      ],
-      "fact": "Если в новой заявке не хватает данных, а менеджер не отвечает бэк-офису в течение часа, об этом нужно срочно сообщить руководителю отдела продаж.",
-      "positioning": null,
-      "search_text": "internal_ops missing_data если в новой заявке не хватает данных, а менеджер не отвечает бэк-офису в течение часа, об этом нужно срочно сообщить руководителю отдела продаж. internal_ops missing_data escalation",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 100,
-      "text": "Если клиент просит дополнительные льготы, их сначала нужно согласовать с руководителем отдела продаж, а затем передать задачу в бэк-офис.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "extra_benefits",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "benefits",
-        "approval"
-      ],
-      "fact": "Если клиент просит дополнительные льготы, их сначала нужно согласовать с руководителем отдела продаж, а затем передать задачу в бэк-офис.",
-      "positioning": null,
-      "search_text": "internal_ops extra_benefits если клиент просит дополнительные льготы, их сначала нужно согласовать с руководителем отдела продаж, а затем передать задачу в бэк-офис. internal_ops benefits approval",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 101,
-      "text": "Если банк не согласовывает нужную льготу, сотрудник бэк-офиса должен связаться с руководителем отдела продаж банка или департаментом по банкротству.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "bank_denies_benefit",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "benefits",
-        "escalation"
-      ],
-      "fact": "Если банк не согласовывает нужную льготу, сотрудник бэк-офиса должен связаться с руководителем отдела продаж банка или департаментом по банкротству.",
-      "positioning": null,
-      "search_text": "internal_ops bank_denies_benefit если банк не согласовывает нужную льготу, сотрудник бэк-офиса должен связаться с руководителем отдела продаж банка или департаментом по банкротству. internal_ops benefits escalation",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 102,
-      "text": "Если счет открывается для нерезидента, сначала в банк отправляют заявку с ИНН должника для предварительной проверки, и только после ответа банка заказывают реестр.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "non_resident_check",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "non_resident",
-        "verification"
-      ],
-      "fact": "Если счет открывается для нерезидента, сначала в банк отправляют заявку с ИНН должника для предварительной проверки, и только после ответа банка заказывают реестр.",
-      "positioning": null,
-      "search_text": "internal_ops non_resident_check если счет открывается для нерезидента, сначала в банк отправляют заявку с инн должника для предварительной проверки, и только после ответа банка заказывают реестр. internal_ops non_resident verification",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 103,
-      "text": "Если клиенту нужен нестандартный счет, менеджер должен выяснить точное название счета, цели использования и статью ФЗ-127, после чего бэк-офис уточняет возможность открытия у банка.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "internal_ops",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "non_standard_account",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [],
-      "tags": [
-        "internal_ops",
-        "non_standard_account",
-        "verification"
-      ],
-      "fact": "Если клиенту нужен нестандартный счет, менеджер должен выяснить точное название счета, цели использования и статью ФЗ-127, после чего бэк-офис уточняет возможность открытия у банка.",
-      "positioning": null,
-      "search_text": "internal_ops non_standard_account если клиенту нужен нестандартный счет, менеджер должен выяснить точное название счета, цели использования и статью фз-127, после чего бэк-офис уточняет возможность открытия у банка. internal_ops non_standard_account verification",
-      "is_internal": true
-    },
-    {
-      "chunk_id": 104,
-      "text": "Если арбитражного управляющего меняют по решению суда, льготы на счете сохранятся, они исчезнут только в том случае, если новый АУ решит сменить счет.",
-      "page_start": 0,
-      "page_end": 0,
-      "source": "knowledge_base.txt",
-      "type": "constraint",
-      "bank": null,
-      "client_type": [],
-      "status": null,
-      "field": null,
-      "topic": "change_au",
-      "value_num": null,
-      "value_text": null,
-      "aliases": [
-        "смена",
-        "ау",
-        "сменили",
-        "управляющего",
-        "назначили",
-        "нового",
-        "другой",
-        "управляющий",
-        "суд",
-        "поменял",
-        "ау",
-        "льготы",
-        "при",
-        "смене"
-      ],
-      "tags": [
-        "constraint",
-        "au_change",
-        "benefits"
-      ],
-      "fact": "Если арбитражного управляющего меняют по решению суда, льготы на счете сохранятся, они исчезнут только в том случае, если новый АУ решит сменить счет.",
-      "positioning": null,
-      "search_text": "constraint change_au если арбитражного управляющего меняют по решению суда, льготы на счете сохранятся, они исчезнут только в том случае, если новый ау решит сменить счет. смена ау сменили управляющего назначили нового другой управляющий суд поменял ау льготы при смене constraint au_change benefits",
-      "is_internal": false
-    },
-    {
-      "chunk_id": 105,
       "text": "Кредитор может получить имущество должника вместо денег (например, если имущество неликвидно); это называется предложением о погашении требований кредиторов путем предоставления отступного.",
       "page_start": 0,
       "page_end": 0,
@@ -3228,11 +2904,14 @@
       ],
       "fact": "Кредитор может получить имущество должника вместо денег (например, если имущество неликвидно); это называется предложением о погашении требований кредиторов путем предоставления отступного.",
       "positioning": null,
-      "search_text": "feature otstupnoe кредитор может получить имущество должника вместо денег (например, если имущество неликвидно); это называется предложением о погашении требований кредиторов путем предоставления отступного. отступное замена денег на имущество имущество кредитору вместо денег неликвид feature property creditors",
-      "is_internal": false
+      "search_text": "feature otstupnoe кредитор может получить имущество должника вместо денег (например, если имущество неликвидно); это называется предложением о погашении требований кредиторов путем предоставления отступного. otstupnoe отступное замена денег на имущество имущество кредитору вместо денег неликвид feature property creditors",
+      "is_internal": false,
+      "scenario_id": "otstupnoe",
+      "answer_hint": null,
+      "next_question": null
     },
     {
-      "chunk_id": 106,
+      "chunk_id": 82,
       "text": "Счета можно открывать на любых стадиях: наблюдения, внешнего управления, конкурсного производства и даже если компания в процессе ликвидации.",
       "page_start": 0,
       "page_end": 0,
@@ -3265,11 +2944,14 @@
       ],
       "fact": "Счета можно открывать на любых стадиях: наблюдения, внешнего управления, конкурсного производства и даже если компания в процессе ликвидации.",
       "positioning": null,
-      "search_text": "constraint allowed_stages счета можно открывать на любых стадиях: наблюдения, внешнего управления, конкурсного производства и даже если компания в процессе ликвидации. стадия наблюдения внешнее управление конкурсное производство на каких стадиях стадия банкротства constraint stages opening",
-      "is_internal": false
+      "search_text": "constraint allowed_stages счета можно открывать на любых стадиях: наблюдения, внешнего управления, конкурсного производства и даже если компания в процессе ликвидации. allowed_stages стадия наблюдения внешнее управление конкурсное производство на каких стадиях стадия банкротства constraint stages opening",
+      "is_internal": false,
+      "scenario_id": "allowed_stages",
+      "answer_hint": null,
+      "next_question": null
     },
     {
-      "chunk_id": 107,
+      "chunk_id": 83,
       "text": "Осуществление платежей представителем финансового управляющего возможно, если у него есть нотариальная доверенность.",
       "page_start": 0,
       "page_end": 0,
@@ -3305,11 +2987,14 @@
       ],
       "fact": "Осуществление платежей представителем финансового управляющего возможно, если у него есть нотариальная доверенность.",
       "positioning": null,
-      "search_text": "constraint proxy_payments осуществление платежей представителем финансового управляющего возможно, если у него есть нотариальная доверенность. платежи представителем оплатить по доверенности переводы по доверенности нотариальная доверенность платежи помощник переведет constraint proxy payments poa",
-      "is_internal": false
+      "search_text": "constraint proxy_payments осуществление платежей представителем финансового управляющего возможно, если у него есть нотариальная доверенность. proxy_payments платежи представителем оплатить по доверенности переводы по доверенности нотариальная доверенность платежи помощник переведет constraint proxy payments poa",
+      "is_internal": false,
+      "scenario_id": "proxy_payments",
+      "answer_hint": null,
+      "next_question": null
     },
     {
-      "chunk_id": 108,
+      "chunk_id": 84,
       "text": "Если счет уже открыт напрямую, перезакрепить его за нами можно только через закрытие (срок ожидания в Т-Банке — 3 месяца, в Альфа-Банке — 2 месяца), поэтому вместо перезакрепления клиенту рекомендуется просто открыть счет в другом нашем банке-партнере.",
       "page_start": 0,
       "page_end": 0,
@@ -3347,11 +3032,14 @@
       ],
       "fact": "Если счет уже открыт напрямую, перезакрепить его за нами можно только через закрытие (срок ожидания в Т-Банке — 3 месяца, в Альфа-Банке — 2 месяца), поэтому вместо перезакрепления клиенту рекомендуется просто открыть счет в другом нашем банке-партнере.",
       "positioning": null,
-      "search_text": "constraint account_reattach если счет уже открыт напрямую, перезакрепить его за нами можно только через закрытие (срок ожидания в т-банке — 3 месяца, в альфа-банке — 2 месяца), поэтому вместо перезакрепления клиенту рекомендуется просто открыть счет в другом нашем банке-партнере. перезакрепить должника перевести к вам закрыть и открыть заново перевести счет уже открыт напрямую свой счет constraint account reattach",
-      "is_internal": false
+      "search_text": "constraint account_reattach если счет уже открыт напрямую, перезакрепить его за нами можно только через закрытие (срок ожидания в т-банке — 3 месяца, в альфа-банке — 2 месяца), поэтому вместо перезакрепления клиенту рекомендуется просто открыть счет в другом нашем банке-партнере. account_reattach перезакрепить должника перевести к вам закрыть и открыть заново перевести счет уже открыт напрямую свой счет constraint account reattach",
+      "is_internal": false,
+      "scenario_id": "account_reattach",
+      "answer_hint": null,
+      "next_question": null
     },
     {
-      "chunk_id": 109,
+      "chunk_id": 85,
       "text": "Валютный счет должника может использоваться исключительно для зачисления иностранной валюты от третьих лиц (дебиторов); расчеты с кредиторами с валютного счета проводить нельзя.",
       "page_start": 0,
       "page_end": 0,
@@ -3386,11 +3074,14 @@
       ],
       "fact": "Валютный счет должника может использоваться исключительно для зачисления иностранной валюты от третьих лиц (дебиторов); расчеты с кредиторами с валютного счета проводить нельзя.",
       "positioning": null,
-      "search_text": "constraint currency_account валютный счет должника может использоваться исключительно для зачисления иностранной валюты от третьих лиц (дебиторов); расчеты с кредиторами с валютного счета проводить нельзя. валютный счет счет в валюте иностранная валюта доллары евро расчеты в валюте валюта constraint currency limits",
-      "is_internal": false
+      "search_text": "constraint currency_account валютный счет должника может использоваться исключительно для зачисления иностранной валюты от третьих лиц (дебиторов); расчеты с кредиторами с валютного счета проводить нельзя. currency_account валютный счет счет в валюте иностранная валюта доллары евро расчеты в валюте валюта constraint currency limits",
+      "is_internal": false,
+      "scenario_id": "currency_account",
+      "answer_hint": null,
+      "next_question": null
     },
     {
-      "chunk_id": 110,
+      "chunk_id": 86,
       "text": "По регламенту арбитражный управляющий не может иметь несколько одинаковых основных счетов в разных банках; при переходе на новое обслуживание старые счета должны быть закрыты.",
       "page_start": 0,
       "page_end": 0,
@@ -3425,8 +3116,714 @@
       ],
       "fact": "По регламенту арбитражный управляющий не может иметь несколько одинаковых основных счетов в разных банках; при переходе на новое обслуживание старые счета должны быть закрыты.",
       "positioning": null,
-      "search_text": "constraint multiple_accounts по регламенту арбитражный управляющий не может иметь несколько одинаковых основных счетов в разных банках; при переходе на новое обслуживание старые счета должны быть закрыты. несколько основных счетов два счета счета в разных банках одинаковые счета несколько банков constraint multiple_accounts closing",
-      "is_internal": false
+      "search_text": "constraint multiple_accounts по регламенту арбитражный управляющий не может иметь несколько одинаковых основных счетов в разных банках; при переходе на новое обслуживание старые счета должны быть закрыты. multiple_accounts несколько основных счетов два счета счета в разных банках одинаковые счета несколько банков constraint multiple_accounts closing",
+      "is_internal": false,
+      "scenario_id": "multiple_accounts",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 87,
+      "text": "Если арбитражного управляющего меняют по решению суда, льготы на счете сохранятся, они исчезнут только в том случае, если новый АУ решит сменить счет.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "constraint",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "change_au",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [
+        "смена",
+        "ау",
+        "сменили",
+        "управляющего",
+        "назначили",
+        "нового",
+        "другой",
+        "управляющий",
+        "суд",
+        "поменял",
+        "ау",
+        "льготы",
+        "при",
+        "смене"
+      ],
+      "tags": [
+        "constraint",
+        "au_change",
+        "benefits"
+      ],
+      "fact": "Если арбитражного управляющего меняют по решению суда, льготы на счете сохранятся, они исчезнут только в том случае, если новый АУ решит сменить счет.",
+      "positioning": null,
+      "search_text": "constraint change_au если арбитражного управляющего меняют по решению суда, льготы на счете сохранятся, они исчезнут только в том случае, если новый ау решит сменить счет. change_au смена ау сменили управляющего назначили нового другой управляющий суд поменял ау льготы при смене constraint au_change benefits",
+      "is_internal": false,
+      "scenario_id": "change_au",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 88,
+      "text": "Полное открытие счета обычно занимает около недели с момента заявки; после подписания документов в банке открытие занимает до двух дней.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "timelines",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [
+        "сколько",
+        "дней",
+        "когда",
+        "откроют",
+        "сроки",
+        "открытия",
+        "как",
+        "быстро",
+        "время",
+        "открытия",
+        "за",
+        "сколько",
+        "дней",
+        "открывается",
+        "срок",
+        "счета"
+      ],
+      "tags": [
+        "internal_ops",
+        "timelines"
+      ],
+      "fact": "Полное открытие счета обычно занимает около недели с момента заявки; после подписания документов в банке открытие занимает до двух дней.",
+      "positioning": null,
+      "search_text": "internal_ops timelines полное открытие счета обычно занимает около недели с момента заявки; после подписания документов в банке открытие занимает до двух дней. internal_ops_timelines сколько дней когда откроют сроки открытия как быстро время открытия за сколько дней открывается срок счета internal_ops timelines",
+      "is_internal": true,
+      "scenario_id": "internal_ops_timelines",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 89,
+      "text": "Приоритеты заявок: не срочный — в течение месяца, стандартный — в течение двух недель, срочный — в течение недели, горящий — в течение трех дней, катастрофа — сегодня.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "priorities",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "priorities"
+      ],
+      "fact": "Приоритеты заявок: не срочный — в течение месяца, стандартный — в течение двух недель, срочный — в течение недели, горящий — в течение трех дней, катастрофа — сегодня.",
+      "positioning": null,
+      "search_text": "internal_ops priorities приоритеты заявок: не срочный — в течение месяца, стандартный — в течение двух недель, срочный — в течение недели, горящий — в течение трех дней, катастрофа — сегодня. internal_ops_priorities internal_ops priorities",
+      "is_internal": true,
+      "scenario_id": "internal_ops_priorities",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 90,
+      "text": "Если заявка получила статус «Просрочено», изменить дату открытия счета может только сотрудник отдела контроля качества.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "overdue_priority",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "priority",
+        "overdue"
+      ],
+      "fact": "Если заявка получила статус «Просрочено», изменить дату открытия счета может только сотрудник отдела контроля качества.",
+      "positioning": null,
+      "search_text": "internal_ops overdue_priority если заявка получила статус «просрочено», изменить дату открытия счета может только сотрудник отдела контроля качества. internal_ops_overdue_priority internal_ops priority overdue",
+      "is_internal": true,
+      "scenario_id": "internal_ops_overdue_priority",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 91,
+      "text": "Если на открываемом счете уже есть средства, заявка получает приоритет «Срочно», и у клиента нужно запросить выписку об остатках.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "funds_available",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "priority",
+        "urgent",
+        "funds"
+      ],
+      "fact": "Если на открываемом счете уже есть средства, заявка получает приоритет «Срочно», и у клиента нужно запросить выписку об остатках.",
+      "positioning": null,
+      "search_text": "internal_ops funds_available если на открываемом счете уже есть средства, заявка получает приоритет «срочно», и у клиента нужно запросить выписку об остатках. internal_ops_funds_available internal_ops priority urgent funds",
+      "is_internal": true,
+      "scenario_id": "internal_ops_funds_available",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 92,
+      "text": "Если торги проходят через неделю и счет нужен срочно, заявку нужно согласовать с руководителем отдела продаж и отправить с пометкой о срочности.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "urgent_auction",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "urgent",
+        "auction"
+      ],
+      "fact": "Если торги проходят через неделю и счет нужен срочно, заявку нужно согласовать с руководителем отдела продаж и отправить с пометкой о срочности.",
+      "positioning": null,
+      "search_text": "internal_ops urgent_auction если торги проходят через неделю и счет нужен срочно, заявку нужно согласовать с руководителем отдела продаж и отправить с пометкой о срочности. internal_ops_urgent_auction internal_ops urgent auction",
+      "is_internal": true,
+      "scenario_id": "internal_ops_urgent_auction",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 93,
+      "text": "На стадии согласования встречи с банком менеджер обязан лично связаться с клиентом и подтвердить факт согласования встречи банком.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "stage_meeting_prep",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "meeting",
+        "stage"
+      ],
+      "fact": "На стадии согласования встречи с банком менеджер обязан лично связаться с клиентом и подтвердить факт согласования встречи банком.",
+      "positioning": null,
+      "search_text": "internal_ops stage_meeting_prep на стадии согласования встречи с банком менеджер обязан лично связаться с клиентом и подтвердить факт согласования встречи банком. internal_ops_stage_meeting_prep internal_ops meeting stage",
+      "is_internal": true,
+      "scenario_id": "internal_ops_stage_meeting_prep",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 94,
+      "text": "Стадия «Сегодня встреча / Ждем АУ» требует повышенного контроля; менеджер обязан связаться с АУ и контролировать посещение банка.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "stage_meeting_today",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "meeting",
+        "stage"
+      ],
+      "fact": "Стадия «Сегодня встреча / Ждем АУ» требует повышенного контроля; менеджер обязан связаться с АУ и контролировать посещение банка.",
+      "positioning": null,
+      "search_text": "internal_ops stage_meeting_today стадия «сегодня встреча / ждем ау» требует повышенного контроля; менеджер обязан связаться с ау и контролировать посещение банка. internal_ops_stage_meeting_today internal_ops meeting stage",
+      "is_internal": true,
+      "scenario_id": "internal_ops_stage_meeting_today",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 95,
+      "text": "Если заявка отложена по уважительной причине, ее можно перевести в статус «Долгосрок» максимум на один месяц.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "stage_longterm",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "longterm",
+        "stage"
+      ],
+      "fact": "Если заявка отложена по уважительной причине, ее можно перевести в статус «Долгосрок» максимум на один месяц.",
+      "positioning": null,
+      "search_text": "internal_ops stage_longterm если заявка отложена по уважительной причине, ее можно перевести в статус «долгосрок» максимум на один месяц. internal_ops_stage_longterm internal_ops longterm stage",
+      "is_internal": true,
+      "scenario_id": "internal_ops_stage_longterm",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 96,
+      "text": "Этап получения реквизитов и доступов является критическим; закрывать заявку без подтверждения смены временного пароля нельзя.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "stage_requisites",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "requisites",
+        "access"
+      ],
+      "fact": "Этап получения реквизитов и доступов является критическим; закрывать заявку без подтверждения смены временного пароля нельзя.",
+      "positioning": null,
+      "search_text": "internal_ops stage_requisites этап получения реквизитов и доступов является критическим; закрывать заявку без подтверждения смены временного пароля нельзя. internal_ops_stage_requisites internal_ops requisites access",
+      "is_internal": true,
+      "scenario_id": "internal_ops_stage_requisites",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 97,
+      "text": "Когда документы готовы, менеджер обязан уточнить у клиента, можно ли передать его телефон банку для согласования встречи.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "bank_call_consent",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "meeting",
+        "consent"
+      ],
+      "fact": "Когда документы готовы, менеджер обязан уточнить у клиента, можно ли передать его телефон банку для согласования встречи.",
+      "positioning": null,
+      "search_text": "internal_ops bank_call_consent когда документы готовы, менеджер обязан уточнить у клиента, можно ли передать его телефон банку для согласования встречи. internal_ops_bank_call_consent internal_ops meeting consent",
+      "is_internal": true,
+      "scenario_id": "internal_ops_bank_call_consent",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 98,
+      "text": "Если банк не позвонил клиенту для назначения встречи, сотрудник бэк-офиса должен срочно связаться с менеджером банка.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "no_call_from_bank",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "bank_communication",
+        "meeting"
+      ],
+      "fact": "Если банк не позвонил клиенту для назначения встречи, сотрудник бэк-офиса должен срочно связаться с менеджером банка.",
+      "positioning": null,
+      "search_text": "internal_ops no_call_from_bank если банк не позвонил клиенту для назначения встречи, сотрудник бэк-офиса должен срочно связаться с менеджером банка. internal_ops_no_call_from_bank internal_ops bank_communication meeting",
+      "is_internal": true,
+      "scenario_id": "internal_ops_no_call_from_bank",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 99,
+      "text": "Если данные о времени встречи от банка и клиента расходятся, бэк-офис обязан срочно уточнить корректную информацию.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "date_mismatch",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "bank_communication",
+        "mismatch"
+      ],
+      "fact": "Если данные о времени встречи от банка и клиента расходятся, бэк-офис обязан срочно уточнить корректную информацию.",
+      "positioning": null,
+      "search_text": "internal_ops date_mismatch если данные о времени встречи от банка и клиента расходятся, бэк-офис обязан срочно уточнить корректную информацию. internal_ops_date_mismatch internal_ops bank_communication mismatch",
+      "is_internal": true,
+      "scenario_id": "internal_ops_date_mismatch",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 100,
+      "text": "Если клиент переносит встречу, заявка возвращается на стадию согласования, а менеджер фиксирует новую дату.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "meeting_reschedule_client",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "meeting",
+        "reschedule_client"
+      ],
+      "fact": "Если клиент переносит встречу, заявка возвращается на стадию согласования, а менеджер фиксирует новую дату.",
+      "positioning": null,
+      "search_text": "internal_ops meeting_reschedule_client если клиент переносит встречу, заявка возвращается на стадию согласования, а менеджер фиксирует новую дату. internal_ops_meeting_reschedule_client internal_ops meeting reschedule_client",
+      "is_internal": true,
+      "scenario_id": "internal_ops_meeting_reschedule_client",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 101,
+      "text": "Если банк переносит встречу, менеджер должен срочно связаться с клиентом и договориться о новой дате.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "meeting_reschedule_bank",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "meeting",
+        "reschedule_bank"
+      ],
+      "fact": "Если банк переносит встречу, менеджер должен срочно связаться с клиентом и договориться о новой дате.",
+      "positioning": null,
+      "search_text": "internal_ops meeting_reschedule_bank если банк переносит встречу, менеджер должен срочно связаться с клиентом и договориться о новой дате. internal_ops_meeting_reschedule_bank internal_ops meeting reschedule_bank",
+      "is_internal": true,
+      "scenario_id": "internal_ops_meeting_reschedule_bank",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 102,
+      "text": "Если в день подписания документов возникла проблема, клиент не должен уходить из отделения, а менеджер должен решать вопрос через бэк-офис на месте.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "signing_issue",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "signing",
+        "issue"
+      ],
+      "fact": "Если в день подписания документов возникла проблема, клиент не должен уходить из отделения, а менеджер должен решать вопрос через бэк-офис на месте.",
+      "positioning": null,
+      "search_text": "internal_ops signing_issue если в день подписания документов возникла проблема, клиент не должен уходить из отделения, а менеджер должен решать вопрос через бэк-офис на месте. internal_ops_signing_issue internal_ops signing issue",
+      "is_internal": true,
+      "scenario_id": "internal_ops_signing_issue",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 103,
+      "text": "Если через 1–2 дня после подписания документов клиент не получил реквизиты и доступы, менеджер обязан срочно сообщить о проблеме.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "delay_access",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "access",
+        "delay"
+      ],
+      "fact": "Если через 1–2 дня после подписания документов клиент не получил реквизиты и доступы, менеджер обязан срочно сообщить о проблеме.",
+      "positioning": null,
+      "search_text": "internal_ops delay_access если через 1–2 дня после подписания документов клиент не получил реквизиты и доступы, менеджер обязан срочно сообщить о проблеме. internal_ops_delay_access internal_ops access delay",
+      "is_internal": true,
+      "scenario_id": "internal_ops_delay_access",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 104,
+      "text": "Если клиент ушел из банка без подписания документов из-за плохого обслуживания, заявка переводится в статус сбоя и подключается руководство.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "negative_experience",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "negative",
+        "issue",
+        "escalation"
+      ],
+      "fact": "Если клиент ушел из банка без подписания документов из-за плохого обслуживания, заявка переводится в статус сбоя и подключается руководство.",
+      "positioning": null,
+      "search_text": "internal_ops negative_experience если клиент ушел из банка без подписания документов из-за плохого обслуживания, заявка переводится в статус сбоя и подключается руководство. internal_ops_negative_experience internal_ops negative issue escalation",
+      "is_internal": true,
+      "scenario_id": "internal_ops_negative_experience",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 105,
+      "text": "Если срочная заявка была подана сразу в несколько банков, после успешного открытия счета в одном банке остальные заявки нужно аннулировать.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "duplicate_requests",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "duplicates"
+      ],
+      "fact": "Если срочная заявка была подана сразу в несколько банков, после успешного открытия счета в одном банке остальные заявки нужно аннулировать.",
+      "positioning": null,
+      "search_text": "internal_ops duplicate_requests если срочная заявка была подана сразу в несколько банков, после успешного открытия счета в одном банке остальные заявки нужно аннулировать. internal_ops_duplicate_requests internal_ops duplicates",
+      "is_internal": true,
+      "scenario_id": "internal_ops_duplicate_requests",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 106,
+      "text": "Если в новой заявке не хватает данных, а менеджер не отвечает бэк-офису в течение часа, об этом нужно срочно сообщить руководителю отдела продаж.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "missing_data",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "missing_data",
+        "escalation"
+      ],
+      "fact": "Если в новой заявке не хватает данных, а менеджер не отвечает бэк-офису в течение часа, об этом нужно срочно сообщить руководителю отдела продаж.",
+      "positioning": null,
+      "search_text": "internal_ops missing_data если в новой заявке не хватает данных, а менеджер не отвечает бэк-офису в течение часа, об этом нужно срочно сообщить руководителю отдела продаж. internal_ops_missing_data internal_ops missing_data escalation",
+      "is_internal": true,
+      "scenario_id": "internal_ops_missing_data",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 107,
+      "text": "Если клиент просит дополнительные льготы, их сначала нужно согласовать с руководителем отдела продаж, а затем передать задачу в бэк-офис.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "extra_benefits",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "benefits",
+        "approval"
+      ],
+      "fact": "Если клиент просит дополнительные льготы, их сначала нужно согласовать с руководителем отдела продаж, а затем передать задачу в бэк-офис.",
+      "positioning": null,
+      "search_text": "internal_ops extra_benefits если клиент просит дополнительные льготы, их сначала нужно согласовать с руководителем отдела продаж, а затем передать задачу в бэк-офис. internal_ops_extra_benefits internal_ops benefits approval",
+      "is_internal": true,
+      "scenario_id": "internal_ops_extra_benefits",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 108,
+      "text": "Если банк не согласовывает нужную льготу, сотрудник бэк-офиса должен связаться с руководителем отдела продаж банка или департаментом по банкротству.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "bank_denies_benefit",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "benefits",
+        "escalation"
+      ],
+      "fact": "Если банк не согласовывает нужную льготу, сотрудник бэк-офиса должен связаться с руководителем отдела продаж банка или департаментом по банкротству.",
+      "positioning": null,
+      "search_text": "internal_ops bank_denies_benefit если банк не согласовывает нужную льготу, сотрудник бэк-офиса должен связаться с руководителем отдела продаж банка или департаментом по банкротству. internal_ops_bank_denies_benefit internal_ops benefits escalation",
+      "is_internal": true,
+      "scenario_id": "internal_ops_bank_denies_benefit",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 109,
+      "text": "Если счет открывается для нерезидента, сначала в банк отправляют заявку с ИНН должника для предварительной проверки, и только после ответа банка заказывают реестр.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "non_resident_check",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "non_resident",
+        "verification"
+      ],
+      "fact": "Если счет открывается для нерезидента, сначала в банк отправляют заявку с ИНН должника для предварительной проверки, и только после ответа банка заказывают реестр.",
+      "positioning": null,
+      "search_text": "internal_ops non_resident_check если счет открывается для нерезидента, сначала в банк отправляют заявку с инн должника для предварительной проверки, и только после ответа банка заказывают реестр. internal_ops_non_resident_check internal_ops non_resident verification",
+      "is_internal": true,
+      "scenario_id": "internal_ops_non_resident_check",
+      "answer_hint": null,
+      "next_question": null
+    },
+    {
+      "chunk_id": 110,
+      "text": "Если клиенту нужен нестандартный счет, менеджер должен выяснить точное название счета, цели использования и статью ФЗ-127, после чего бэк-офис уточняет возможность открытия у банка.",
+      "page_start": 0,
+      "page_end": 0,
+      "source": "knowledge_base.txt",
+      "type": "internal_ops",
+      "bank": null,
+      "client_type": [],
+      "status": null,
+      "field": null,
+      "topic": "non_standard_account",
+      "value_num": null,
+      "value_text": null,
+      "aliases": [],
+      "tags": [
+        "internal_ops",
+        "non_standard_account",
+        "verification"
+      ],
+      "fact": "Если клиенту нужен нестандартный счет, менеджер должен выяснить точное название счета, цели использования и статью ФЗ-127, после чего бэк-офис уточняет возможность открытия у банка.",
+      "positioning": null,
+      "search_text": "internal_ops non_standard_account если клиенту нужен нестандартный счет, менеджер должен выяснить точное название счета, цели использования и статью фз-127, после чего бэк-офис уточняет возможность открытия у банка. internal_ops_non_standard_account internal_ops non_standard_account verification",
+      "is_internal": true,
+      "scenario_id": "internal_ops_non_standard_account",
+      "answer_hint": null,
+      "next_question": null
     }
   ]
 }

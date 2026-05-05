@@ -380,3 +380,39 @@ async def build_conversation_context(
         "fact_pack": fact_pack,
         "tools": ["calculate_transfer_fee", "search_kb"],
     }
+
+
+def _merge_pricing_list(existing: list, kb_list: list) -> list:
+    """Merge KB pricing into hardcoded list: KB data wins per-bank, hardcoded fills gaps."""
+    by_bank = {e["bank"]: dict(e) for e in existing}
+    for kb_entry in kb_list:
+        bank = kb_entry.get("bank")
+        if not bank:
+            continue
+        if bank in by_bank:
+            by_bank[bank].update({k: v for k, v in kb_entry.items() if v is not None})
+        else:
+            by_bank[bank] = dict(kb_entry)
+    return list(by_bank.values())
+
+
+def enrich_fact_pack_from_kb(fact_pack: dict, kb_static: dict) -> dict:
+    """Override hardcoded fact_pack entries with KB-derived data where available."""
+    if not kb_static:
+        return fact_pack
+    pack = dict(fact_pack)
+    if kb_static.get("partner_banks"):
+        pack["partner_banks"] = kb_static["partner_banks"]
+    if kb_static.get("bank_pricing_yul"):
+        existing = pack.get("bank_pricing_yul") or []
+        pack["bank_pricing_yul"] = _merge_pricing_list(existing, kb_static["bank_pricing_yul"])
+    if kb_static.get("bank_pricing_fl"):
+        existing = pack.get("bank_pricing_fl") or []
+        pack["bank_pricing_fl"] = _merge_pricing_list(existing, kb_static["bank_pricing_fl"])
+    if kb_static.get("advance_opening"):
+        pack["advance_opening"] = kb_static["advance_opening"]
+    if kb_static.get("card_rules"):
+        existing = pack.get("card_rules") or {}
+        if isinstance(existing, dict):
+            pack["card_rules"] = {**existing, **kb_static["card_rules"]}
+    return pack

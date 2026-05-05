@@ -83,6 +83,7 @@ def validate_reply(
     tool_results: Optional[dict] = None,
     user_text: str = "",
     answer_contract: Optional[dict] = None,
+    scenario_facts: Optional[dict] = None,
 ) -> dict:
     """
     Проверить ответ brain.
@@ -176,5 +177,28 @@ def validate_reply(
         for phrase in do_not_include:
             if phrase.lower() in reply_lower:
                 return {"is_valid": False, "reason": f"forbidden_phrase_{phrase[:30]}"}
+
+    # Scenario facts completeness check
+    if scenario_facts:
+        _GENERIC_PHRASES = [
+            "как я могу помочь", "чем могу помочь",
+            "секунду уточняю информацию",
+            "что вас интересует", "задайте вопрос",
+        ]
+        if any(ph in reply_lower for ph in _GENERIC_PHRASES):
+            return {"is_valid": False, "reason": "generic_reply_despite_scenario_facts"}
+
+        # debtor_card_realization: required facts
+        if "debtor_card_realization" in scenario_facts:
+            if answer_contract and answer_contract.get("topic") == "debtor_card":
+                required = ["реализация", "финансовый управляющий"]
+                if not all(r in reply_lower for r in required):
+                    return {"is_valid": False, "reason": "missing_required_card_facts"}
+
+        # partner_banks: if topic=partner_banks, all 3 active banks must appear
+        if "partner_banks" in scenario_facts and answer_contract and answer_contract.get("topic") == "partner_banks":
+            required_banks = ["альфа-банк", "ткб", "уралсиб"]
+            if not all(b in reply_lower for b in required_banks):
+                return {"is_valid": False, "reason": "missing_required_partner_banks"}
 
     return {"is_valid": True, "reason": None}

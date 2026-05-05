@@ -347,8 +347,15 @@ async def process_message(message):
         current_entities = ctx["current_entities"]
         fact_pack = ctx.get("fact_pack") or {}
 
-        # 2. Retrieve KB facts (broad, no query_mode)
-        kb_facts = await retrieve_context_for_brain(user_text, memory, current_entities)
+        # 2. Retrieve KB facts with scenario matching
+        kb_result = await retrieve_context_for_brain(user_text, memory, current_entities)
+        kb_facts = kb_result.get("raw_kb_facts") if isinstance(kb_result, dict) else (kb_result or [])
+        scenario_matches = kb_result.get("scenario_matches", []) if isinstance(kb_result, dict) else []
+        scenario_facts = kb_result.get("scenario_facts", {}) if isinstance(kb_result, dict) else {}
+        fact_pack["scenario_matches"] = scenario_matches
+        fact_pack["scenario_facts"] = scenario_facts
+        from app.services.context_builder import enrich_fact_pack_from_kb
+        fact_pack = enrich_fact_pack_from_kb(fact_pack, kb_result.get("kb_static", {}) if isinstance(kb_result, dict) else {})
 
         # 3. Pause phrase (human timing)
         await _maybe_send_pause_phrase(session.id, message.channel, message.external_user_id, "default", slots)
@@ -443,6 +450,7 @@ async def process_message(message):
                 reply, brain_result, current_entities, slots,
                 tool_results=tool_results, user_text=user_text,
                 answer_contract=answer_contract,
+                scenario_facts=scenario_facts,
             )
             if not val["is_valid"]:
                 logger.warning(

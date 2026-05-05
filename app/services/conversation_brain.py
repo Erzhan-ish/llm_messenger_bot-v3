@@ -95,6 +95,12 @@ fact_pack — основной источник истины. Используй
    - must_include: эти факты/формулировки должны быть в ответе.
    - do_not_include: эти слова/фразы запрещены в ответе.
    - next_question: задай именно этот уточняющий вопрос.
+6. Если fact_pack содержит scenario_facts — это полный набор обязательных фактов по распознанному сценарию.
+   - scenario_facts приоритетнее raw_kb_facts: если сценарий распознан, используй его факты.
+   - Если scenario_facts содержит pricing — используй конкретные цифры оттуда, не придумывай.
+   - Если scenario_facts содержит constraints — обязательно упомяни их.
+   - Если scenario_facts непустой, НЕ давай generic-ответ: "уточните пожалуйста", "как я могу помочь".
+   - raw_kb_facts — только дополнительный материал, если scenario_facts не покрывает вопрос.
 
 ═══ ПРАВИЛА СМЫСЛА (не смешивай темы) ═══
 - карта ≠ снятие наличных: если клиент спрашивает про карту — отвечай про карту (реализация), не про наличные.
@@ -332,6 +338,39 @@ def _build_user_message(payload: dict) -> str:
     )
 
 
+def _scenario_facts_to_text(scenario_facts: dict, top_n: int = 2) -> str:
+    """Convert scenario_facts to a flat fact list the LLM can reliably use.
+
+    Mistral-nemo:12b returns malformed output when receiving deep nested JSON
+    or bracket-header formats. A plain numbered list avoids that.
+    """
+    if not scenario_facts:
+        return ""
+    facts: list[str] = []
+    for i, (sid, profile) in enumerate(scenario_facts.items()):
+        if i >= top_n:
+            break
+        if not isinstance(profile, dict):
+            continue
+        pricing = profile.get("pricing") or {}
+        for fee_val in pricing.values():
+            if isinstance(fee_val, dict) and fee_val.get("fact"):
+                facts.append(fee_val["fact"])
+        for item in (profile.get("constraints") or [])[:3]:
+            facts.append(item)
+        for item in (profile.get("availability") or [])[:5]:
+            facts.append(item)
+        for item in (profile.get("features") or [])[:3]:
+            facts.append(item)
+        for item in (profile.get("bonus") or [])[:2]:
+            facts.append(item)
+        for item in (profile.get("answer_hints") or [])[:2]:
+            facts.append(item)
+    if not facts:
+        return ""
+    return "Обязательные факты по запросу:\n" + "\n".join(f"- {f}" for f in facts)
+
+
 async def run_conversation_brain(
     user_text: str,
     recent_dialog: list[dict],
@@ -341,11 +380,20 @@ async def run_conversation_brain(
     fact_pack: dict | None = None,
 ) -> dict:
     """Вызвать LLM-мозг и вернуть структурированное решение."""
+    fp = dict(fact_pack) if fact_pack else {}
+    sf = fp.get("scenario_facts")
+    if sf:
+        # Replace nested JSON with a flat text block to prevent LLM confusion
+        sf_text = _scenario_facts_to_text(sf)
+        if sf_text:
+            fp["scenario_facts"] = sf_text
+        else:
+            fp.pop("scenario_facts", None)
     payload = {
         "user_message": user_text,
         "recent_dialog": recent_dialog[-12:],
         "memory": memory,
-        "fact_pack": fact_pack or {},
+        "fact_pack": fp,
         "raw_kb_facts": kb_facts[:8],
         "tool_results": tool_results,
     }

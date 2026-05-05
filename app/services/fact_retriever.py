@@ -520,12 +520,13 @@ async def retrieve_context_for_brain(
     user_text: str,
     memory: dict,
     current_entities: dict,
-) -> list[dict]:
+) -> dict:
     """Широкий KB-поиск для conversation_brain — без query_mode, без intent.
 
     Ищет по: текущему тексту, active_task банку, last_bank, mentioned_bank,
     ключевым словам домена. Гарантирует попадание партнёрских банков если
     клиент спрашивает о банках.
+    Возвращает dict с ключами: scenario_matches, scenario_facts, kb_static, raw_kb_facts.
     """
     kb = get_kb()
     if not kb:
@@ -647,12 +648,54 @@ async def retrieve_context_for_brain(
                     "status": getattr(ch, "status", None),
                 })
 
-        logger.info("retrieve_context_for_brain | chunks={} | bank_focus={}", len(facts), bank_focus)
-        return facts[:16]
+        scenario_matches_list: list[dict] = []
+        scenario_facts_pack: dict = {}
+        kb_static: dict = {}
+        try:
+            si = kb.scenario_index
+            matches = si.match_scenarios(user_text, memory, current_entities)
+            scenario_facts_pack = si.build_fact_pack(matches, memory, current_entities)
+            scenario_matches_list = [
+                {
+                    "scenario_id": m.scenario_id,
+                    "score": m.score,
+                    "reasons": m.reasons,
+                    "matched_aliases": m.matched_aliases,
+                }
+                for m in matches
+            ]
+            pb = si.build_partner_banks_dict()
+            if pb.get("active") or pb.get("paused"):
+                kb_static["partner_banks"] = pb
+            pricing_yul = si.build_pricing_list("ЮЛ")
+            if pricing_yul:
+                kb_static["bank_pricing_yul"] = pricing_yul
+            pricing_fl = si.build_pricing_list("ФЛ")
+            if pricing_fl:
+                kb_static["bank_pricing_fl"] = pricing_fl
+            card_rules = si.build_card_rules()
+            if card_rules:
+                kb_static["card_rules"] = card_rules
+            advance = si.build_advance_opening()
+            if advance:
+                kb_static["advance_opening"] = advance
+        except Exception:
+            logger.exception("ScenarioFactIndex matching failed (ignored)")
+
+        logger.info(
+            "retrieve_context_for_brain | chunks={} | scenarios={} | bank_focus={}",
+            len(facts), len(scenario_matches_list), bank_focus,
+        )
+        return {
+            "scenario_matches": scenario_matches_list,
+            "scenario_facts": scenario_facts_pack,
+            "kb_static": kb_static,
+            "raw_kb_facts": facts[:16],
+        }
 
     except Exception:
         logger.exception("retrieve_context_for_brain failed (ignored)")
-        return []
+        return {"scenario_matches": [], "scenario_facts": {}, "kb_static": {}, "raw_kb_facts": []}
 
 
 async def retrieve_planner_context(

@@ -169,6 +169,10 @@ class KBChunk:
     positioning: Optional[str] = None
     search_text: str = ""
     is_internal: bool = False
+    # Scenario fields (v5)
+    scenario_id: Optional[str] = None
+    answer_hint: Optional[str] = None
+    next_question: Optional[str] = None
 
 
 class KnowledgeBase:
@@ -200,6 +204,10 @@ class KnowledgeBase:
         self._n_docs = max(1, len(self._chunks))
         self._embeddings = None
         self._embed_model = None
+
+        # Scenario index (lazy import to avoid circular)
+        from app.knowledge_base.scenario_index import ScenarioFactIndex
+        self.scenario_index = ScenarioFactIndex(self._chunks)
 
     def _ensure_embeddings(self) -> bool:
         """Lazy-load embedding model and encode all chunks. Returns False if unavailable."""
@@ -243,7 +251,7 @@ class KnowledgeBase:
                 version = payload.get("version", 0)
                 
                 # Invalidate if version mismatched or source changed
-                if version == 4:
+                if version == 5:
                     curr_sha = _sha256_file(source_path)
                     if meta.get("source_sha256") == curr_sha:
                         should_rebuild = False
@@ -251,7 +259,7 @@ class KnowledgeBase:
                     else:
                         logger.info("KB source changed, rebuilding...")
                 else:
-                    logger.info(f"KB cache version mismatch (got {version}, want 4), rebuilding...")
+                    logger.info(f"KB cache version mismatch (got {version}, want 5), rebuilding...")
             except Exception as e:
                 logger.error(f"Error reading KB cache: {e}")
 
@@ -431,7 +439,10 @@ def _chunk_by_markers(text: str, *, source: str, chunk_chars: int, overlap_chars
             fact=normalized.get("fact"),
             positioning=normalized.get("positioning"),
             search_text=st,
-            is_internal=(normalized.get("type") == "internal_ops")
+            is_internal=(normalized.get("type") == "internal_ops"),
+            scenario_id=normalized.get("scenario_id"),
+            answer_hint=normalized.get("answer_hint"),
+            next_question=normalized.get("next_question"),
         ))
         chunk_id += 1
 
@@ -441,31 +452,32 @@ def _parse_block(block: str) -> dict:
     lines = block.splitlines()
     data = {}
     valid_keys = {
-        "TYPE", "BANK", "CLIENT_TYPE", "STATUS", "FIELD", 
-        "TOPIC", "VALUE_NUM", "VALUE_TEXT", "FACT", 
-        "POSITIONING", "ALIASES", "TAGS"
+        "TYPE", "BANK", "CLIENT_TYPE", "STATUS", "FIELD",
+        "TOPIC", "VALUE_NUM", "VALUE_TEXT", "FACT",
+        "POSITIONING", "ALIASES", "TAGS",
+        "SCENARIO", "SCENARIO_ID", "ANSWER_HINT", "NEXT_QUESTION",
     }
     for line in lines:
         line = line.strip()
         if not line: continue
-        
+
         # Match "KEY: VALUE" strictly at the start
         if ":" in line:
             parts = line.split(":", 1)
             key = parts[0].strip().upper()
             val = parts[1].strip()
-            
+
             if key in valid_keys:
                 data[key.lower()] = val
     return data
 
 def _normalize_chunk(raw: dict) -> dict:
     normalized = raw.copy()
-    
+
     # type -> lowercase
     if "type" in normalized:
         normalized["type"] = normalized["type"].lower()
-    
+
     # bank -> canonical
     bank = normalized.get("bank", "")
     if bank:
@@ -476,7 +488,7 @@ def _normalize_chunk(raw: dict) -> dict:
         elif "т-банк" in b_low or "тинькофф" in b_low: normalized["bank"] = "Т-Банк"
         elif "мкб" in b_low: normalized["bank"] = "МКБ"
         elif "росбанк" in b_low: normalized["bank"] = "Росбанк"
-    
+
     # client_type -> list [ФЛ, ИП, ЮЛ]
     ct = normalized.get("client_type", "")
     if ct:
@@ -487,40 +499,52 @@ def _normalize_chunk(raw: dict) -> dict:
         normalized["client_type"] = parts
     else:
         normalized["client_type"] = []
-    
+
     # aliases, tags -> list
     for k in ["aliases", "tags"]:
         if k in normalized:
             normalized[k] = [x.strip() for x in normalized[k].replace(",", " ").split() if x.strip()]
         else:
             normalized[k] = []
-            
+
     # value_num -> float
     vn = normalized.get("value_num")
     if vn:
         try:
-            # clean comma for float conversion
             normalized["value_num"] = float(str(vn).replace(",", ".").replace(" ", ""))
-        except:
+        except Exception:
             normalized["value_num"] = None
-            
+
+    # scenario_id: prefer SCENARIO_ID, fallback to SCENARIO; normalize to lower_snake_case
+    sid = normalized.pop("scenario_id", None) or normalized.pop("scenario", None)
+    if sid:
+        normalized["scenario_id"] = sid.strip().lower().replace(" ", "_").replace("-", "_")
+    else:
+        normalized["scenario_id"] = None
+
+    # answer_hint, next_question: plain strings
+    for k in ("answer_hint", "next_question"):
+        v = normalized.get(k)
+        normalized[k] = v.strip() if v else None
+
     return normalized
 
 def _make_search_text(chunk: dict) -> str:
     parts = []
-    keys = ["type", "bank", "field", "topic", "value_text", "fact", "positioning"]
+    keys = ["type", "bank", "field", "topic", "value_text", "fact", "positioning",
+            "scenario_id", "answer_hint", "next_question"]
     for k in keys:
         v = chunk.get(k)
         if v:
             parts.append(str(v))
-            
+
     if chunk.get("client_type"):
         parts.extend(chunk["client_type"])
     if chunk.get("aliases"):
         parts.extend(chunk["aliases"])
     if chunk.get("tags"):
         parts.extend(chunk["tags"])
-        
+
     res = " ".join(parts).lower()
     return re.sub(r"\s+", " ", res).strip()
 
@@ -717,7 +741,7 @@ def _cache_is_valid(cache_path: Path, source_path: Path) -> bool:
 
 def _save_cache(cache_path: Path, chunks: List[KBChunk], source_path: Path) -> None:
     payload = {
-        "version": 4,
+        "version": 5,
         "meta": {
             "source_path": str(source_path),
             "source_mtime": float(source_path.stat().st_mtime),
@@ -744,6 +768,9 @@ def _save_cache(cache_path: Path, chunks: List[KBChunk], source_path: Path) -> N
                 "positioning": c.positioning,
                 "search_text": c.search_text,
                 "is_internal": c.is_internal,
+                "scenario_id": c.scenario_id,
+                "answer_hint": c.answer_hint,
+                "next_question": c.next_question,
             }
             for c in chunks
         ],
@@ -779,7 +806,10 @@ def _load_cache(cache_path: Path) -> List[KBChunk]:
                     fact=it.get("fact"),
                     positioning=it.get("positioning"),
                     search_text=str(it.get("search_text", "")),
-                    is_internal=bool(it.get("is_internal", False))
+                    is_internal=bool(it.get("is_internal", False)),
+                    scenario_id=it.get("scenario_id"),
+                    answer_hint=it.get("answer_hint"),
+                    next_question=it.get("next_question"),
                 )
             )
         else:

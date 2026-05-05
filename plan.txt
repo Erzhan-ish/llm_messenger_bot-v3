@@ -1,346 +1,364 @@
 Ты работаешь с llm_messenger_bot-v3.
 
 Цель:
-Корректно передать системные инструкции в LLM, убрать двусмысленность между request_data/handoff и заставить код запускать escalation, когда клиент реально готов открыть счёт.
-
-Проблемы из живого теста:
-1. Клиент говорит: “ну какие еще, счет открыть”.
-   Brain возвращает action=request_data, handoff=false.
-   Бот просит документы, но не запускает escalation.
-2. Клиент говорит: “счет открыть”.
-   Бот пишет “Давайте приступим...” как будто сам откроет счёт.
-   Это запрещено бизнес-правилом.
-3. System prompt говорит “не копируй CONTEXT_DO_NOT_COPY”, но фактический user payload передаётся просто как JSON без тега.
-4. Бот повторяет представление/имя и плохо отвечает на “ты бот?”.
-5. Нужно чётко разделить:
-   - bot reply клиенту
-   - state update
-   - handoff/escalation action
-   - request_data action
-6. Китайский текст можно не фиксить глубоко, но нужно добавить language validator: ответ только на русском.
-
-============================================================
-1. Исправить передачу системных инструкций и контекста
-============================================================
-
-Файл:
-app/services/conversation_brain.py
-
-Сейчас _build_user_message(payload) возвращает просто JSON.
-Нужно реально обернуть контекст в теги:
-
-def _build_user_message(payload: dict) -> str:
-    return f"""
-<CONTEXT_DO_NOT_COPY>
-{json.dumps(payload, ensure_ascii=False, indent=2)}
-</CONTEXT_DO_NOT_COPY>
-
-<OUTPUT_SCHEMA>
-{{
-  "reply": "текст клиенту или null",
-  "action": "answer|ask_clarification|request_data|handoff|stop",
-  "needs_tool": {{"name": "calculate_transfer_fee|search_kb|none", "args": {{}}}},
-  "state_update": {{
-    "active_task": {{}},
-    "last_bank": null,
-    "last_topic": null,
-    "pending_question": null,
-    "last_answer_summary": null,
-    "sales_context": {{
-      "client_type": null,
-      "selected_bank": null,
-      "need": null,
-      "price_priority": null,
-      "ready_to_open": false
-    }}
-  }},
-  "handoff": {{"needed": false, "reason": null}},
-  "stop": false,
-  "confidence": 0.0
-}}
-</OUTPUT_SCHEMA>
-
-Верни только JSON по OUTPUT_SCHEMA. Никакого текста вне JSON.
-"""
-
-В BRAIN_SYSTEM_PROMPT оставить правила поведения, но не вставлять туда полный JSON-схемный пример дважды.
-Лучше:
-- system = роль, бизнес-правила, стиль, ограничения;
-- user = context + output_schema.
-
-Acceptance:
-- В prompt реально есть CONTEXT_DO_NOT_COPY.
-- Модель больше не возвращает user_message/recent_dialog/memory.
-- JSON repair вызывается редко.
-
-============================================================
-2. Разделить request_data и handoff
-============================================================
-
-Сейчас action=request_data не запускает escalation.
-Нужно определить правило:
-
-request_data = бот просит минимальные данные, но пока не передаёт менеджеру.
-handoff = бот передаёт менеджеру.
-
-Но для фраз:
-- “счет открыть”
-- “откроем?”
-- “как открыть?”
-- “хочу открыть”
-- “давайте открыть”
-- “оформляем”
-- “готов начать”
-- “подключите менеджера”
-- “позовите человека”
-- “что дальше”
-после выбора банка/условий должно быть:
-action=handoff
-handoff.needed=true
-
-Если данных мало, reply может звучать так:
-“Да, поможем оформить. Для старта нужен ИНН или название должника — подключу старшего менеджера, он доведёт до открытия.”
-
-То есть handoff не требует, чтобы все данные уже были собраны.
-
-Acceptance:
-User: “ну какие еще, счет открыть”
-→ action=handoff
-→ handoff.needed=true
-→ maybe_escalate called.
-
-User: “счет откройте мне”
-→ action=handoff
-→ handoff.needed=true.
-
-============================================================
-3. Добавить post-brain handoff override в коде
-============================================================
-
-Файл:
-app/processing/message_processor.py
-или app/services/response_validator.py
-
-Даже если LLM вернула action=request_data и handoff=false, код должен проверить явные фразы открытия.
-
-Добавить helper:
-
-OPEN_ACCOUNT_EXPLICIT_RE = re.compile(
-    r"(сч[её]т\s+откр|открыть\s+сч[её]т|откроем|оформляем|давайте\s+откр|хочу\s+откр|готов\s+откр|как\s+откр|что\s+дальше)",
-    re.I | re.U,
-)
-
-def should_force_handoff(user_text: str, brain_result: dict, memory: dict) -> bool:
-    if not OPEN_ACCOUNT_EXPLICIT_RE.search(user_text or ""):
-        return False
-
-    # НЕ force handoff, если active_task — comparison/transfer_fee
-    active_task = (memory or {}).get("active_task") or {}
-    if active_task.get("type") in ("transfer_fee_quote", "bank_comparison"):
-        return False
-
-    return True
-
-После run_conversation_brain:
-if should_force_handoff(user_text, brain_result, memory):
-    brain_result["action"] = "handoff"
-    brain_result["handoff"] = {"needed": True, "reason": "ready_to_open"}
-
-Acceptance:
-Даже если LLM ошиблась и вернула request_data, код поднимет handoff.
-
-============================================================
-4. Исполнить handoff в message_processor
-============================================================
-
-Файл:
-app/processing/message_processor.py
-
-После brain_result:
-
-handoff = brain_result.get("handoff") or {}
-if brain_result.get("action") == "handoff" or handoff.get("needed"):
-    reply = brain_result.get("reply") or _build_handoff_bridge(slots, "ready_to_open")
-    await send_bot(...)
-    await maybe_escalate(session.id, slots, reason=handoff.get("reason") or "ready_to_open")
-    slots["_escalation_sent"] = True
-    await set_slots(session.id, slots)
-    return
+Переделать поиск по базе знаний так, чтобы он не просто возвращал случайные top-k чанки, а умел распознавать все сценарии из KB и отдавать все обязательные факты по каждому найденному сценарию.
 
 Важно:
-- reply отправляется пользователю;
-- maybe_escalate вызывается после/до отправки, но не должен валить job;
-- если CRM_ENABLED=false, логируем skip, но считаем handoff состоявшимся локально.
+Не возвращаем старый semantic routing.
+LLM всё ещё думает и пишет.
+Код должен:
+- построить структурированный scenario/fact index;
+- найти candidate scenarios;
+- собрать полный fact_pack по ним;
+- передать brain чистые факты;
+- проверить, что ответ не потерял обязательные факты.
+
+============================================================
+1. Расширить формат KB
+============================================================
+
+В knowledge_base.txt для каждого CHUNK добавить поля:
+
+SCENARIO:
+ANSWER_HINT:
+NEXT_QUESTION:
+
+Пример:
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: debtor_card_realization
+TOPIC: realization_card
+CLIENT_TYPE: ФЛ
+ALIASES: карта карточка реализация имущества должник списывают долги
+TAGS: card debtor realization financial_manager
+FACT: Если у гражданина введена реализация имущества, новая банковская карта оформляется и подписывается исключительно финансовым управляющим.
+ANSWER_HINT: Не путать карту со снятием наличных. Если клиент спрашивает карту, объяснить роль финансового управляющего.
+NEXT_QUESTION: Реализация имущества уже введена?
+
+Для тарифов:
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: uralsib_yul_conditions
+BANK: Уралсиб
+CLIENT_TYPE: ЮЛ
+FIELD: opening_fee
+TOPIC: account_opening
+VALUE_NUM: 3500
+ALIASES: уралсиб юрлицо условия тариф открытие счет
+FACT: В Уралсибе для ЮЛ открытие счёта стоит 3500 руб.
 
 Acceptance:
-В логах после “счет открыть” видно:
-Brain action=handoff или forced handoff
-maybe_escalate called / CRM disabled skip
-_escalation_sent=True
+- KB loader парсит SCENARIO, ANSWER_HINT, NEXT_QUESTION.
+- KBChunk содержит scenario_id, answer_hint, next_question.
 
 ============================================================
-5. Исправить maybe_escalate / Bitrix поведение
-============================================================
-
-Файлы:
-app/processing/utils.py
-app/escalation/service.py
-
-Если CRM_ENABLED=false:
-- не вызывать Bitrix вообще;
-- логировать: “CRM disabled, escalation skipped locally”;
-- выставить _escalation_sent=True.
-
-Если CRM_ENABLED=true, но Bitrix вернул ACCESS_DENIED:
-- не падать;
-- логировать warning;
-- всё равно не ломать диалог.
-
-Acceptance:
-- Нет traceback ACCESS_DENIED в worker.
-- Handoff reply всё равно уходит пользователю.
-
-============================================================
-6. Запретить обещание “откроем” без handoff
+2. Обновить KBChunk и parser
 ============================================================
 
 Файл:
-app/services/response_validator.py
+app/knowledge_base/kb.py
 
-Если reply содержит:
-- “откроем”
-- “приступим к открытию”
-- “давайте откроем”
-- “оформим”
-- “начнём открытие”
+Добавить поля в dataclass KBChunk:
 
-И handoff.needed=false:
-validation_error = "promised_action_without_handoff"
+scenario_id: Optional[str] = None
+answer_hint: Optional[str] = None
+next_question: Optional[str] = None
 
-Repair hint:
-“Не обещай, что бот сам откроет счёт. Либо поставь handoff.needed=true, либо скажи: ‘поможем оформить, нужен ИНН или название должника’.”
+В _parse_block:
+valid_keys добавить:
+SCENARIO
+SCENARIO_ID
+ANSWER_HINT
+NEXT_QUESTION
 
-Но лучше для явного открытия — force handoff.
+В _normalize_chunk:
+- scenario/scenario_id нормализовать в scenario_id
+- lower snake_case, если нужно
+
+В _make_search_text:
+добавить:
+scenario_id
+answer_hint
+next_question
 
 Acceptance:
-Бот больше не пишет “Давайте приступим к открытию...” без handoff.
+После rebuild cache каждый chunk имеет scenario_id, если он указан в KB.
 
 ============================================================
-7. Русский язык only validator
+3. Создать ScenarioFactIndex
 ============================================================
 
 Файл:
-app/services/response_validator.py
+app/knowledge_base/scenario_index.py
 
-Добавить проверку:
-- если reply содержит CJK characters [\u4e00-\u9fff] или слишком много нерусских символов:
-  validation_error = "non_russian_output"
+Реализовать:
 
-Repair:
-“Ответ должен быть полностью на русском. Перепиши без китайского/английского текста.”
+@dataclass
+class ScenarioMatch:
+    scenario_id: str
+    score: float
+    reasons: list[str]
+    matched_aliases: list[str]
 
-Acceptance:
-Китайский текст не уходит пользователю даже на слабой модели.
+class ScenarioFactIndex:
+    def __init__(self, chunks: list[KBChunk]):
+        self.by_scenario: dict[str, list[KBChunk]]
+        self.by_topic: dict[str, list[KBChunk]]
+        self.by_bank: dict[str, list[KBChunk]]
+        self.by_client_type: dict[str, list[KBChunk]]
+        self.alias_to_scenarios: dict[str, set[str]]
 
-============================================================
-8. Исправить identity/persona policy
-============================================================
+    def match_scenarios(user_text, memory, current_entities) -> list[ScenarioMatch]
+    def get_chunks_for_scenario(scenario_id, bank=None, client_type=None) -> list[KBChunk]
+    def build_fact_pack(matches, memory, current_entities) -> dict
 
-Файл:
-app/services/conversation_brain.py
-
-Сейчас бот может дважды представляться и на “ты бот?” отвечает странно.
-
-Добавить в system prompt:
-
-Ты не споришь с клиентом о том, бот ты или нет.
-Если клиент спрашивает “ты бот?”:
-- не говори “я не бот”;
-- не обманывай;
-- спокойно верни к роли сервиса:
-  “Я виртуальный помощник компании «В плюсе», помогаю с первичной консультацией по счетам должников. Если нужно — подключу менеджера.”
-
-Если клиент спрашивает “зачем дважды имя говорить?”:
-- коротко извинись;
-- не повторяй имя;
-- продолжай по делу:
-  “Извините, повторился. Дальше буду без лишнего представления. По счёту или банкам что подсказать?”
+match_scenarios должен учитывать:
+- aliases
+- tags
+- topic
+- current_entities.mentioned_bank
+- current_entities.mentioned_client_type
+- memory.last_topic
+- memory.active_task
+- exact phrase matches
+- hybrid search score как дополнительный сигнал, но не единственный
 
 Важно:
-Убрать правило “Никогда не признавайся, что ты бот или ИИ.”
-Оно создаёт риск ложного ответа.
-Заменить на:
-“Не акцентируй внимание на ИИ, но если прямо спрашивают — честно скажи, что это виртуальный помощник.”
+Scenario index не принимает финальное решение за LLM.
+Он только собирает candidate scenarios and facts.
+
+============================================================
+4. Интегрировать ScenarioFactIndex в KnowledgeBase
+============================================================
+
+Файл:
+app/knowledge_base/kb.py
+app/knowledge_base/loader.py
+
+KnowledgeBase должен иметь:
+
+self.scenario_index = ScenarioFactIndex(self._chunks)
+
+или helper:
+
+def get_scenario_index() -> ScenarioFactIndex:
+    return get_kb().scenario_index
 
 Acceptance:
-User: “ты бот?”
-Bot: “Я виртуальный помощник компании «В плюсе»...”
-No lie.
+Можно вызвать:
+get_kb().scenario_index.match_scenarios(...)
 
 ============================================================
-9. Не повторять представление
+5. Переписать retrieve_context_for_brain
 ============================================================
 
-Файлы:
+Файл:
+app/services/fact_retriever.py
+
+Сейчас retrieve_context_for_brain делает top-k поиск и возвращает chunks.
+Нужно сделать 2 слоя:
+
+A. scenario_matches:
+scenario_matches = kb.scenario_index.match_scenarios(user_text, memory, current_entities)
+
+B. scenario_fact_pack:
+scenario_pack = kb.scenario_index.build_fact_pack(scenario_matches, memory, current_entities)
+
+C. raw_kb_facts:
+оставить hybrid top-k как дополнительный источник, но не основной.
+
+Возвращаемая структура должна быть не просто list[dict], а лучше:
+
+{
+  "scenario_matches": [...],
+  "scenario_facts": {...},
+  "raw_kb_facts": [...]
+}
+
+Если нельзя сразу менять интерфейс, можно временно:
+- raw_kb_facts оставить list;
+- scenario_facts положить в context_builder.fact_pack.
+
+Acceptance:
+На запрос “Уралсиб вроде нормально, какие там условия?”
+scenario_facts содержит все ключевые факты Уралсиба для ЮЛ:
+- opening_fee 3500
+- monthly_fee 1600
+- transfer_to_yul 35
+- operation_control_fee 150
+- docs, если есть
+- bonus, если есть
+
+============================================================
+6. Fact_pack должен строиться из KB, не из hardcoded Python
+============================================================
+
+Файл:
 app/services/context_builder.py
-app/services/conversation_brain.py
-app/services/response_validator.py
 
-Убедиться:
-- после первого reply с “Алексей/В плюсе” set memory._introduced=true;
-- validator запрещает reply startswith “Здравствуйте” или “Я Алексей”, если _introduced=true;
-- repair убирает повторное представление.
+Сейчас там hardcoded:
+_BANK_PRICING_YUL
+_BANK_PRICING_FL
+_CARD_RULES
+_PARTNER_BANKS
+
+Нужно постепенно заменить:
+
+partner_banks = scenario_index facts where SCENARIO=partner_banks
+bank_pricing_yul = facts where scenario in legal_entity_bank_selection / *_yul_conditions
+bank_pricing_fl = facts where scenario in individual_bank_selection / *_fl_conditions
+card_rules = scenario debtor_card_realization
+advance_opening = scenario advance_opening
+
+На переходном этапе можно оставить hardcoded fallback, но приоритет должен быть у KB.
 
 Acceptance:
-После “вы кто?” и “что вы за компания?” бот не говорит имя дважды подряд.
+Если knowledge_base.txt обновили тариф Уралсиба, fact_pack меняется без правки Python-кода.
 
 ============================================================
-10. Добавить тесты
+7. Добавить coverage retrieval
 ============================================================
 
-Добавить:
+Нужна функция:
 
-test_context_wrapped_in_tags
-- _build_user_message содержит <CONTEXT_DO_NOT_COPY> и <OUTPUT_SCHEMA>
+get_all_facts_for_scenario(scenario_id, bank=None, client_type=None) -> dict
 
-test_explicit_open_forces_handoff
-Input: “ну какие еще, счет открыть”
-Brain returns action=request_data handoff=false
-Expected: force_handoff true
+Она собирает:
+pricing:
+  opening_fee
+  monthly_fee
+  transfer_fee
+  control_fee
+docs:
+  [...]
+constraints:
+  [...]
+bonus:
+  [...]
+availability:
+  status
+features:
+  [...]
+answer_hints:
+  [...]
+next_questions:
+  [...]
 
-test_handoff_executes_maybe_escalate
-Brain result handoff needed true
-Expected: maybe_escalate called and _escalation_sent set
+Это должно агрегировать по chunk.type и field.
 
-test_promised_action_without_handoff_blocked
-Reply: “Давайте откроем счет”
-handoff=false
-Expected validation error
+Acceptance:
+Для каждого scenario_id можно получить полный структурированный профиль.
 
-test_non_russian_output_blocked
-Reply contains Chinese chars
-Expected validation error + repair
+============================================================
+8. Обновить conversation context
+============================================================
 
-test_bot_identity_honest
-User: “ты бот?”
-Expected: virtual assistant, no false “живой человек”
+Файл:
+app/services/context_builder.py
+app/processing/message_processor.py
 
-test_no_repeated_intro_after_introduced
-introduced=true
-Reply starts with “Здравствуйте”
-Expected validation error
+В brain payload передавать:
+
+"scenario_matches": [
+  {"scenario_id": "...", "score": 0.92, "reasons": [...]}
+],
+"scenario_facts": {
+  "debtor_card_realization": {...},
+  "uralsib_yul_conditions": {...}
+},
+"raw_kb_facts": [...]
+"fact_pack": {...}
+
+Prompt brain:
+- scenario_facts — приоритетнее raw_kb_facts.
+- Если scenario_facts содержит факты, используй их.
+- raw_kb_facts — только дополнительный материал.
+- Если scenario_facts пустой, честно уточни.
+
+============================================================
+9. Добавить validation на completeness
+============================================================
+
+Файл:
+app/services/response_validator.py
+
+Если answer_contract или scenario_facts имеют required facts:
+- проверять, что reply содержит обязательные факты или хотя бы не противоречит им.
+
+Примеры:
+- partner_banks: должны быть Альфа-Банк, ТКБ, Уралсиб.
+- debtor_card_realization: должны быть “реализация имущества” + “финансовый управляющий”.
+- uralsib_yul_conditions: если клиент спросил “условия”, reply должен содержать opening/monthly или спросить, что именно интересует, но не generic fallback.
+- account_type_difference: reply не может быть “Как я могу помочь?”
+
+Acceptance:
+Generic replies не проходят при наличии scenario_facts.
+
+============================================================
+10. Добавить scenario coverage tests
+============================================================
+
+Добавить тесты:
+
+test_all_kb_chunks_have_scenario_or_legacy_allowed
+- Все новые чанки должны иметь SCENARIO.
+- Legacy chunks allowed only temporarily with warning.
+
+test_all_scenarios_have_aliases
+- У каждого scenario есть aliases/tags.
+
+test_scenario_index_matches_all_core_queries
+Покрыть:
+- карта должнику
+- спецсчёт без основного
+- задатковый и залоговый
+- список банков
+- юр лицо подешевле
+- тарифы Уралсиб
+- документы Уралсиб
+- перевод 200000 на физлицо Альфа
+- доп комиссии Уралсиб
+- онлайн по ЭЦП
+- доверенность
+- умерший должник
+- нерезидент
+- красная зона
+- ликвидированное ЮЛ
+- интернет-банк ФЛ/ИП
+- капитализация
+- зарплатный проект
+
+test_scenario_fact_pack_complete_uralsib_yul
+Expected:
+opening_fee=3500
+monthly_fee=1600
+transfer_to_yul=35
+operation_control_fee=150
+
+test_scenario_fact_pack_debtor_card
+Expected:
+realization_card fact
+before_realization fact
+do_not_mix_cash_withdrawal
+
+test_no_top_k_loss_for_conditions
+Query:
+“Уралсиб вроде нормально, какие там условия?”
+Expected:
+scenario_facts contains all relevant Уралсиб facts, even if raw_kb_facts top-k misses some.
 
 ============================================================
 FINAL ACCEPTANCE
 ============================================================
 
 Готово, если:
-1. System instructions реально передаются в system role, а context — в <CONTEXT_DO_NOT_COPY>.
-2. Model output стабильно только JSON по OUTPUT_SCHEMA.
-3. “счет открыть” запускает handoff/escalation.
-4. action=request_data не используется для явного ready-to-open.
-5. Бот не обещает открыть счёт сам.
-6. CRM_DISABLED не вызывает Bitrix.
-7. Китайский/нерусский текст не уходит пользователю.
-8. На “ты бот?” бот честно говорит “виртуальный помощник”, не обманывает.
-9. Представление не повторяется.
+1. KB поддерживает SCENARIO / ANSWER_HINT / NEXT_QUESTION.
+2. ScenarioFactIndex строится при загрузке KB.
+3. retrieve_context_for_brain возвращает не только top-k chunks, но и scenario_matches + scenario_facts.
+4. fact_pack строится из KB, а не только из hardcoded Python.
+5. Все основные сценарии распознаются через aliases/tags/scenario_id.
+6. По найденному сценарию возвращаются все обязательные факты, а не только top-k.
+7. Обновление knowledge_base.txt меняет поведение без правки Python-кода.
+8. Есть coverage tests на все сценарии.
