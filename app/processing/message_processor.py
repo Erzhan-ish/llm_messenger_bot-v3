@@ -74,6 +74,25 @@ _READY_FOLLOWUP_RE = re.compile(
     re.I | re.U,
 )
 
+# Явные фразы готовности открыть счёт — code-level override (не зависит от LLM)
+_OPEN_ACCOUNT_EXPLICIT_RE = re.compile(
+    r"(сч[её]т\s+откр|открыть\s+сч[её]т|откроем|оформляем|давайте\s+откр"
+    r"|хочу\s+откр|готов\s+откр|как\s+откр|что\s+дальше|ну\s+какие\s+ещ[её]"
+    r"|ну\s+какие\s+еще)",
+    re.I | re.U,
+)
+
+
+def should_force_handoff(user_text: str, brain_result: dict, memory: dict) -> bool:
+    """Проверить, нужно ли принудительно поднять handoff независимо от решения LLM."""
+    if not _OPEN_ACCOUNT_EXPLICIT_RE.search(user_text or ""):
+        return False
+    # Не override если active_task — сравнение или расчёт комиссии
+    active_task = (memory or {}).get("active_task") or {}
+    if active_task.get("type") in ("transfer_fee_quote", "bank_comparison", "compare"):
+        return False
+    return True
+
 
 def _build_context_fallback(fact_pack: dict, current_entities: dict, slots: dict) -> str:
     """Fallback на основе известных фактов, а не generic-фраза."""
@@ -376,13 +395,24 @@ async def process_message(message):
                     tool_results=tool_results, fact_pack=fact_pack,
                 )
 
+        # 6.5. Code-level handoff override for explicit open-account phrases
+        if should_force_handoff(user_text, brain_result, memory):
+            logger.info("Session {} | Force handoff override for explicit open phrase", session.id)
+            brain_result["action"] = "handoff"
+            brain_result["handoff"] = {"needed": True, "reason": "ready_to_open"}
+
         # 7. Handle brain handoff action
         action = brain_result.get("action") or "answer"
         handoff = brain_result.get("handoff") or {}
 
         if action == "handoff" or handoff.get("needed"):
-            # Brain says handoff — validate consent signal
-            if slots.get("_had_consent") or _CONSENT_HARD_RE.search(user_text):
+            # Accept handoff if: hard consent regex, explicit open phrase, or forced override
+            is_consent = (
+                slots.get("_had_consent")
+                or _CONSENT_HARD_RE.search(user_text)
+                or _OPEN_ACCOUNT_EXPLICIT_RE.search(user_text)
+            )
+            if is_consent:
                 bridge_reply = cleanup_text(brain_result.get("reply") or "")
                 if not bridge_reply:
                     bridge_reply = _build_handoff_bridge(slots, handoff.get("reason") or "ready_to_open")
@@ -391,15 +421,16 @@ async def process_message(message):
                 if current_entities.get("mentioned_bank"):
                     slots["_last_bank"] = current_entities["mentioned_bank"]
                 slots.pop("_had_consent", None)
+                slots["_escalation_sent"] = True
                 await set_slots(session.id, slots)
-                await maybe_escalate(session.id, slots, reason=handoff.get("reason") or "brain_handoff")
                 await send_bot(
                     session, message.channel, message.external_user_id, bridge_reply, slots,
                     processing_start=processing_start, client_msg_len=len(user_text),
                 )
+                await maybe_escalate(session.id, slots, reason=handoff.get("reason") or "brain_handoff")
                 return
             else:
-                # Brain triggered handoff without hard consent — treat as request_data
+                # Brain triggered handoff without any consent signal — treat as request_data
                 action = "request_data"
 
         # 8. Extract reply
@@ -455,6 +486,11 @@ async def process_message(message):
                     repair_hint = (
                         "answered_tariffs_when_asked_bank_list: Клиент спросил список банков, "
                         "а не тарифы. Дай только список активных банков и банков на паузе."
+                    )
+                elif repair_hint == "non_russian_output":
+                    repair_hint = (
+                        "non_russian_output: Ответ содержит нерусский текст (китайский/английский). "
+                        "Перепиши ответ полностью на русском языке."
                     )
                 repaired = await conversation_brain_repair(
                     previous_reply=reply,

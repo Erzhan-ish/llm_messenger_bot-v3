@@ -758,5 +758,94 @@ class TestBrainJsonParsing(unittest.TestCase):
         self.assertIn("уточняю", result.lower())
 
 
+# ---------------------------------------------------------------------------
+# Тесты плана v13 (7 тестов)
+# ---------------------------------------------------------------------------
+class TestPlanV13(unittest.TestCase):
+
+    def _validate(self, reply, brain_result=None, entities=None, slots=None,
+                  tool_results=None, user_text="", answer_contract=None):
+        from app.services.response_validator import validate_reply
+        return validate_reply(
+            reply,
+            brain_result or {},
+            entities or {},
+            slots or {},
+            tool_results=tool_results,
+            user_text=user_text,
+            answer_contract=answer_contract,
+        )
+
+    # test_context_wrapped_in_tags
+    def test_context_wrapped_in_tags(self):
+        """_build_user_message содержит CONTEXT_DO_NOT_COPY и OUTPUT_SCHEMA."""
+        from app.services.conversation_brain import _build_user_message
+        msg = _build_user_message({"user_message": "привет", "recent_dialog": []})
+        self.assertIn("<CONTEXT_DO_NOT_COPY>", msg)
+        self.assertIn("</CONTEXT_DO_NOT_COPY>", msg)
+        self.assertIn("<OUTPUT_SCHEMA>", msg)
+        self.assertIn("</OUTPUT_SCHEMA>", msg)
+
+    # test_explicit_open_forces_handoff
+    def test_explicit_open_forces_handoff(self):
+        """'ну какие еще, счет открыть' + brain=request_data → should_force_handoff=True."""
+        from app.processing.message_processor import should_force_handoff
+        brain = {"action": "request_data", "handoff": {"needed": False}}
+        result = should_force_handoff("ну какие еще, счет открыть", brain, {})
+        self.assertTrue(result)
+
+    # test_force_handoff_skips_compare_task
+    def test_force_handoff_skips_compare_task(self):
+        """should_force_handoff не срабатывает при active_task=transfer_fee_quote."""
+        from app.processing.message_processor import should_force_handoff
+        brain = {"action": "request_data", "handoff": {"needed": False}}
+        memory = {"active_task": {"type": "transfer_fee_quote"}}
+        result = should_force_handoff("как открыть счет", brain, memory)
+        self.assertFalse(result)
+
+    # test_promised_action_without_handoff_blocked
+    def test_promised_action_without_handoff_blocked(self):
+        """'Давайте откроем счёт' без handoff → promised_action_without_handoff."""
+        r = self._validate(
+            "Давайте откроем счёт в Альфа-Банке.",
+            brain_result={"handoff": {"needed": False}, "action": "answer"},
+        )
+        self.assertFalse(r["is_valid"])
+        self.assertEqual(r["reason"], "promised_action_without_handoff")
+
+    # test_pristupi_without_handoff_blocked
+    def test_pristupi_without_handoff_blocked(self):
+        """'приступим к открытию' без handoff → promised_action_without_handoff."""
+        r = self._validate(
+            "Приступим к открытию счёта, нужны документы.",
+            brain_result={"handoff": {"needed": False}, "action": "answer"},
+        )
+        self.assertFalse(r["is_valid"])
+        self.assertEqual(r["reason"], "promised_action_without_handoff")
+
+    # test_non_russian_output_blocked
+    def test_non_russian_output_blocked(self):
+        """Ответ с китайскими символами → non_russian_output."""
+        r = self._validate("Пожалуйста, обращайтесь. 祝您一天愉快！")
+        self.assertFalse(r["is_valid"])
+        self.assertEqual(r["reason"], "non_russian_output")
+
+    # test_russian_only_passes
+    def test_russian_only_passes(self):
+        """Чисто русский текст → проходит CJK проверку."""
+        r = self._validate("По Альфа-Банку: открытие 800 руб., ведение 800 руб. в месяц.")
+        self.assertTrue(r["is_valid"])
+
+    # test_no_repeated_intro_after_introduced
+    def test_no_repeated_intro_after_introduced(self):
+        """'Я Алексей...' после _introduced=True → repeated_intro."""
+        r = self._validate(
+            "Я Алексей, менеджер «В плюсе». Чем помочь?",
+            slots={"_introduced": True},
+        )
+        self.assertFalse(r["is_valid"])
+        self.assertEqual(r["reason"], "repeated_intro")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

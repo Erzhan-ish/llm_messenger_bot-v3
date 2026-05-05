@@ -22,6 +22,9 @@ _CASH_WORDS_RE = re.compile(r"\b(наличн\w*|судебное\s+решени
 # "почему?" паттерн
 _WHY_RE = re.compile(r"^\s*(почему|а\s+почему|почему\s+нельзя|в\s+чём\s+причина|в\s+чем\s+причина)\s*[?!]?\s*$", re.I | re.U)
 
+# CJK и нерусские символы в ответе
+_CJK_RE = re.compile(r"[一-鿿぀-ゟ゠-ヿ＀-￯]")
+
 # Мягкие фразы намерения открыть счёт (не попадают в hard handoff guard)
 _OPEN_ACCOUNT_SOFT_RE = re.compile(
     r"(счет\s+откройте|откройте\s+(?:мне\s+)?счет"
@@ -37,7 +40,8 @@ _OPEN_ACCOUNT_SOFT_RE = re.compile(
 # Недопустимые обещания действия без handoff
 _PROMISE_ACTION_RE = re.compile(
     r"\b(откроем|давайте\s+откроем|открываем|сделаем\s+счет|оформляем\s+счет"
-    r"|мы\s+откроем|я\s+откр[ою]\w*|сейчас\s+откроем)\b",
+    r"|мы\s+откроем|я\s+откр[ою]\w*|сейчас\s+откроем"
+    r"|приступим\s+к\s+открытию|начнём\s+открытие|начнем\s+открытие)\b",
     re.I | re.U,
 )
 
@@ -90,6 +94,10 @@ def validate_reply(
 
     reply_lower = reply.lower()
 
+    # Нерусский/китайский текст в ответе
+    if _CJK_RE.search(reply):
+        return {"is_valid": False, "reason": "non_russian_output"}
+
     # Повтор предыдущего ответа
     prev_text = slots.get("_last_bot_text") or ""
     if prev_text and _is_near_duplicate(reply, prev_text):
@@ -98,8 +106,12 @@ def validate_reply(
             return {"is_valid": False, "reason": "did_not_explain_reason"}
         return {"is_valid": False, "reason": "near_duplicate_of_previous"}
 
-    # Повторное приветствие
-    if slots.get("_introduced") and reply_lower.startswith("здравствуйте"):
+    # Повторное приветствие или представление
+    if slots.get("_introduced") and (
+        reply_lower.startswith("здравствуйте")
+        or reply_lower.startswith("я алексей")
+        or reply_lower.startswith("я менеджер алексей")
+    ):
         return {"is_valid": False, "reason": "repeated_intro"}
 
     # Комиссия из tool_result должна быть в ответе
