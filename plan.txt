@@ -1,354 +1,346 @@
 Ты работаешь с llm_messenger_bot-v3.
 
-Архитектура conversation_brain стала лучше: код больше не должен жёстко классифицировать сценарии. Но сейчас brain теряет контекст follow-up сообщений и иногда отвечает слишком общо.
-
 Цель:
-Сохранить формулу:
-LLM думает и пишет живой текст.
-Код хранит память, даёт чистые facts/action contracts, проверяет и выполняет.
+Корректно передать системные инструкции в LLM, убрать двусмысленность между request_data/handoff и заставить код запускать escalation, когда клиент реально готов открыть счёт.
 
-Не возвращать старый regex-routing.
-Нужно усилить memory + answer_contract.
+Проблемы из живого теста:
+1. Клиент говорит: “ну какие еще, счет открыть”.
+   Brain возвращает action=request_data, handoff=false.
+   Бот просит документы, но не запускает escalation.
+2. Клиент говорит: “счет открыть”.
+   Бот пишет “Давайте приступим...” как будто сам откроет счёт.
+   Это запрещено бизнес-правилом.
+3. System prompt говорит “не копируй CONTEXT_DO_NOT_COPY”, но фактический user payload передаётся просто как JSON без тега.
+4. Бот повторяет представление/имя и плохо отвечает на “ты бот?”.
+5. Нужно чётко разделить:
+   - bot reply клиенту
+   - state update
+   - handoff/escalation action
+   - request_data action
+6. Китайский текст можно не фиксить глубоко, но нужно добавить language validator: ответ только на русском.
 
 ============================================================
-1. Не повторять intro
+1. Исправить передачу системных инструкций и контекста
 ============================================================
 
-Файлы:
+Файл:
 app/services/conversation_brain.py
-app/services/context_builder.py
+
+Сейчас _build_user_message(payload) возвращает просто JSON.
+Нужно реально обернуть контекст в теги:
+
+def _build_user_message(payload: dict) -> str:
+    return f"""
+<CONTEXT_DO_NOT_COPY>
+{json.dumps(payload, ensure_ascii=False, indent=2)}
+</CONTEXT_DO_NOT_COPY>
+
+<OUTPUT_SCHEMA>
+{{
+  "reply": "текст клиенту или null",
+  "action": "answer|ask_clarification|request_data|handoff|stop",
+  "needs_tool": {{"name": "calculate_transfer_fee|search_kb|none", "args": {{}}}},
+  "state_update": {{
+    "active_task": {{}},
+    "last_bank": null,
+    "last_topic": null,
+    "pending_question": null,
+    "last_answer_summary": null,
+    "sales_context": {{
+      "client_type": null,
+      "selected_bank": null,
+      "need": null,
+      "price_priority": null,
+      "ready_to_open": false
+    }}
+  }},
+  "handoff": {{"needed": false, "reason": null}},
+  "stop": false,
+  "confidence": 0.0
+}}
+</OUTPUT_SCHEMA>
+
+Верни только JSON по OUTPUT_SCHEMA. Никакого текста вне JSON.
+"""
+
+В BRAIN_SYSTEM_PROMPT оставить правила поведения, но не вставлять туда полный JSON-схемный пример дважды.
+Лучше:
+- system = роль, бизнес-правила, стиль, ограничения;
+- user = context + output_schema.
+
+Acceptance:
+- В prompt реально есть CONTEXT_DO_NOT_COPY.
+- Модель больше не возвращает user_message/recent_dialog/memory.
+- JSON repair вызывается редко.
+
+============================================================
+2. Разделить request_data и handoff
+============================================================
+
+Сейчас action=request_data не запускает escalation.
+Нужно определить правило:
+
+request_data = бот просит минимальные данные, но пока не передаёт менеджеру.
+handoff = бот передаёт менеджеру.
+
+Но для фраз:
+- “счет открыть”
+- “откроем?”
+- “как открыть?”
+- “хочу открыть”
+- “давайте открыть”
+- “оформляем”
+- “готов начать”
+- “подключите менеджера”
+- “позовите человека”
+- “что дальше”
+после выбора банка/условий должно быть:
+action=handoff
+handoff.needed=true
+
+Если данных мало, reply может звучать так:
+“Да, поможем оформить. Для старта нужен ИНН или название должника — подключу старшего менеджера, он доведёт до открытия.”
+
+То есть handoff не требует, чтобы все данные уже были собраны.
+
+Acceptance:
+User: “ну какие еще, счет открыть”
+→ action=handoff
+→ handoff.needed=true
+→ maybe_escalate called.
+
+User: “счет откройте мне”
+→ action=handoff
+→ handoff.needed=true.
+
+============================================================
+3. Добавить post-brain handoff override в коде
+============================================================
+
+Файл:
+app/processing/message_processor.py
+или app/services/response_validator.py
+
+Даже если LLM вернула action=request_data и handoff=false, код должен проверить явные фразы открытия.
+
+Добавить helper:
+
+OPEN_ACCOUNT_EXPLICIT_RE = re.compile(
+    r"(сч[её]т\s+откр|открыть\s+сч[её]т|откроем|оформляем|давайте\s+откр|хочу\s+откр|готов\s+откр|как\s+откр|что\s+дальше)",
+    re.I | re.U,
+)
+
+def should_force_handoff(user_text: str, brain_result: dict, memory: dict) -> bool:
+    if not OPEN_ACCOUNT_EXPLICIT_RE.search(user_text or ""):
+        return False
+
+    # НЕ force handoff, если active_task — comparison/transfer_fee
+    active_task = (memory or {}).get("active_task") or {}
+    if active_task.get("type") in ("transfer_fee_quote", "bank_comparison"):
+        return False
+
+    return True
+
+После run_conversation_brain:
+if should_force_handoff(user_text, brain_result, memory):
+    brain_result["action"] = "handoff"
+    brain_result["handoff"] = {"needed": True, "reason": "ready_to_open"}
+
+Acceptance:
+Даже если LLM ошиблась и вернула request_data, код поднимет handoff.
+
+============================================================
+4. Исполнить handoff в message_processor
+============================================================
+
+Файл:
 app/processing/message_processor.py
 
-Проблема:
-Бот повторяет “Здравствуйте! Я Алексей...” в следующих ответах.
+После brain_result:
 
-Сделать:
-- В memory передавать `_introduced`.
-- После первого intro сохранять `_introduced=True`.
-- В prompt brain добавить:
+handoff = brain_result.get("handoff") or {}
+if brain_result.get("action") == "handoff" or handoff.get("needed"):
+    reply = brain_result.get("reply") or _build_handoff_bridge(slots, "ready_to_open")
+    await send_bot(...)
+    await maybe_escalate(session.id, slots, reason=handoff.get("reason") or "ready_to_open")
+    slots["_escalation_sent"] = True
+    await set_slots(session.id, slots)
+    return
 
-Если memory._introduced=true:
-- не начинай ответ с “Здравствуйте”;
-- не представляйся снова;
-- сразу отвечай по сути.
+Важно:
+- reply отправляется пользователю;
+- maybe_escalate вызывается после/до отправки, но не должен валить job;
+- если CRM_ENABLED=false, логируем skip, но считаем handoff состоявшимся локально.
 
 Acceptance:
-Первый ответ может быть с представлением.
-Второй и следующие ответы не начинаются с “Здравствуйте, я Алексей”.
+В логах после “счет открыть” видно:
+Brain action=handoff или forced handoff
+maybe_escalate called / CRM disabled skip
+_escalation_sent=True
 
 ============================================================
-2. Сохранять pending question после “ЮЛ или ФЛ?”
+5. Исправить maybe_escalate / Bitrix поведение
 ============================================================
 
 Файлы:
-app/services/conversation_brain.py
-app/processing/message_processor.py
-app/services/context_builder.py
+app/processing/utils.py
+app/escalation/service.py
 
-Проблема:
-После вопроса “ЮЛ или ФЛ?” клиент отвечает “ФЛ”, но brain не продолжает подбор для ФЛ.
+Если CRM_ENABLED=false:
+- не вызывать Bitrix вообще;
+- логировать: “CRM disabled, escalation skipped locally”;
+- выставить _escalation_sent=True.
 
-Когда brain спрашивает:
-“Счёт подбираем для юрлица или физлица?”
-или
-“Для начала определим тип: ЮЛ или ФЛ?”
-
-state_update должен сохранять:
-
-{
-  "active_task": {
-    "type": "bank_selection",
-    "pending_question": "client_type",
-    "source": "partner_banks"
-  },
-  "last_topic": "partner_banks"
-}
-
-Если пользователь отвечает:
-“ФЛ” / “физ лицо” / “физик”
-
-context_builder должен положить:
-current_entities.client_type = "ФЛ"
-
-Brain должен использовать active_task и ответить по ФЛ, а не повторять список банков.
-
-Expected:
-“Для физлица основной рабочий вариант — ТКБ: открытие 1500 руб., ведение бесплатно. Расходные операции лучше заранее согласовывать с юристами банка. Смотрим тарифы или документы?”
+Если CRM_ENABLED=true, но Bitrix вернул ACCESS_DENIED:
+- не падать;
+- логировать warning;
+- всё равно не ломать диалог.
 
 Acceptance:
-User: “ФЛ”
-Bot: отвечает вариант для ФЛ, не общий список банков.
+- Нет traceback ACCESS_DENIED в worker.
+- Handoff reply всё равно уходит пользователю.
 
 ============================================================
-3. Обработать короткое “какие?” через memory
-============================================================
-
-Файлы:
-app/services/conversation_brain.py
-app/services/context_builder.py
-
-Проблема:
-User: “какие?”
-Bot повторяет список партнёрских банков.
-
-Если user_text короткий:
-- “какие?”
-- “какие именно?”
-- “что есть?”
-- “какой вариант?”
-
-И memory.active_task или memory.last_topic есть, brain обязан интерпретировать это как продолжение прошлой темы.
-
-Пример memory:
-{
-  "last_topic": "partner_banks",
-  "client_type": "ФЛ"
-}
-
-User:
-“какие?”
-
-Expected:
-“Для физлица сейчас основной вариант — ТКБ: открытие 1500 руб., ведение 0 руб. в месяц. Хотите, подскажу документы?”
-
-Prompt:
-Короткие вопросы вроде “какие?”, “а что есть?”, “дальше?” всегда трактуй через recent_dialog и active_task. Не начинай новую тему.
-
-Acceptance:
-“какие?” после “ФЛ” не повторяет партнёрские банки, а раскрывает варианты для ФЛ.
-
-============================================================
-4. Добавить answer_contract в fact_pack
-============================================================
-
-Файлы:
-app/services/context_builder.py
-app/services/fact_retriever.py
-
-Нужен не routing, а подсказка формата ответа.
-
-Добавить в context:
-
-answer_contract = {
-  "must_answer_current_question": true,
-  "do_not_repeat_intro": true,
-  "do_not_repeat_previous_answer": true,
-  "max_questions": 1,
-  "style": "natural_short"
-}
-
-Для partner_banks:
-answer_contract = {
-  "topic": "partner_banks",
-  "must_include": ["Альфа-Банк", "ТКБ", "Уралсиб"],
-  "should_include": ["Т-Банк, МКБ и Росбанк на паузе"],
-  "do_not_include": ["opening_fee", "monthly_fee"],
-  "next_question": "Счёт подбираем для юрлица или физлица?"
-}
-
-Для FL bank selection:
-answer_contract = {
-  "topic": "bank_selection_fl",
-  "must_include": ["ТКБ", "открытие 1500", "ведение 0"],
-  "should_include": ["расходные операции согласуются юристами банка"],
-  "do_not_include": ["Альфа как вариант для ФЛ без факта", "общий список банков"]
-}
-
-Для card:
-answer_contract = {
-  "topic": "debtor_card",
-  "must_include": ["карта оформляется после введения реализации имущества", "подписывает финансовый управляющий"],
-  "do_not_include": ["наличные", "судебное решение о выдаче наличными"],
-  "next_question": "Реализация уже введена?"
-}
-
-Это НЕ старая классификация. Это контракт качества ответа для LLM.
-
-============================================================
-5. Исправить card answer contract
-============================================================
-
-Файлы:
-app/services/context_builder.py
-app/services/conversation_brain.py
-
-Проблема:
-Бот говорит “Нет проблем с картой”, хотя дальше ограничение.
-
-Для вопроса про карту должника fact_pack.card_rules.primary должен быть:
-
-“Если у гражданина введена реализация имущества, новая банковская карта оформляется и подписывается исключительно финансовым управляющим.”
-
-Prompt:
-Если клиент спрашивает “можно карту сделать?”:
-- не говори “нет проблем”;
-- не отвечай про наличные;
-- объясни условие: после введения реализации имущества;
-- спроси, введена ли реализация.
-
-Expected:
-“Карту можно оформить после введения реализации имущества: подписывает её финансовый управляющий. Реализация уже введена?”
-
-Acceptance:
-Нет фразы “нет проблем”.
-Нет фразы про судебное решение о наличных.
-Есть вопрос про реализацию имущества.
-
-============================================================
-6. Исправить follow-up “почему?”
-============================================================
-
-Файлы:
-app/services/conversation_brain.py
-
-Если last_topic или active_task связан с debtor_card / card_realization, а user_text:
-- почему?
-- а почему?
-- почему нельзя?
-- в чем причина?
-
-Brain должен объяснить причину, а не повторять ответ.
-
-Expected:
-“Потому что после введения реализации имуществом должника распоряжается финансовый управляющий, поэтому карту оформляет и подписывает именно он. До этой стадии карту на должника не оформляем.”
-
-Prompt:
-Если клиент спрашивает “почему?” после ограничения, объясни причину простыми словами. Не повторяй прошлый ответ дословно.
-
-Acceptance:
-“почему?” после карты → explanation, no duplicate.
-
-============================================================
-7. Validator должен ловить wrong-topic answers
+6. Запретить обещание “откроем” без handoff
 ============================================================
 
 Файл:
 app/services/response_validator.py
 
-Добавить проверки по answer_contract:
+Если reply содержит:
+- “откроем”
+- “приступим к открытию”
+- “давайте откроем”
+- “оформим”
+- “начнём открытие”
 
-- Если contract.do_not_include содержит “наличные”, а reply содержит “наличные” или “судебное решение о выдаче наличными” → validation_error=wrong_topic_fact.
-- Если contract.topic=partner_banks и reply содержит тарифы → validation_error=answered_tariffs_when_asked_bank_list.
-- Если contract.topic=bank_selection_fl и reply не содержит “ТКБ” → validation_error=missing_primary_fact.
-- Если memory._introduced=true и reply startswith “Здравствуйте” → validation_error=repeated_intro.
-- Если user_text == “почему?” и reply near_duplicate previous → validation_error=did_not_explain_reason.
+И handoff.needed=false:
+validation_error = "promised_action_without_handoff"
 
-Repair prompt:
-“Исправь ответ: ты использовал не тот факт / повторил приветствие / не ответил на follow-up. Используй answer_contract.”
+Repair hint:
+“Не обещай, что бот сам откроет счёт. Либо поставь handoff.needed=true, либо скажи: ‘поможем оформить, нужен ИНН или название должника’.”
+
+Но лучше для явного открытия — force handoff.
 
 Acceptance:
-Ошибки не уходят пользователю, сначала repair.
+Бот больше не пишет “Давайте приступим к открытию...” без handoff.
 
 ============================================================
-8. Улучшить state_update от conversation_brain
+7. Русский язык only validator
+============================================================
+
+Файл:
+app/services/response_validator.py
+
+Добавить проверку:
+- если reply содержит CJK characters [\u4e00-\u9fff] или слишком много нерусских символов:
+  validation_error = "non_russian_output"
+
+Repair:
+“Ответ должен быть полностью на русском. Перепиши без китайского/английского текста.”
+
+Acceptance:
+Китайский текст не уходит пользователю даже на слабой модели.
+
+============================================================
+8. Исправить identity/persona policy
 ============================================================
 
 Файл:
 app/services/conversation_brain.py
 
-Brain должен всегда возвращать state_update:
+Сейчас бот может дважды представляться и на “ты бот?” отвечает странно.
 
-{
-  "last_topic": "...",
-  "active_task": {...},
-  "client_type": "...",
-  "pending_question": "...",
-  "last_answer_summary": "..."
-}
+Добавить в system prompt:
 
-После partner_banks вопроса:
-last_topic=partner_banks
-pending_question=client_type
+Ты не споришь с клиентом о том, бот ты или нет.
+Если клиент спрашивает “ты бот?”:
+- не говори “я не бот”;
+- не обманывай;
+- спокойно верни к роли сервиса:
+  “Я виртуальный помощник компании «В плюсе», помогаю с первичной консультацией по счетам должников. Если нужно — подключу менеджера.”
 
-После ответа “ФЛ”:
-client_type=ФЛ
-last_topic=bank_selection_fl
-active_task.type=bank_selection
-active_task.client_type=ФЛ
+Если клиент спрашивает “зачем дважды имя говорить?”:
+- коротко извинись;
+- не повторяй имя;
+- продолжай по делу:
+  “Извините, повторился. Дальше буду без лишнего представления. По счёту или банкам что подсказать?”
 
-После card question:
-last_topic=debtor_card
-pending_question=realization_status
-
-После “почему?”:
-last_topic=debtor_card
-pending_question=realization_status сохраняется, если вопрос всё ещё актуален.
+Важно:
+Убрать правило “Никогда не признавайся, что ты бот или ИИ.”
+Оно создаёт риск ложного ответа.
+Заменить на:
+“Не акцентируй внимание на ИИ, но если прямо спрашивают — честно скажи, что это виртуальный помощник.”
 
 Acceptance:
-В логах после каждого ответа виден state_update с last_topic и pending_question.
+User: “ты бот?”
+Bot: “Я виртуальный помощник компании «В плюсе»...”
+No lie.
 
 ============================================================
-9. Prompt: меньше канцелярита и скрипта
+9. Не повторять представление
 ============================================================
 
-Файл:
+Файлы:
+app/services/context_builder.py
 app/services/conversation_brain.py
+app/services/response_validator.py
 
-Добавить style rules:
+Убедиться:
+- после первого reply с “Алексей/В плюсе” set memory._introduced=true;
+- validator запрещает reply startswith “Здравствуйте” или “Я Алексей”, если _introduced=true;
+- repair убирает повторное представление.
 
-- Не начинай с “Понятно” без причины.
-- Не пиши “Вы интересуетесь...” — отвечай прямо.
-- Не повторяй формулировку клиента.
-- Не говори “для начала давайте определим тип вашей организации”, лучше: “Счёт для юрлица или физлица?”
-- Не говори “у нас есть варианты со сниженными тарифами”, если нет конкретики.
-- Если знаешь конкретный вариант — назови его.
-- Пиши 1–3 предложения.
-- Один вопрос максимум.
-
-Bad:
-“Вы интересуетесь нашими партнерскими банками.”
-
-Good:
-“Сейчас активные варианты — Альфа-Банк, ТКБ и Уралсиб. Для физлица чаще смотрим ТКБ. Счёт для физлица?”
+Acceptance:
+После “вы кто?” и “что вы за компания?” бот не говорит имя дважды подряд.
 
 ============================================================
-10. Tests
+10. Добавить тесты
 ============================================================
 
 Добавить:
 
-test_no_repeated_intro
-Context introduced=true
-Expected reply does not start with Здравствуйте.
+test_context_wrapped_in_tags
+- _build_user_message содержит <CONTEXT_DO_NOT_COPY> и <OUTPUT_SCHEMA>
 
-test_partner_banks_then_fl
-User: с какими банками?
-Bot asks ЮЛ/ФЛ
-User: ФЛ
-Expected: TKB FL pricing, not partner list.
+test_explicit_open_forces_handoff
+Input: “ну какие еще, счет открыть”
+Brain returns action=request_data handoff=false
+Expected: force_handoff true
 
-test_short_which_followup
-After client_type=ФЛ
-User: какие?
-Expected: TKB option.
+test_handoff_executes_maybe_escalate
+Brain result handoff needed true
+Expected: maybe_escalate called and _escalation_sent set
 
-test_card_not_no_problem
-User: карту сделать?
-Expected: no “нет проблем”; asks realization.
+test_promised_action_without_handoff_blocked
+Reply: “Давайте откроем счет”
+handoff=false
+Expected validation error
 
-test_card_why_explains_reason
-After card answer
-User: почему?
-Expected: reason explanation, not duplicate.
+test_non_russian_output_blocked
+Reply contains Chinese chars
+Expected validation error + repair
 
-test_validator_blocks_cash_when_card
-answer_contract.topic=debtor_card
-reply mentions cash withdrawal
-Expected validation_error.
+test_bot_identity_honest
+User: “ты бот?”
+Expected: virtual assistant, no false “живой человек”
 
-test_validator_blocks_repeated_intro
+test_no_repeated_intro_after_introduced
 introduced=true
-reply starts with Здравствуйте
-Expected validation_error.
+Reply starts with “Здравствуйте”
+Expected validation error
 
 ============================================================
 FINAL ACCEPTANCE
 ============================================================
 
 Готово, если:
-1. После “ФЛ” бот говорит конкретно про ТКБ для ФЛ.
-2. После “какие?” бот продолжает прошлую тему.
-3. Бот не повторяет приветствие.
-4. Карта не путается с наличными.
-5. “Почему?” объясняет причину, а не повторяет.
-6. Ответы звучат живо, без фраз “Вы интересуетесь...”.
+1. System instructions реально передаются в system role, а context — в <CONTEXT_DO_NOT_COPY>.
+2. Model output стабильно только JSON по OUTPUT_SCHEMA.
+3. “счет открыть” запускает handoff/escalation.
+4. action=request_data не используется для явного ready-to-open.
+5. Бот не обещает открыть счёт сам.
+6. CRM_DISABLED не вызывает Bitrix.
+7. Китайский/нерусский текст не уходит пользователю.
+8. На “ты бот?” бот честно говорит “виртуальный помощник”, не обманывает.
+9. Представление не повторяется.
