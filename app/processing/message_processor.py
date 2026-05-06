@@ -13,7 +13,7 @@ import os
 import re
 import time
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 from app.config import settings
 from app.context.session_manager import get_or_create_session, reset_session
@@ -75,17 +75,44 @@ _READY_FOLLOWUP_RE = re.compile(
 )
 
 # Явные фразы готовности открыть счёт — code-level override (не зависит от LLM)
+# "как открыть" убрана — это информационный вопрос, не согласие
 _OPEN_ACCOUNT_EXPLICIT_RE = re.compile(
     r"(сч[её]т\s+откр|открыть\s+сч[её]т|откроем|оформляем|давайте\s+откр"
-    r"|хочу\s+откр|готов\s+откр|как\s+откр|что\s+дальше|ну\s+какие\s+ещ[её]"
+    r"|хочу\s+откр|готов\s+откр|что\s+дальше|ну\s+какие\s+ещ[её]"
     r"|ну\s+какие\s+еще)",
     re.I | re.U,
+)
+
+# Вопросительные формулировки, при которых "счет открыть" — информационный вопрос, не согласие
+_QUESTION_PHRASING_RE = re.compile(
+    r"\b(где|как\s+быстро|как\s+скоро|как\s+долго|сколько\s+по\s+времени"
+    r"|сколько\s+времени|сколько\s+дней|за\s+сколько|быстрее\s+всего"
+    r"|быстрее\s+открыть|где\s+быстрее)\b",
+    re.I | re.U,
+)
+
+# Сообщения только из знаков (????!, !!!) — сигнал фрустрации
+_FRUSTRATION_ONLY_RE = re.compile(r"^[?!.\s…–—-]+$")
+
+# Вопросы вне домена компании
+_OUT_OF_DOMAIN_RE = re.compile(
+    r"\b(льгот[аыие]|скидк[аиу]|бонус\w*|акци[яи]|промокод|кэшбэк|реферальн\w*"
+    r"|партнёрск\w*|партнерск\w*|программ[аы]\s+лояльн|лояльност\w*)\b",
+    re.I | re.U,
+)
+
+_OUT_OF_DOMAIN_REPLY = (
+    "Мы специализируемся на открытии счетов для должников в банкротных процедурах — "
+    "льготы и скидки не наша тема. Если появятся вопросы по счетам, тарифам или документам — я на связи."
 )
 
 
 def should_force_handoff(user_text: str, brain_result: dict, memory: dict) -> bool:
     """Проверить, нужно ли принудительно поднять handoff независимо от решения LLM."""
     if not _OPEN_ACCOUNT_EXPLICIT_RE.search(user_text or ""):
+        return False
+    # Информационный вопрос ("где быстрее всего счет открыть?") — не handoff
+    if _QUESTION_PHRASING_RE.search(user_text or ""):
         return False
     # Не override если active_task — сравнение или расчёт комиссии
     active_task = (memory or {}).get("active_task") or {}
@@ -94,11 +121,54 @@ def should_force_handoff(user_text: str, brain_result: dict, memory: dict) -> bo
     return True
 
 
-def _build_context_fallback(fact_pack: dict, current_entities: dict, slots: dict) -> str:
-    """Fallback на основе известных фактов, а не generic-фраза."""
+def _build_context_fallback(
+    fact_pack: dict,
+    current_entities: dict,
+    slots: dict,
+    scenario_facts: Optional[dict] = None,
+    signals: Optional[dict] = None,
+) -> str:
+    """Scenario-aware fallback: uses answer_contract/scenario_facts before generic phrasing."""
+    answer_contract = (fact_pack or {}).get("answer_contract") or {}
+    topic = answer_contract.get("topic") or ""
+    question_policy = answer_contract.get("question_policy") or "optional"
+    sigs = signals or {}
+
+    # A) Debtor card — deterministic card answer (question_policy=required by contract)
+    sf_has_card = scenario_facts and "debtor_card_realization" in scenario_facts
+    if sf_has_card or topic == "debtor_card":
+        return (
+            "Если введена реализация имущества, карту оформляет и подписывает финансовый управляющий. "
+            "Если реализации ещё нет — карту пока оформить нельзя. Реализация уже введена?"
+        )
+
+    # B) Account type difference
+    if sigs.get("asks_account_type_difference") or topic == "account_type_difference":
+        return (
+            "Да, разница есть: задатковый и залоговый счета отличаются назначением операций и режимом использования. "
+            "Чтобы подсказать точно по открытию, уточните — речь про счёт для торгов/задатка или про залоговое имущество?"
+        )
+
+    # C) Partner banks list (question_policy=required by contract)
+    sf_has_banks = scenario_facts and "partner_banks" in scenario_facts
+    if sf_has_banks or topic == "partner_banks":
+        return (
+            "Сейчас активные варианты — Альфа-Банк, ТКБ и Уралсиб. "
+            "Т-Банк, МКБ и Росбанк сейчас на паузе. "
+            "Счёт подбираем для юрлица или физлица?"
+        )
+
+    # D) Bank-specific pricing
     bank = current_entities.get("mentioned_bank") or slots.get("_last_bank")
     client_type = slots.get("client_type")
     if bank:
+        trailing = "" if question_policy == "forbidden" else " Разобрать документы или сроки?"
+        if bank == "Уралсиб":
+            ct = "для ФЛ" if client_type == "ФЛ" else "для юрлица"
+            return (
+                f"По Уралсибу {ct}: открытие 3500 руб., ведение 1600 руб. в месяц. "
+                f"По платежам: перевод на юрлицо — 35 руб., плюс 150 руб. за контроль банкротной операции.{trailing}"
+            )
         pricing_key = "bank_pricing_fl" if client_type == "ФЛ" else "bank_pricing_yul"
         for entry in (fact_pack.get(pricing_key) or []):
             if entry.get("bank") == bank:
@@ -114,11 +184,9 @@ def _build_context_fallback(fact_pack: dict, current_entities: dict, slots: dict
                     parts.append(notes)
                 if parts:
                     ct = "для ФЛ" if client_type == "ФЛ" else "для юрлица"
-                    return (
-                        f"По {bank} {ct}: {', '.join(parts)}. "
-                        f"Разобрать документы или сроки?"
-                    )
-    return "Секунду, уточняю информацию. Какой именно вопрос вас интересует?"
+                    return f"По {bank} {ct}: {', '.join(parts)}.{trailing}"
+
+    return "Секунду, уточняю информацию. Уточните, пожалуйста, вопрос."
 
 
 def _merge_trailing_user_messages(msgs: list, current_text: str, *, max_items: int = 3) -> str:
@@ -337,15 +405,53 @@ async def process_message(message):
             return
 
         # -----------------------------------------------------------------------
+        # HARD GUARD 4: identity / greeting (deterministic, no LLM)
+        # -----------------------------------------------------------------------
+        from app.services.identity_guard import check_identity_guard
+        _ig_memory = {
+            "_introduced": bool(slots.get("_introduced")),
+            "last_topic": slots.get("_last_topic"),
+        }
+        identity_response = check_identity_guard(user_text, _ig_memory)
+        if identity_response:
+            _ig_reply = identity_response["reply"]
+            if identity_response.get("set_introduced"):
+                slots["_introduced"] = True
+            if identity_response.get("last_topic"):
+                slots["_last_topic"] = identity_response["last_topic"]
+            await set_slots(session.id, slots)
+            logger.info("Session {} | Identity guard matched — deterministic reply len={}", session.id, len(_ig_reply))
+            await send_bot(session, message.channel, message.external_user_id, _ig_reply, slots, processing_start=processing_start)
+            return
+
+        # -----------------------------------------------------------------------
+        # HARD GUARD 5: frustration symbols (????, !!!) — deterministic confusion reply
+        # -----------------------------------------------------------------------
+        if _FRUSTRATION_ONLY_RE.match(user_text):
+            from app.services.identity_guard import _CONFUSION_REPLY
+            logger.info("Session {} | Frustration-only message — sending confusion reply", session.id)
+            await send_bot(session, message.channel, message.external_user_id, _CONFUSION_REPLY, slots, processing_start=processing_start)
+            return
+
+        # -----------------------------------------------------------------------
+        # HARD GUARD 6: out-of-domain topics (льготы, скидки, бонусы)
+        # -----------------------------------------------------------------------
+        if _OUT_OF_DOMAIN_RE.search(user_text):
+            logger.info("Session {} | Out-of-domain topic detected — sending redirect", session.id)
+            await send_bot(session, message.channel, message.external_user_id, _OUT_OF_DOMAIN_REPLY, slots, processing_start=processing_start)
+            return
+
+        # -----------------------------------------------------------------------
         # MAIN PIPELINE: conversation_brain
         # -----------------------------------------------------------------------
 
-        # 1. Build context (includes fact_pack)
+        # 1. Build context (includes fact_pack and signals)
         ctx = await build_conversation_context(user_text, session.id, slots)
         recent_dialog = ctx["recent_dialog"]
         memory = ctx["memory"]
         current_entities = ctx["current_entities"]
         fact_pack = ctx.get("fact_pack") or {}
+        signals = ctx.get("signals") or {}
 
         # 2. Retrieve KB facts with scenario matching
         kb_result = await retrieve_context_for_brain(user_text, memory, current_entities)
@@ -365,9 +471,20 @@ async def process_message(message):
             user_text, recent_dialog, memory, kb_facts, fact_pack=fact_pack
         )
 
-        # 5. Handle stop action immediately
+        # 5. Handle stop action — only truly stop if it's an end-dialog phrase
         if brain_result.get("stop") or brain_result.get("action") == "stop":
-            logger.info("Session {} | Brain returned stop action", session.id)
+            from app.processing.triggers import END_DIALOG_PHRASES
+            _utext_norm = re.sub(r"[^а-яёa-z\s]", "", user_text.lower()).strip()
+            if _utext_norm in END_DIALOG_PHRASES or brain_result.get("reply"):
+                logger.info("Session {} | Brain returned stop action — recognized end phrase", session.id)
+                return
+            # Brain incorrectly returned stop on a non-end message — use fallback
+            logger.warning("Session {} | Brain stop on non-end phrase '{}' — using context fallback", session.id, user_text[:40])
+            _stop_fallback = _build_context_fallback(
+                fact_pack, current_entities, slots,
+                scenario_facts=scenario_facts, signals=signals,
+            )
+            await send_bot(session, message.channel, message.external_user_id, _stop_fallback, slots, processing_start=processing_start)
             return
 
         # 6. Execute tool if requested
@@ -500,6 +617,25 @@ async def process_message(message):
                         "non_russian_output: Ответ содержит нерусский текст (китайский/английский). "
                         "Перепиши ответ полностью на русском языке."
                     )
+                elif repair_hint == "missing_fl_tariff_details":
+                    repair_hint = (
+                        "missing_fl_tariff_details: Клиент спросил тарифы для ФЛ. "
+                        "Дай конкретные цифры из fact_pack.bank_pricing_fl: "
+                        "ТКБ — открытие 1500 руб., ведение бесплатно; "
+                        "Уралсиб — ведение бесплатно, переводы до 100 тыс. бесплатно, свыше — 0.2%."
+                    )
+                elif repair_hint == "unnecessary_question":
+                    repair_hint = (
+                        "unnecessary_question: answer_contract.question_policy=forbidden. "
+                        "Клиент уже дал данные / подтвердил выбор / поблагодарил. "
+                        "Убери вопрос в конце — заверши ответ утверждением."
+                    )
+                elif repair_hint == "missing_required_question":
+                    repair_hint = (
+                        "missing_required_question: answer_contract.question_policy=required. "
+                        "В ответе отсутствует уточняющий вопрос. "
+                        "Добавь вопрос из answer_contract.next_question или задай уточнение по теме."
+                    )
                 repaired = await conversation_brain_repair(
                     previous_reply=reply,
                     validation_error=repair_hint,
@@ -510,13 +646,35 @@ async def process_message(message):
                     fact_pack=fact_pack,
                 )
                 if repaired and repaired.strip():
-                    reply = repaired
-                    logger.info("Session {} | Repaired reply len={}", session.id, len(reply))
+                    # Re-validate repaired reply before accepting it
+                    repaired_val = validate_reply(
+                        repaired, brain_result, current_entities, slots,
+                        tool_results=tool_results, user_text=user_text,
+                        answer_contract=answer_contract,
+                        scenario_facts=scenario_facts,
+                    )
+                    if repaired_val["is_valid"]:
+                        reply = repaired
+                        logger.info("Session {} | Repaired reply accepted len={}", session.id, len(reply))
+                    else:
+                        logger.warning(
+                            "Session {} | Repaired reply invalid: {} — using context fallback",
+                            session.id, repaired_val["reason"],
+                        )
+                        reply = _build_context_fallback(
+                            fact_pack, current_entities, slots,
+                            scenario_facts=scenario_facts, signals=signals,
+                        )
+                else:
+                    reply = ""
 
         # 10. Fallback if still no reply
         if not reply or not reply.strip():
             logger.warning("Session {} | Brain returned no reply — using context fallback", session.id)
-            reply = _build_context_fallback(fact_pack, current_entities, slots)
+            reply = _build_context_fallback(
+                fact_pack, current_entities, slots,
+                scenario_facts=scenario_facts, signals=signals,
+            )
 
         # 11. Dynamic greeting injection (only for first turn)
         if (

@@ -225,6 +225,7 @@ class ScenarioFactIndex:
             "заранее": "early_opening",
             "открыть заранее": "early_opening",
             "без движений": "early_opening",
+            "реструктуризац": "restructuring_ip",
             "партнёр": "partner_banks",
             "партнер": "partner_banks",
             "список банк": "partner_banks",

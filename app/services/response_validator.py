@@ -25,6 +25,15 @@ _WHY_RE = re.compile(r"^\s*(почему|а\s+почему|почему\s+нел
 # CJK и нерусские символы в ответе
 _CJK_RE = re.compile(r"[一-鿿぀-ゟ゠-ヿ＀-￯]")
 
+# Ответ заканчивается вопросом
+_ENDS_WITH_QUESTION_RE = re.compile(r"\?\s*$", re.U)
+
+# Явный запрос данных (альтернатива вопросу при question_policy=required)
+_DATA_REQUEST_RE = re.compile(
+    r"\b(укажите|пришлите|нужен|нужна|необходим\w*|отправьте|предоставьте|сообщите|назовите)\b",
+    re.I | re.U,
+)
+
 # Мягкие фразы намерения открыть счёт (не попадают в hard handoff guard)
 _OPEN_ACCOUNT_SOFT_RE = re.compile(
     r"(счет\s+откройте|откройте\s+(?:мне\s+)?счет"
@@ -156,6 +165,18 @@ def validate_reply(
         if not is_comparison and not handoff.get("needed") and action not in ("handoff", "request_data"):
             return {"is_valid": False, "reason": "open_account_without_handoff_or_request_data"}
 
+    # question_policy checks
+    if answer_contract:
+        question_policy = answer_contract.get("question_policy") or "optional"
+        if question_policy == "forbidden":
+            if _ENDS_WITH_QUESTION_RE.search(reply.strip()):
+                return {"is_valid": False, "reason": "unnecessary_question"}
+        elif question_policy == "required":
+            has_question = _ENDS_WITH_QUESTION_RE.search(reply.strip())
+            has_data_request = _DATA_REQUEST_RE.search(reply)
+            if not has_question and not has_data_request:
+                return {"is_valid": False, "reason": "missing_required_question"}
+
     # Answer contract checks
     if answer_contract:
         topic = answer_contract.get("topic") or ""
@@ -169,9 +190,15 @@ def validate_reply(
         if topic == "partner_banks" and _TARIFF_NUMBERS_RE.search(reply):
             return {"is_valid": False, "reason": "answered_tariffs_when_asked_bank_list"}
 
-        # topic=bank_selection_fl: ТКБ должен быть в ответе
-        if topic == "bank_selection_fl" and "ткб" not in reply_lower:
-            return {"is_valid": False, "reason": "missing_primary_fact"}
+        # topic=bank_selection_fl: ТКБ и хотя бы одна цифра тарифа
+        if topic == "bank_selection_fl":
+            if "ткб" not in reply_lower:
+                return {"is_valid": False, "reason": "missing_primary_fact"}
+            # If user asked for tariffs, must include at least one number
+            _TARIFF_Q_RE = re.compile(r"(тариф|условия|стоимость|сколько|открытие|ведение)", re.I | re.U)
+            if user_text and _TARIFF_Q_RE.search(user_text):
+                if not re.search(r"\b(1500|0\s*руб|бесплатно)", reply_lower):
+                    return {"is_valid": False, "reason": "missing_fl_tariff_details"}
 
         # Общая проверка do_not_include
         for phrase in do_not_include:
@@ -200,5 +227,32 @@ def validate_reply(
             required_banks = ["альфа-банк", "ткб", "уралсиб"]
             if not all(b in reply_lower for b in required_banks):
                 return {"is_valid": False, "reason": "missing_required_partner_banks"}
+
+    # Role confusion — bot echoes nonsense
+    _ROLE_CONFUSION_PHRASES = ["о чем я?", "о чём я?", "как я могу вам помочь?", "чем могу помочь?"]
+    if any(reply_lower.strip() == ph for ph in _ROLE_CONFUSION_PHRASES):
+        return {"is_valid": False, "reason": "role_confusion"}
+
+    # Generic greeting reply to specific question — check before too_short
+    _SPECIFIC_QUESTION_RE = re.compile(
+        r"(карт|счет|банк|тариф|документ|условия|перевод|задатков|залогов|комисси|наличн|открыт|разниц)",
+        re.I | re.U,
+    )
+    _GREETING_REPLY_START = re.compile(
+        r"^(здравствуйте|добрый день|привет)[!,.\s]*(я\s+алексей|как\s+я\s+могу|чем\s+могу)",
+        re.I | re.U,
+    )
+    if user_text and _SPECIFIC_QUESTION_RE.search(user_text) and _GREETING_REPLY_START.match(reply_lower):
+        return {"is_valid": False, "reason": "generic_greeting_reply_to_specific_question"}
+
+    # Identity question — reply must contain role markers
+    if answer_contract and answer_contract.get("topic") == "identity":
+        required = ["в плюсе", "счет", "должник", "банкрот"]
+        if not any(r in reply_lower for r in required):
+            return {"is_valid": False, "reason": "identity_question_wrong_answer"}
+
+    # Too short for a specific question (not a greeting/follow-up)
+    if user_text and _SPECIFIC_QUESTION_RE.search(user_text) and len(reply) < 40:
+        return {"is_valid": False, "reason": "too_short_for_specific_question"}
 
     return {"is_valid": True, "reason": None}

@@ -41,6 +41,55 @@ _RECIPIENT_UL_RE = re.compile(
     re.I | re.U,
 )
 
+# ---------------------------------------------------------------------------
+# Conversational signal patterns
+# ---------------------------------------------------------------------------
+_SIG_GREETING_ONLY_RE = re.compile(
+    r"^(добрый\s+день|добрый\s+вечер|доброе\s+утро|здравствуйте|привет|добрый)[!.,\s]*$",
+    re.I | re.U,
+)
+_SIG_ASKS_IDENTITY_RE = re.compile(
+    r"(вы\s+кто|ты\s+кто|кто\s+вы|что\s+за\s+компания"
+    r"|почему\s+не\s+представляетесь|с\s+кем\s+я\s+общаюсь)",
+    re.I | re.U,
+)
+_SIG_CONFUSION_RE = re.compile(
+    r"(о\s+чём\s+ты|о\s+чем\s+ты|причём\s+тут|причем\s+тут"
+    r"|что\s+ты\s+несёшь|что\s+ты\s+несешь|я\s+не\s+про\s+это|зачем\s+дважды)",
+    re.I | re.U,
+)
+_SIG_REPEAT_RE = re.compile(
+    r"(повторяешься|уже\s+говорил|ты\s+что\s+бот|хватит\s+повторять|зачем\s+дважды\s+имя)",
+    re.I | re.U,
+)
+_SIG_WHY_RE = re.compile(
+    r"^\s*(почему|а\s+почему|почему\s+нельзя|в\s+чём\s+причина|в\s+чем\s+причина)\s*[?!]?\s*$",
+    re.I | re.U,
+)
+_SIG_NEXT_STEP_RE = re.compile(
+    r"(что\s+дальше|как\s+дальше|дальше\s+что|и\s+что\s+теперь|следующий\s+шаг)",
+    re.I | re.U,
+)
+_SIG_ACCOUNT_TYPE_DIFF_RE = re.compile(
+    r"(задатков\w*|залогов\w*|разниц\w+.*счёт|разниц\w+.*счет|виды\s+счет|специальный\s+счет|чем\s+отличается\s+счет)",
+    re.I | re.U,
+)
+
+
+def build_conversational_signals(user_text: str) -> dict:
+    """Detect conversation meta-signals from user text."""
+    t = user_text or ""
+    return {
+        "is_greeting_only": bool(_SIG_GREETING_ONLY_RE.match(t.strip())),
+        "asks_identity": bool(_SIG_ASKS_IDENTITY_RE.search(t)),
+        "complains_confusion": bool(_SIG_CONFUSION_RE.search(t)),
+        "complains_repeat": bool(_SIG_REPEAT_RE.search(t)),
+        "asks_why": bool(_SIG_WHY_RE.match(t)),
+        "asks_next_step": bool(_SIG_NEXT_STEP_RE.search(t)),
+        "asks_account_type_difference": bool(_SIG_ACCOUNT_TYPE_DIFF_RE.search(t)),
+    }
+
+
 # Card-related keyword detection (for fact_pack priority)
 _CARD_KEYWORDS_RE = re.compile(
     r"\b(карт[аеуиой]|карточк\w*|сделать\s+карт|карт[уа]\s+должник\w*|карт[уа]\s+выдат|карт[уа]\s+открыт)\b",
@@ -56,6 +105,10 @@ _BANK_LIST_KEYWORDS_RE = re.compile(
 )
 _LOW_COST_KEYWORDS_RE = re.compile(
     r"\b(подешевле|дешевле|недорого|самый\s+деш[её]в\w*|минимальн\w*\s+(?:цен|тариф|стоимост)|бюджетн\w*)\b",
+    re.I | re.U,
+)
+_TARIFF_KEYWORDS_RE = re.compile(
+    r"\b(условия|тарифы|тариф|сколько\s+стоит|стоимость|цены|расценки|открытие|ведение|комисси\w*)\b",
     re.I | re.U,
 )
 
@@ -199,15 +252,38 @@ def _build_answer_contract(
     client_type: Optional[str],
     active_task: dict,
     user_text: str,
+    signals: Optional[dict] = None,
 ) -> dict:
     """Контракт качества ответа — не routing, а ограничения на содержание."""
     base = {
         "must_answer_current_question": True,
         "do_not_repeat_intro": True,
         "do_not_repeat_previous_answer": True,
-        "max_questions": 1,
         "style": "natural_short",
+        "question_policy": "optional",
+        "next_question": None,
     }
+
+    sigs = signals or {}
+
+    if sigs.get("asks_identity") or sigs.get("complains_confusion"):
+        return {
+            **base,
+            "topic": "identity",
+            "must_include": ["Алексей", "В плюсе", "счета должников"],
+            "do_not_include": ["нужны данные для открытия счета", "оформлением", "я бот", "я живой человек"],
+            "response_mode": "explain_role",
+            "question_policy": "forbidden",
+            "next_question": None,
+        }
+
+    if sigs.get("asks_account_type_difference"):
+        return {
+            **base,
+            "topic": "account_type_difference",
+            "do_not_include": ["Как я могу вам помочь?", "Здравствуйте", "какой именно вопрос"],
+            "question_policy": "optional",
+        }
 
     if asks_card:
         return {
@@ -215,6 +291,7 @@ def _build_answer_contract(
             "topic": "debtor_card",
             "must_include": ["реализация имущества", "финансовый управляющий"],
             "do_not_include": ["наличные", "судебное решение о выдаче наличными", "нет проблем"],
+            "question_policy": "required",
             "next_question": "Реализация уже введена?",
         }
 
@@ -225,6 +302,7 @@ def _build_answer_contract(
             "must_include": ["Альфа-Банк", "ТКБ", "Уралсиб"],
             "should_include": ["Т-Банк, МКБ и Росбанк на паузе"],
             "do_not_include": ["opening_fee", "monthly_fee"],
+            "question_policy": "required",
             "next_question": "Счёт подбираем для юрлица или физлица?",
         }
 
@@ -236,6 +314,7 @@ def _build_answer_contract(
             "must_include": ["ТКБ", "открытие 1500", "ведение 0"],
             "should_include": ["расходные операции согласуются юристами банка"],
             "do_not_include": ["общий список банков"],
+            "question_policy": "optional",
         }
 
     return base
@@ -249,6 +328,7 @@ def build_fact_pack(
     user_text: str,
     memory: dict,
     current_entities: dict,
+    signals: Optional[dict] = None,
 ) -> dict:
     """Собрать структурированный контракт фактов для brain.
 
@@ -264,6 +344,7 @@ def build_fact_pack(
     asks_cash = bool(_CASH_KEYWORDS_RE.search(user_text))
     asks_banks = bool(_BANK_LIST_KEYWORDS_RE.search(user_text))
     asks_low_cost = bool(_LOW_COST_KEYWORDS_RE.search(user_text))
+    asks_tariff = bool(_TARIFF_KEYWORDS_RE.search(user_text))
 
     pack: dict = {}
 
@@ -314,6 +395,28 @@ def build_fact_pack(
             "Помоги клиенту выбрать между дешёвым стартом и дешёвым ведением."
         )
 
+    # --- Подсказка по тарифам (если тип клиента уже известен) ---
+    if asks_tariff and not asks_low_cost and not asks_banks:
+        if client_type == "ФЛ":
+            pack["_pricing_hint"] = (
+                "Клиент спрашивает тарифы для ФЛ. Используй точные данные: "
+                "ТКБ — открытие 1500 руб., ведение бесплатно, расходные операции согласуются юристами банка; "
+                "Уралсиб — ведение бесплатно, переводы ФЛ до 100 тыс. руб. бесплатно, свыше — 0.2%, "
+                "контроль банкротной операции 150 руб. за каждую."
+            )
+        elif client_type in ("ЮЛ", "ИП"):
+            pack["_pricing_hint"] = (
+                "Клиент спрашивает тарифы для ЮЛ/ИП. Используй точные данные: "
+                "Альфа-Банк — открытие 800 руб., ведение 800 руб., контроль банкротных операций 0 руб.; "
+                "ТКБ — открытие 2800 руб., ведение 2090 руб., перевод на ЮЛ 33 руб. электронно; "
+                "Уралсиб — открытие 3500 руб., ведение 1600 руб., контроль банкротной операции 150 руб."
+            )
+        else:
+            pack["_pricing_hint"] = (
+                "Клиент спрашивает тарифы/условия, тип клиента не определён. "
+                "Уточни: счёт для юрлица/ИП или физлица? — от этого зависит список доступных банков и тарифы."
+            )
+
     # --- Подсказка по списку банков ---
     if asks_banks:
         pack["_banks_hint"] = (
@@ -329,6 +432,7 @@ def build_fact_pack(
         client_type=client_type,
         active_task=active_task,
         user_text=user_text,
+        signals=signals,
     )
 
     return pack
@@ -358,6 +462,7 @@ async def build_conversation_context(
         recent_dialog = []
 
     current_entities = extract_entities(user_text)
+    signals = build_conversational_signals(user_text)
 
     memory = {
         "active_task": slots.get("_active_task"),
@@ -370,13 +475,14 @@ async def build_conversation_context(
         "_introduced": bool(slots.get("_introduced")),
     }
 
-    fact_pack = build_fact_pack(user_text, memory, current_entities)
+    fact_pack = build_fact_pack(user_text, memory, current_entities, signals=signals)
 
     return {
         "user_text": user_text,
         "recent_dialog": recent_dialog,
         "memory": memory,
         "current_entities": current_entities,
+        "signals": signals,
         "fact_pack": fact_pack,
         "tools": ["calculate_transfer_fee", "search_kb"],
     }

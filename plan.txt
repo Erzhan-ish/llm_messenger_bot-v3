@@ -1,364 +1,233 @@
-Ты работаешь с llm_messenger_bot-v3.
+Задача: сделать речь бота естественнее — убрать обязательный вопрос в конце каждого ответа.
 
-Цель:
-Переделать поиск по базе знаний так, чтобы он не просто возвращал случайные top-k чанки, а умел распознавать все сценарии из KB и отдавать все обязательные факты по каждому найденному сценарию.
+Проблема:
+Сейчас в pipeline.md / BRAIN_SYSTEM_PROMPT и answer_contract слишком жёстко прописано:
+- “1–3 предложения, один вопрос в конце”
+- next_question ожидается почти всегда
+- validator/fallback могут считать отсутствие вопроса ошибкой
 
-Важно:
-Не возвращаем старый semantic routing.
-LLM всё ещё думает и пишет.
-Код должен:
-- построить структурированный scenario/fact index;
-- найти candidate scenarios;
-- собрать полный fact_pack по ним;
-- передать brain чистые факты;
-- проверить, что ответ не потерял обязательные факты.
+Из-за этого бот звучит неестественно:
+- клиент дал согласие → бот всё равно спрашивает
+- клиент отправил данные → бот всё равно спрашивает
+- клиент попрощался → бот всё равно продолжает
+- клиент готов открыть счёт → бот вместо перехода задаёт лишний вопрос
+
+Нужно заменить правило “всегда вопрос” на “вопрос только если он нужен”.
 
 ============================================================
-1. Расширить формат KB
+1. Смягчить BRAIN_SYSTEM_PROMPT / pipeline.md
 ============================================================
 
-В knowledge_base.txt для каждого CHUNK добавить поля:
+Было:
+“Пиши коротко: 1–3 предложения, один вопрос в конце.”
 
-SCENARIO:
-ANSWER_HINT:
-NEXT_QUESTION:
+Стало:
+“Пиши коротко: обычно 1–3 предложения. Задавай уточняющий вопрос в конце только если он реально нужен: чтобы собрать недостающие данные, выбрать банк, уточнить тип клиента или продвинуть клиента к следующему шагу. Если клиент уже дал данные, подтвердил выбор, согласился на оформление, попрощался или просто поблагодарил — вопрос не нужен.”
+
+Добавить правило:
+
+Не задавай вопрос ради вопроса.
+Если следующий шаг уже понятен — подтверди его и действуй.
+
+Примеры:
+
+User: “ИНН 1234567890”
+Good:
+“Принял ИНН, передам менеджеру для проверки.”
+
+Bad:
+“Принял ИНН. Что ещё подсказать?”
+
+User: “Уралсиб подходит, оформляем”
+Good:
+“Отлично, Уралсиб фиксируем. Подключу старшего менеджера, он доведёт по документам и открытию.”
+
+Bad:
+“Отлично, Уралсиб фиксируем. Документы подсказать?”
+
+User: “спасибо, понял”
+Good:
+“Пожалуйста, обращайтесь.”
+
+Bad:
+“Пожалуйста. Что ещё хотите уточнить?”
+
+============================================================
+2. Сделать next_question опциональным
+============================================================
+
+В answer_contract:
+next_question может быть строкой или null.
 
 Пример:
 
----CHUNK---
-TYPE: constraint
-SCENARIO: debtor_card_realization
-TOPIC: realization_card
-CLIENT_TYPE: ФЛ
-ALIASES: карта карточка реализация имущества должник списывают долги
-TAGS: card debtor realization financial_manager
-FACT: Если у гражданина введена реализация имущества, новая банковская карта оформляется и подписывается исключительно финансовым управляющим.
-ANSWER_HINT: Не путать карту со снятием наличных. Если клиент спрашивает карту, объяснить роль финансового управляющего.
-NEXT_QUESTION: Реализация имущества уже введена?
-
-Для тарифов:
-
----CHUNK---
-TYPE: pricing
-SCENARIO: uralsib_yul_conditions
-BANK: Уралсиб
-CLIENT_TYPE: ЮЛ
-FIELD: opening_fee
-TOPIC: account_opening
-VALUE_NUM: 3500
-ALIASES: уралсиб юрлицо условия тариф открытие счет
-FACT: В Уралсибе для ЮЛ открытие счёта стоит 3500 руб.
-
-Acceptance:
-- KB loader парсит SCENARIO, ANSWER_HINT, NEXT_QUESTION.
-- KBChunk содержит scenario_id, answer_hint, next_question.
-
-============================================================
-2. Обновить KBChunk и parser
-============================================================
-
-Файл:
-app/knowledge_base/kb.py
-
-Добавить поля в dataclass KBChunk:
-
-scenario_id: Optional[str] = None
-answer_hint: Optional[str] = None
-next_question: Optional[str] = None
-
-В _parse_block:
-valid_keys добавить:
-SCENARIO
-SCENARIO_ID
-ANSWER_HINT
-NEXT_QUESTION
-
-В _normalize_chunk:
-- scenario/scenario_id нормализовать в scenario_id
-- lower snake_case, если нужно
-
-В _make_search_text:
-добавить:
-scenario_id
-answer_hint
-next_question
-
-Acceptance:
-После rebuild cache каждый chunk имеет scenario_id, если он указан в KB.
-
-============================================================
-3. Создать ScenarioFactIndex
-============================================================
-
-Файл:
-app/knowledge_base/scenario_index.py
-
-Реализовать:
-
-@dataclass
-class ScenarioMatch:
-    scenario_id: str
-    score: float
-    reasons: list[str]
-    matched_aliases: list[str]
-
-class ScenarioFactIndex:
-    def __init__(self, chunks: list[KBChunk]):
-        self.by_scenario: dict[str, list[KBChunk]]
-        self.by_topic: dict[str, list[KBChunk]]
-        self.by_bank: dict[str, list[KBChunk]]
-        self.by_client_type: dict[str, list[KBChunk]]
-        self.alias_to_scenarios: dict[str, set[str]]
-
-    def match_scenarios(user_text, memory, current_entities) -> list[ScenarioMatch]
-    def get_chunks_for_scenario(scenario_id, bank=None, client_type=None) -> list[KBChunk]
-    def build_fact_pack(matches, memory, current_entities) -> dict
-
-match_scenarios должен учитывать:
-- aliases
-- tags
-- topic
-- current_entities.mentioned_bank
-- current_entities.mentioned_client_type
-- memory.last_topic
-- memory.active_task
-- exact phrase matches
-- hybrid search score как дополнительный сигнал, но не единственный
-
-Важно:
-Scenario index не принимает финальное решение за LLM.
-Он только собирает candidate scenarios and facts.
-
-============================================================
-4. Интегрировать ScenarioFactIndex в KnowledgeBase
-============================================================
-
-Файл:
-app/knowledge_base/kb.py
-app/knowledge_base/loader.py
-
-KnowledgeBase должен иметь:
-
-self.scenario_index = ScenarioFactIndex(self._chunks)
-
-или helper:
-
-def get_scenario_index() -> ScenarioFactIndex:
-    return get_kb().scenario_index
-
-Acceptance:
-Можно вызвать:
-get_kb().scenario_index.match_scenarios(...)
-
-============================================================
-5. Переписать retrieve_context_for_brain
-============================================================
-
-Файл:
-app/services/fact_retriever.py
-
-Сейчас retrieve_context_for_brain делает top-k поиск и возвращает chunks.
-Нужно сделать 2 слоя:
-
-A. scenario_matches:
-scenario_matches = kb.scenario_index.match_scenarios(user_text, memory, current_entities)
-
-B. scenario_fact_pack:
-scenario_pack = kb.scenario_index.build_fact_pack(scenario_matches, memory, current_entities)
-
-C. raw_kb_facts:
-оставить hybrid top-k как дополнительный источник, но не основной.
-
-Возвращаемая структура должна быть не просто list[dict], а лучше:
-
 {
-  "scenario_matches": [...],
-  "scenario_facts": {...},
-  "raw_kb_facts": [...]
+  "next_question": null
 }
 
-Если нельзя сразу менять интерфейс, можно временно:
-- raw_kb_facts оставить list;
-- scenario_facts положить в context_builder.fact_pack.
+Если next_question=null:
+- LLM не должна придумывать вопрос сама;
+- validator не должен требовать вопрос;
+- fallback не должен автоматически добавлять вопрос.
 
-Acceptance:
-На запрос “Уралсиб вроде нормально, какие там условия?”
-scenario_facts содержит все ключевые факты Уралсиба для ЮЛ:
-- opening_fee 3500
-- monthly_fee 1600
-- transfer_to_yul 35
-- operation_control_fee 150
-- docs, если есть
-- bonus, если есть
+Если next_question задан:
+- LLM может использовать его, если вопрос уместен;
+- но даже тогда вопрос не обязателен, если клиент уже дал ответ или готов к handoff.
 
 ============================================================
-6. Fact_pack должен строиться из KB, не из hardcoded Python
+3. Добавить question_policy в answer_contract
 ============================================================
 
-Файл:
-app/services/context_builder.py
+Вместо одного поля next_question добавить/поддержать:
 
-Сейчас там hardcoded:
-_BANK_PRICING_YUL
-_BANK_PRICING_FL
-_CARD_RULES
-_PARTNER_BANKS
+{
+  "question_policy": "required|optional|forbidden"
+}
 
-Нужно постепенно заменить:
+Правила:
 
-partner_banks = scenario_index facts where SCENARIO=partner_banks
-bank_pricing_yul = facts where scenario in legal_entity_bank_selection / *_yul_conditions
-bank_pricing_fl = facts where scenario in individual_bank_selection / *_fl_conditions
-card_rules = scenario debtor_card_realization
-advance_opening = scenario advance_opening
+required:
+- нужно собрать критически недостающую информацию
+- например: тип клиента неизвестен, сумма перевода неизвестна, банк не выбран
 
-На переходном этапе можно оставить hardcoded fallback, но приоритет должен быть у KB.
+optional:
+- можно задать вопрос, если это помогает продолжить диалог
+- например: “документы подсказать?”, “сравнить с другим банком?”
 
-Acceptance:
-Если knowledge_base.txt обновили тариф Уралсиба, fact_pack меняется без правки Python-кода.
-
-============================================================
-7. Добавить coverage retrieval
-============================================================
-
-Нужна функция:
-
-get_all_facts_for_scenario(scenario_id, bank=None, client_type=None) -> dict
-
-Она собирает:
-pricing:
-  opening_fee
-  monthly_fee
-  transfer_fee
-  control_fee
-docs:
-  [...]
-constraints:
-  [...]
-bonus:
-  [...]
-availability:
-  status
-features:
-  [...]
-answer_hints:
-  [...]
-next_questions:
-  [...]
-
-Это должно агрегировать по chunk.type и field.
-
-Acceptance:
-Для каждого scenario_id можно получить полный структурированный профиль.
-
-============================================================
-8. Обновить conversation context
-============================================================
-
-Файл:
-app/services/context_builder.py
-app/processing/message_processor.py
-
-В brain payload передавать:
-
-"scenario_matches": [
-  {"scenario_id": "...", "score": 0.92, "reasons": [...]}
-],
-"scenario_facts": {
-  "debtor_card_realization": {...},
-  "uralsib_yul_conditions": {...}
-},
-"raw_kb_facts": [...]
-"fact_pack": {...}
-
-Prompt brain:
-- scenario_facts — приоритетнее raw_kb_facts.
-- Если scenario_facts содержит факты, используй их.
-- raw_kb_facts — только дополнительный материал.
-- Если scenario_facts пустой, честно уточни.
-
-============================================================
-9. Добавить validation на completeness
-============================================================
-
-Файл:
-app/services/response_validator.py
-
-Если answer_contract или scenario_facts имеют required facts:
-- проверять, что reply содержит обязательные факты или хотя бы не противоречит им.
+forbidden:
+- вопрос в конце не нужен
+- клиент дал данные
+- клиент согласился на handoff
+- клиент попрощался
+- клиент сказал “спасибо”
+- клиент явно попросил открыть счёт
+- бот просто подтверждает принятие информации
 
 Примеры:
-- partner_banks: должны быть Альфа-Банк, ТКБ, Уралсиб.
-- debtor_card_realization: должны быть “реализация имущества” + “финансовый управляющий”.
-- uralsib_yul_conditions: если клиент спросил “условия”, reply должен содержать opening/monthly или спросить, что именно интересует, но не generic fallback.
-- account_type_difference: reply не может быть “Как я могу помочь?”
+
+1. Клиент спрашивает список банков:
+question_policy=required
+next_question="Счёт подбираем для юрлица или физлица?"
+
+2. Клиент спрашивает тарифы:
+question_policy=optional
+next_question="Документы подсказать?"
+
+3. Клиент говорит “оформляем”:
+question_policy=forbidden
+next_question=null
+
+4. Клиент говорит “спасибо”:
+question_policy=forbidden
+next_question=null
+
+============================================================
+4. Обновить response_validator
+============================================================
+
+Validator не должен требовать вопрос в каждом ответе.
+
+Добавить проверки:
+
+Если question_policy="forbidden":
+- reply не должен заканчиваться вопросом
+- если reply содержит лишний вопрос → validation_error="unnecessary_question"
+
+Если question_policy="required":
+- reply должен содержать вопрос или явный запрос данных
+- если нет → validation_error="missing_required_question"
+
+Если question_policy="optional":
+- вопрос допустим, но не обязателен
 
 Acceptance:
-Generic replies не проходят при наличии scenario_facts.
+- “Принял ИНН, передам менеджеру.” проходит validator.
+- “Уралсиб фиксируем, подключу менеджера.” проходит validator.
+- “Спасибо, обращайтесь.” проходит validator.
+- Лишний вопрос после “спасибо” блокируется.
 
 ============================================================
-10. Добавить scenario coverage tests
+5. Обновить context_fallback
 ============================================================
 
-Добавить тесты:
+Fallback сейчас может добавлять вопрос автоматически.
+Нужно:
+- смотреть answer_contract.question_policy
+- если forbidden → не добавлять вопрос
+- если required → добавить нужный вопрос
+- если optional → добавить только если ответ без него выглядит оборванным
 
-test_all_kb_chunks_have_scenario_or_legacy_allowed
-- Все новые чанки должны иметь SCENARIO.
-- Legacy chunks allowed only temporarily with warning.
+Пример handoff fallback:
 
-test_all_scenarios_have_aliases
-- У каждого scenario есть aliases/tags.
+Good:
+“Хорошо, поможем открыть. Подключу старшего менеджера, он доведёт по документам и оформлению.”
 
-test_scenario_index_matches_all_core_queries
-Покрыть:
-- карта должнику
-- спецсчёт без основного
-- задатковый и залоговый
-- список банков
-- юр лицо подешевле
-- тарифы Уралсиб
-- документы Уралсиб
-- перевод 200000 на физлицо Альфа
-- доп комиссии Уралсиб
-- онлайн по ЭЦП
-- доверенность
-- умерший должник
-- нерезидент
-- красная зона
-- ликвидированное ЮЛ
-- интернет-банк ФЛ/ИП
-- капитализация
-- зарплатный проект
+Bad:
+“Хорошо, поможем открыть. Что ещё подсказать?”
 
-test_scenario_fact_pack_complete_uralsib_yul
-Expected:
-opening_fee=3500
-monthly_fee=1600
-transfer_to_yul=35
-operation_control_fee=150
+============================================================
+6. Обновить conversation_brain prompt
+============================================================
 
-test_scenario_fact_pack_debtor_card
-Expected:
-realization_card fact
-before_realization fact
-do_not_mix_cash_withdrawal
+Добавить блок:
 
-test_no_top_k_loss_for_conditions
-Query:
-“Уралсиб вроде нормально, какие там условия?”
-Expected:
-scenario_facts contains all relevant Уралсиб facts, even if raw_kb_facts top-k misses some.
+═══ ВОПРОС В КОНЦЕ ═══
+Не каждый ответ должен заканчиваться вопросом.
+Задавай вопрос только если:
+- не хватает данных;
+- нужно выбрать банк;
+- нужно уточнить тип клиента;
+- нужно продвинуть клиента к следующему шагу.
+
+Не задавай вопрос, если:
+- клиент дал данные;
+- клиент подтвердил выбор;
+- клиент готов к оформлению;
+- клиент попрощался;
+- клиент просто сказал спасибо;
+- action=handoff или stop;
+- answer_contract.question_policy=forbidden.
+
+Если question_policy=forbidden — заверши ответ утверждением, без вопроса.
+
+============================================================
+7. Тесты
+============================================================
+
+Добавить:
+
+test_no_question_after_thanks
+User: “спасибо, понял”
+Expected: no question at end
+
+test_no_question_after_inn
+User: “ИНН 1234567890”
+Expected: acknowledge data, no question
+
+test_no_question_on_handoff
+User: “подходит, оформляем”
+Expected: handoff bridge, no extra question
+
+test_required_question_when_client_type_missing
+User: “банк подобрать”
+Expected: asks ЮЛ/ФЛ/ИП
+
+test_optional_question_allowed_for_pricing
+User: “какие тарифы в Уралсибе?”
+Expected: may ask “документы подсказать?”, but not mandatory
+
+test_validator_blocks_unnecessary_question
+question_policy=forbidden
+reply ends with “Что ещё подсказать?”
+Expected: validation_error=unnecessary_question
 
 ============================================================
 FINAL ACCEPTANCE
 ============================================================
 
 Готово, если:
-1. KB поддерживает SCENARIO / ANSWER_HINT / NEXT_QUESTION.
-2. ScenarioFactIndex строится при загрузке KB.
-3. retrieve_context_for_brain возвращает не только top-k chunks, но и scenario_matches + scenario_facts.
-4. fact_pack строится из KB, а не только из hardcoded Python.
-5. Все основные сценарии распознаются через aliases/tags/scenario_id.
-6. По найденному сценарию возвращаются все обязательные факты, а не только top-k.
-7. Обновление knowledge_base.txt меняет поведение без правки Python-кода.
-8. Есть coverage tests на все сценарии.
+1. Бот больше не задаёт вопрос в конце каждого ответа.
+2. next_question может быть null.
+3. question_policy управляет тем, нужен вопрос или нет.
+4. После “спасибо”, “понял”, “оформляем”, “ИНН ...” бот не допрашивает клиента.
+5. Когда данных реально не хватает, бот всё ещё задаёт уточняющий вопрос.
