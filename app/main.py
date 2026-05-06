@@ -33,6 +33,20 @@ def _ensure_user_columns(conn) -> None:
 
 @app.on_event("startup")
 async def on_startup():
+    from app.config import settings
+    from app.services.conversation_brain import load_brain_prompt
+
+    if settings.LLM_PROVIDER == "stub":
+        raise RuntimeError(
+            "LLM_PROVIDER=stub is not allowed in production. "
+            "Set LLM_PROVIDER=ollama or LLM_PROVIDER=timeweb in your .env"
+        )
+
+    try:
+        load_brain_prompt()
+    except (FileNotFoundError, RuntimeError) as exc:
+        raise RuntimeError(f"Startup failed — brain prompt unavailable: {exc}") from exc
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_user_columns)

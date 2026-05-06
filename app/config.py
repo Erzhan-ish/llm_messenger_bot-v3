@@ -57,8 +57,8 @@ class Settings(BaseSettings):
     OLLAMA_ANALYZER_MAX_TOKENS: int = 400
     OLLAMA_ENRICHMENT_MAX_TOKENS: int = 400
     OLLAMA_ESCALATION_MAX_TOKENS: int = 500
-    TIMEWEB_BRAIN_MAX_TOKENS: int = 700
-    OLLAMA_BRAIN_MAX_TOKENS: int = 700
+    TIMEWEB_BRAIN_MAX_TOKENS: int = 1000
+    OLLAMA_BRAIN_MAX_TOKENS: int = 1000
     OLLAMA_NUM_CTX: int = 6144
 
     # MVP stability switches
@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     STT_MODEL_NAME: str = Field(default="small")
     STT_DEVICE: str = Field(default="cpu")
     STT_COMPUTE_TYPE: str = Field(default="int8")
+
+    # LLM system prompt (brain)
+    LLM_SYSTEM_PROMPT_PATH: str = Field(default="app/llm/prompts/manager/system_prompt.md")
 
     # Knowledge Base
     KB_SOURCE_PATH: str = Field(default="")
