@@ -94,10 +94,22 @@ _QUESTION_PHRASING_RE = re.compile(
 # Сообщения только из знаков (????!, !!!) — сигнал фрустрации
 _FRUSTRATION_ONLY_RE = re.compile(r"^[?!.\s…–—-]+$")
 
-# Вопросы вне домена компании
+# Вопросы вне домена компании (льготы/скидки/промо — не про банковские бонусы АУ)
 _OUT_OF_DOMAIN_RE = re.compile(
-    r"\b(льгот[аыие]|скидк[аиу]|бонус\w*|акци[яи]|промокод|кэшбэк|реферальн\w*"
+    r"\b(льгот[аыие]|скидк[аиу]|акци[яи]|промокод|кэшбэк|реферальн\w*"
     r"|партнёрск\w*|партнерск\w*|программ[аы]\s+лояльн|лояльност\w*)\b",
+    re.I | re.U,
+)
+
+# Bank-domain bonus/interest phrases — must NOT be routed to out-of-domain
+_BANK_BONUS_INTEREST_RE = re.compile(
+    r"\b(бонус\w*\s*(для\s+ау|для\s+управляющ\w*|для\s+ав\w*|от\s+должник\w*|от\s+банк\w*)?"
+    r"|процент\w*\s*(годовых|на\s+остаток|капитализац\w*)?"
+    r"|годовых\b"
+    r"|процент\s+на\s+остаток"
+    r"|доходность\b"
+    r"|ставк[аиу]\s+по\b"
+    r"|интерес\s+на\s+баланс\b)\b",
     re.I | re.U,
 )
 
@@ -149,9 +161,32 @@ def _build_context_fallback(
             "Чтобы подсказать точно по открытию, уточните — речь про счёт для торгов/задатка или про залоговое имущество?"
         )
 
-    # C) Partner banks list (question_policy=required by contract)
+    # C) Direct bank objection / value proposition — use KB facts, never "уточните вопрос"
+    active_scen = slots.get("_active_scenario") or ""
+    sf_has_objection = scenario_facts and "direct_bank_objection" in scenario_facts
+    if sf_has_objection or active_scen == "direct_bank_objection":
+        return (
+            "Да, напрямую в банк обратиться можно. Наша польза в том, что через нас доступны "
+            "льготные условия, которых банк обычно не даёт напрямую, плюс мы сопровождаем "
+            "бюрократию: документы, коммуникацию с банками и финмониторинг. "
+            "То есть вы меньше тратите время на согласования и быстрее доводите открытие счёта до результата."
+        )
+
+    # D) Partner banks list (question_policy=required by contract)
     sf_has_banks = scenario_facts and "partner_banks" in scenario_facts
     if sf_has_banks or topic == "partner_banks":
+        debtor_type = slots.get("debtor_type") or slots.get("client_type")
+        if debtor_type == "ФЛ":
+            return (
+                "Для физических лиц сейчас работаем с ТКБ и Уралсибом. "
+                "Если нужны подробности по тарифам — уточните."
+            )
+        if debtor_type in ("ЮЛ", "ИП"):
+            return (
+                "Для юрлиц сейчас активные варианты — Альфа-Банк, ТКБ и Уралсиб. "
+                "Т-Банк, МКБ и Росбанк сейчас на паузе. "
+                "Могу сравнить тарифы по активным банкам?"
+            )
         return (
             "Сейчас активные варианты — Альфа-Банк, ТКБ и Уралсиб. "
             "Т-Банк, МКБ и Росбанк сейчас на паузе. "
@@ -368,7 +403,9 @@ async def process_message(message):
         # HARD GUARD 2: dialog state guards (non-semantic, based on state_detector)
         # -----------------------------------------------------------------------
         if dialog_state in (DialogState.NOT_INTERESTED, DialogState.LATER) and (
-            _CONSENT_HARD_RE.search(user_text) or slots.get("_pending_question")
+            _CONSENT_HARD_RE.search(user_text)
+            or slots.get("_pending_question")
+            or slots.get("_active_scenario")
         ):
             dialog_state = DialogState.IN_PROGRESS
 
@@ -434,9 +471,10 @@ async def process_message(message):
             return
 
         # -----------------------------------------------------------------------
-        # HARD GUARD 6: out-of-domain topics (льготы, скидки, бонусы)
+        # HARD GUARD 6: out-of-domain topics (льготы, скидки, промо)
+        # Bank bonuses / interest-on-balance are in-domain — exempt them
         # -----------------------------------------------------------------------
-        if _OUT_OF_DOMAIN_RE.search(user_text):
+        if _OUT_OF_DOMAIN_RE.search(user_text) and not _BANK_BONUS_INTEREST_RE.search(user_text):
             logger.info("Session {} | Out-of-domain topic detected — sending redirect", session.id)
             await send_bot(session, message.channel, message.external_user_id, _OUT_OF_DOMAIN_REPLY, slots, processing_start=processing_start)
             return
@@ -444,6 +482,47 @@ async def process_message(message):
         # -----------------------------------------------------------------------
         # MAIN PIPELINE: conversation_brain
         # -----------------------------------------------------------------------
+
+        # Pre-LLM intent extraction (Section 3 of Dialog Engine plan)
+        from app.processing.intent_extractor import extract_intent_signals
+        _intent_signals = extract_intent_signals(user_text, slots)
+        # Persist extracted debtor_type / bank_focus into slots if not already set
+        if _intent_signals["debtor_type"] and not slots.get("debtor_type") and not slots.get("client_type"):
+            _dt_map = {"legal_entity": "ЮЛ", "individual": "ФЛ"}
+            slots["debtor_type"] = _dt_map.get(_intent_signals["debtor_type"], _intent_signals["debtor_type"])
+        if _intent_signals["bank_focus"] and not slots.get("_last_bank"):
+            _bf_map = {"alfabank": "Альфа-Банк", "tkb": "ТКБ", "uralsib": "Уралсиб",
+                       "tbank": "Т-Банк", "mkb": "МКБ", "rosbank": "Росбанк"}
+            slots["_last_bank"] = _bf_map.get(_intent_signals["bank_focus"], _intent_signals["bank_focus"])
+        logger.info(
+            "IntentExtractor | session={} | debtor_type={} | bank_focus={} | intents={} | acts={}",
+            session.id, _intent_signals["debtor_type"], _intent_signals["bank_focus"],
+            _intent_signals["intents"], _intent_signals["dialog_acts"],
+        )
+        # TASK 7 — IntentTrace: log every accepted match with source/score metadata
+        for _m in _intent_signals.get("matches", []):
+            logger.info(
+                "IntentTrace | session={} | intent={} | source={} | score={} | anchor={} | threshold={} | accepted=true",
+                session.id, _m["intent"], _m["source"],
+                _m.get("score", "N/A"), _m.get("matched_anchor", _m["intent"]),
+                _m.get("threshold", "N/A"),
+            )
+        # Log near-threshold semantic misses for debugging
+        for _r in _intent_signals.get("semantic_rejects", []):
+            logger.info(
+                "IntentTrace | session={} | intent={} | source=semantic | score={} | anchor={} | threshold={} | accepted=false",
+                session.id, _r["intent"], _r["score"], _r["matched_anchor"], _r["threshold"],
+            )
+
+        # Build trace context — links all LLM calls for this message to one trace_id
+        from app.services.llm_trace import make_trace_id
+        _trace_ctx: dict = {
+            "trace_id": make_trace_id(),
+            "session_id": session.id,
+            "channel": message.channel,
+            "external_user_id": str(message.external_user_id),
+        }
+        logger.info("Pipeline | trace_id={} | session={}", _trace_ctx["trace_id"], session.id)
 
         # 1. Build context (includes fact_pack and signals)
         ctx = await build_conversation_context(user_text, session.id, slots)
@@ -454,21 +533,177 @@ async def process_message(message):
         signals = ctx.get("signals") or {}
 
         # 2. Retrieve KB facts with scenario matching
-        kb_result = await retrieve_context_for_brain(user_text, memory, current_entities)
+        # TASK 5+6 — forced_scenarios always read from catalog.
+        # direct_bank_objection KB is only forced when the current message is actually
+        # a value-objection or a follow-up to one — NOT when user switches to bank selection.
+        from app.processing.scenario_catalog import forced_kb_for_scenario
+        from app.processing.scenario_policy import (
+            _VALUE_OBJECTION_RE as _val_obj_re,
+            _ACCOUNT_REQUEST_RE as _acct_req_re,
+        )
+        _active_before = slots.get("_active_scenario") or ""
+        _is_value_obj_signal = bool(
+            _val_obj_re.search(user_text)
+            or "direct_bank_objection" in (_intent_signals.get("intents") or [])
+        )
+        _is_account_switch = bool(_acct_req_re.search(user_text))
+        # Objection follow-up: short elaboration while active=direct_bank_objection
+        _OBJECTION_FUP_RE = re.compile(
+            r"^\s*(подробнее|почему|в\s+чем\s+именно|в\s+чём\s+именно"
+            r"|вы\s+не\s+ответили|зачем\s+с\s+вами\s+работать)\s*[?!.]?\s*$",
+            re.I | re.U,
+        )
+        _is_objection_followup = bool(
+            _active_before == "direct_bank_objection"
+            and _OBJECTION_FUP_RE.match(user_text.strip())
+        )
+        # Predict scenario for KB prefetch:
+        # - value objection signal (not overridden by account terms) → direct_bank_objection KB
+        # - objection follow-up while in objection → direct_bank_objection KB
+        # - everything else → use active scenario KB
+        if (_is_value_obj_signal or _is_objection_followup) and not _is_account_switch:
+            _predicted_scenario = "direct_bank_objection"
+        else:
+            _predicted_scenario = _active_before or None
+        if _predicted_scenario:
+            _catalog_kb = forced_kb_for_scenario(_predicted_scenario)
+            _forced_scenarios = _catalog_kb.get("forced_scenarios") or None
+        else:
+            _forced_scenarios = None
+        kb_result = await retrieve_context_for_brain(
+            user_text, memory, current_entities,
+            forced_scenarios=_forced_scenarios,
+            session_id=session.id,
+            trace_id=_trace_ctx["trace_id"],
+        )
         kb_facts = kb_result.get("raw_kb_facts") if isinstance(kb_result, dict) else (kb_result or [])
         scenario_matches = kb_result.get("scenario_matches", []) if isinstance(kb_result, dict) else []
         scenario_facts = kb_result.get("scenario_facts", {}) if isinstance(kb_result, dict) else {}
         fact_pack["scenario_matches"] = scenario_matches
         fact_pack["scenario_facts"] = scenario_facts
+        # Inject forced primary facts at front of kb_facts so LLM sees them first
+        _primary_kb = kb_result.get("_primary_kb_facts") if isinstance(kb_result, dict) else None
+        if _primary_kb:
+            kb_facts = _primary_kb + [f for f in kb_facts if f not in _primary_kb]
         from app.services.context_builder import enrich_fact_pack_from_kb
         fact_pack = enrich_fact_pack_from_kb(fact_pack, kb_result.get("kb_static", {}) if isinstance(kb_result, dict) else {})
+
+        # 2.5. Active scenario locking — prevent RAG from hijacking locked context
+        from app.processing.scenario_policy import apply_scenario_policy_to_fact_pack, decide_scenario_policy
+        scenario_policy = decide_scenario_policy(
+            user_text=user_text,
+            slots=slots,
+            rag_scenarios=scenario_matches,
+            dialog_state=str(dialog_state) if dialog_state else None,
+            intent_signals=_intent_signals,
+        )
+        logger.info(
+            "ScenarioPolicy | session={} | decision={} | active={} | candidates={} | reason={} | scores={}",
+            session.id, scenario_policy["decision"], scenario_policy["active_scenario"],
+            scenario_policy["candidate_scenarios"][:2], scenario_policy["reason"],
+            scenario_policy.get("scores", {}),
+        )
+        slots["_active_scenario"] = scenario_policy["active_scenario"]
+
+        # TASK 6 — Multi-intent: write required_next_step from policy to slots so playbook can serve it
+        from app.processing.scenario_playbook import SLOT_NEXT_STEP
+        _rns = scenario_policy.get("required_next_step")
+        if _rns:
+            slots[SLOT_NEXT_STEP] = _rns
+            logger.info(
+                "MultiIntent | session={} | scenario={} | required_next_step={}",
+                session.id, scenario_policy["active_scenario"], _rns,
+            )
+
+        # Re-fetch locked scenario facts when they dropped out of RAG results
+        if scenario_policy["decision"] in ("keep_active", "compare"):
+            _active_sid = scenario_policy["active_scenario"]
+            if _active_sid and _active_sid not in scenario_facts:
+                from app.knowledge_base.loader import get_kb as _get_kb
+                _kb = _get_kb()
+                if _kb and hasattr(_kb, "scenario_index"):
+                    _bank = current_entities.get("mentioned_bank") or slots.get("bank_name")
+                    _ct = slots.get("client_type")
+                    _active_profile = _kb.scenario_index.get_all_facts_for_scenario(
+                        _active_sid, bank=_bank, client_type=_ct
+                    )
+                    if any([
+                        _active_profile.get("pricing"),
+                        _active_profile.get("constraints"),
+                        _active_profile.get("answer_hints"),
+                        _active_profile.get("availability"),
+                    ]):
+                        scenario_facts[_active_sid] = {
+                            **_active_profile,
+                            "match_score": 0.0,
+                            "match_reasons": ["scenario_lock"],
+                        }
+
+        fact_pack = apply_scenario_policy_to_fact_pack(fact_pack, scenario_policy, scenario_facts)
+
+        # Enrich trace context with RAG and dialog state for full prompt tracing (TASK 9)
+        _trace_ctx["intent_signals"] = _intent_signals
+        _trace_ctx["rag"] = {
+            "primary_chunks": _primary_kb or [],
+            "forced_scenarios": _forced_scenarios,
+            "scenario_matches": [m["scenario_id"] for m in scenario_matches],
+        }
+        _trace_ctx["dialog_policy"] = {
+            "active_scenario": scenario_policy["active_scenario"],
+            "decision": scenario_policy["decision"],
+            "reason": scenario_policy["reason"],
+            "candidate_scenarios": scenario_policy.get("candidate_scenarios", []),
+        }
+
+        # 2.6. Scenario playbook — deterministic slot filling / required_next_step
+        from app.processing.scenario_playbook import (
+            SLOT_FORBIDDEN, SLOT_KNOWN, SLOT_NEXT_STEP, SLOT_PENDING,
+            run_scenario_playbook,
+        )
+        playbook_result = run_scenario_playbook(user_text, slots, fact_pack=fact_pack, kb_facts=kb_facts)
+        pb_log = playbook_result.get("log") or {}
+        logger.info(
+            "ScenarioPlaybook | session={} | action={} | applied={} | llm_skipped={}"
+            " | gratitude={} | yn={} | pending_before={} | pending_after={}"
+            " | next_step_after={}",
+            session.id, playbook_result["action"],
+            pb_log.get("scenario_playbook_applied"),
+            pb_log.get("llm_skipped"),
+            pb_log.get("gratitude_close_detected"),
+            pb_log.get("yes_no_answer_detected"),
+            pb_log.get("pending_slot_before"),
+            pb_log.get("pending_slot_after"),
+            pb_log.get("required_next_step_after"),
+        )
+
+        for k, v in (playbook_result.get("updates") or {}).items():
+            slots[k] = v
+        for k, v in (playbook_result.get("fact_pack_additions") or {}).items():
+            fact_pack[k] = v
+
+        if playbook_result["action"] == "reply" and playbook_result.get("reply"):
+            _pb_reply = playbook_result["reply"]
+            if (
+                not slots.get("_introduced")
+                and slots.get("_turn_count", 0) <= 1
+            ):
+                if not any(w in _pb_reply.lower() for w in ["здравствуйте", "добрый", "привет", "алексей"]):
+                    _pb_reply = "Здравствуйте! Я Алексей, менеджер «В плюсе». " + _pb_reply
+                slots["_introduced"] = True
+            await set_slots(session.id, slots)
+            await send_bot(
+                session, message.channel, message.external_user_id, _pb_reply, slots,
+                processing_start=processing_start,
+            )
+            return
 
         # 3. Pause phrase (human timing)
         await _maybe_send_pause_phrase(session.id, message.channel, message.external_user_id, "default", slots)
 
         # 4. Call brain (first pass)
         brain_result = await run_conversation_brain(
-            user_text, recent_dialog, memory, kb_facts, fact_pack=fact_pack
+            user_text, recent_dialog, memory, kb_facts, fact_pack=fact_pack,
+            trace_ctx=_trace_ctx,
         )
 
         # 5. Handle stop action — only truly stop if it's an end-dialog phrase
@@ -517,6 +752,7 @@ async def process_message(message):
                 brain_result = await run_conversation_brain(
                     user_text, recent_dialog, memory, kb_facts,
                     tool_results=tool_results, fact_pack=fact_pack,
+                    trace_ctx={**_trace_ctx, "phase": "brain_tool"},
                 )
 
         # 6.5. Code-level handoff override for explicit open-account phrases
@@ -630,6 +866,16 @@ async def process_message(message):
                         "Клиент уже дал данные / подтвердил выбор / поблагодарил. "
                         "Убери вопрос в конце — заверши ответ утверждением."
                     )
+                elif repair_hint == "asks_permission_instead_of_answer":
+                    repair_hint = (
+                        "asks_permission_instead_of_answer: Клиент уже попросил сравнить тарифы. "
+                        "Не спрашивай 'Могу сравнить?' — сразу дай сравнение тарифов по активным банкам."
+                    )
+                elif repair_hint == "generic_fallback_for_clear_intent":
+                    repair_hint = (
+                        "generic_fallback_for_clear_intent: Клиент задал чёткий вопрос. "
+                        "Не используй 'Уточните вопрос' — ответь по сути: банки, тарифы, документы или выгода."
+                    )
                 elif repair_hint == "missing_required_question":
                     repair_hint = (
                         "missing_required_question: answer_contract.question_policy=required. "
@@ -644,6 +890,7 @@ async def process_message(message):
                     kb_facts=kb_facts,
                     tool_results=tool_results,
                     fact_pack=fact_pack,
+                    trace_ctx=_trace_ctx,
                 )
                 if repaired and repaired.strip():
                     # Re-validate repaired reply before accepting it

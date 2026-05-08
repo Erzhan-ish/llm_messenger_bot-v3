@@ -237,6 +237,12 @@ class ScenarioFactIndex:
             "подешевле": "bank_selection_yul_low_cost",
             "дешевле": "bank_selection_yul_low_cost",
             "документ": "docs_tkb_yul",
+            "выгода": "direct_bank_objection",
+            "посредник": "direct_bank_objection",
+            "зачем через": "direct_bank_objection",
+            "польза от вас": "direct_bank_objection",
+            "напрямую в банк": "direct_bank_objection",
+            "бонус для ау": "direct_bank_objection",
         }
         for kw, sid in _KW_SCENARIO.items():
             if kw in user_lower:

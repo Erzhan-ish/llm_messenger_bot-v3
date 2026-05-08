@@ -10,6 +10,7 @@ DEFAULT_SLOTS: Dict[str, Optional[object]] = {
     # Debtor context
     "procedure_type":         None,  # "restructuring" / "liquidation" / "external_management" / "competitive"
     "debtor_status":          None,  # "deceased" / "non_resident" / "liquidated"
+    "debtor_type":            None,  # "ЮЛ" / "ФЛ" / "ИП" — entity type of the debtor
     # Internal tracking
     "_introduced":            False,
     "_escalation_sent":       False,
@@ -31,6 +32,15 @@ DEFAULT_SLOTS: Dict[str, Optional[object]] = {
     "_last_bank_anchor":      None,   # банк, явно названный в последнем ответе бота
     # Active task — carries current dialog intent across follow-up messages.
     "_active_task":           None,
+    # Active scenario — locked by scenario policy to prevent RAG hijacking.
+    "_active_scenario":       None,
+    # Scenario playbook state — deterministic slot filling.
+    "_known_slots":           {},
+    "_pending_slot":          None,
+    "_expected_answer_type":  None,
+    "_last_bot_question":     None,
+    "_required_next_step":    None,
+    "_forbidden_actions":     None,
 }
 
 _EMAIL_RE      = re.compile(r"(?i)\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b")
@@ -285,6 +295,23 @@ def extract_runtime_slots(text: str, slots: Dict) -> Dict:
             slots["debtor_status"] = "non_resident"
         elif any(x in t for x in ["ликвидирован", "уже ликвидирован", "ликвидаци завершен"]):
             slots["debtor_status"] = "liquidated"
+
+    # 9b. debtor_type — entity type of the debtor (distinct from the AU's own type)
+    # Triggered by "должник юр лицо", "для юрлица", "у меня юр лицо должник", etc.
+    if not slots.get("debtor_type"):
+        if re.search(
+            r"\b(должник|для|это|у\s+меня)\s+(юр\s*лиц\w*|юл\b|ооо\b|организаци\w*|компани\w*)\b"
+            r"|\b(юр\s*лиц\w*|юл\b|ооо\b)\s+должник\w*\b"
+            r"|\bдля\s+юрлиц\w+\b",
+            t, re.U
+        ):
+            slots["debtor_type"] = "ЮЛ"
+        elif re.search(
+            r"\b(должник|для|это|у\s+меня)\s+(физ\s*лиц\w*|фл\b|физик\w*|гражданин\w*|человек)\b"
+            r"|\b(физ\s*лиц\w*|фл\b)\s+должник\w*\b",
+            t, re.U
+        ):
+            slots["debtor_type"] = "ФЛ"
 
     # 10. Client style (accumulated signals)
     _update_client_style(text, slots)

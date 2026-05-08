@@ -16,6 +16,41 @@ _STOP_WORDS = {
 # Паттерн тарифных цифр (800, 2800, 3500, 2090, 1600) в контексте стоимости
 _TARIFF_NUMBERS_RE = re.compile(r"\b(800|2800|3500|2090|1600|1500)\s*руб", re.I | re.U)
 
+# "Могу сравнить?" / "хотите сравнить?" — запрещено когда пользователь уже попросил
+_ASKS_PERMISSION_RE = re.compile(
+    r"(могу\s+сравнить|хотите\s+сравнить\??|сравнить\s+тарифы\??)",
+    re.I | re.U,
+)
+
+# Явный запрос тарифов/условий
+_TARIFF_EXPLICIT_REQUEST_RE = re.compile(
+    r"(какие\s+(тарифы|условия)|сравни\s+(тарифы|условия)|покажи\s+(тарифы|условия)"
+    r"|условия\s+и\s+тарифы|тарифы\s+у\s+(них|него)|условия\s+у\s+(них|него))",
+    re.I | re.U,
+)
+
+# Обобщённый откат — "уточните вопрос" при ясном намерении
+_GENERIC_FALLBACK_RE = re.compile(
+    r"(уточните\s+вопрос|секунду[\s,]+уточняю|уточните[\s,]+пожалуйста\s+вопрос)",
+    re.I | re.U,
+)
+
+# Ясные бизнес-намерения, при которых generic fallback запрещён
+_CLEAR_INTENT_RE = re.compile(
+    r"("
+    r"выгод\w+\s+(через|с\s+вами|от\s+вас)"
+    r"|зачем\s+(через|с\s+вами)"
+    r"|напрямую\s+в\s+банк"
+    r"|какие\s+(тарифы|условия|банки)"
+    r"|нужен\s+банк|подобрать\s+банк"
+    r"|подешевле|дешев\w+\s+банк"
+    r"|какие\s+документы|что\s+нужно\s+для\s+открытия"
+    r"|стадии?\s+наблюден\w*"
+    r"|карт\w+\s+должник\w*"
+    r")",
+    re.I | re.U,
+)
+
 # Паттерн слов про наличные
 _CASH_WORDS_RE = re.compile(r"\b(наличн\w*|судебное\s+решение\s+о\s+выдаче\s+наличными)\b", re.I | re.U)
 
@@ -56,6 +91,42 @@ _PROMISE_ACTION_RE = re.compile(
 
 # Активные задачи, при которых "открыть" = продолжение сравнения, не намерение
 _COMPARISON_TASK_TYPES = {"transfer_fee_quote", "compare", "bank_selection", "pricing"}
+
+# Вопрос "юрлицо или физлицо?" когда тип должника уже известен
+_DEBTOR_TYPE_QUESTION_RE = re.compile(
+    r"("
+    r"для\s+юр\s*лица?\s+или\s+физ\w*"
+    r"|юр\s*лиц\w*\s+или\s+физ\s*лиц\w*"
+    r"|счёт\s+подбираем\s+для\s+юр"
+    r"|должник\s+—?\s+юрлицо\s+или\s+физлицо"
+    r")",
+    re.I | re.U,
+)
+
+# Bank/pricing scenarios — active scenario falls back to allowed_stages
+_BANK_PRICING_SCENARIOS = frozenset({
+    "bank_selection_yul", "bank_pricing_yul", "bank_selection_fl",
+    "uralsib_yul_conditions", "uralsib_fl_conditions",
+    "alfabank_yul_conditions", "tkb_yul_conditions", "tkb_fl_conditions",
+    "tbank_yul_conditions", "mkb_yul_conditions", "rosbank_yul_conditions",
+})
+
+_OBSERVATION_STAGE_RE = re.compile(
+    r"\b(стади[яеи]\s+наблюден\w*|на\s+стадии\s+наблюден\w*|в\s+стадии\s+наблюден\w*)\b",
+    re.I | re.U,
+)
+
+# Банки-условия: сценарий → ключевое слово банка в нижнем регистре
+_BANK_CONDITIONS_SCENARIO_KW: dict[str, str] = {
+    "alfabank_yul_conditions":  "альфа",
+    "tkb_yul_conditions":       "ткб",
+    "tkb_fl_conditions":        "ткб",
+    "uralsib_yul_conditions":   "уралсиб",
+    "uralsib_fl_conditions":    "уралсиб",
+    "tbank_yul_conditions":     "т-банк",
+    "mkb_yul_conditions":       "мкб",
+    "rosbank_yul_conditions":   "росбанк",
+}
 
 
 def _keywords(text: str) -> set[str]:
@@ -103,6 +174,43 @@ def validate_reply(
         return {"is_valid": False, "reason": "empty_reply"}
 
     reply_lower = reply.lower()
+
+    # Scenario playbook: forbidden phrases from _forbidden_actions slot
+    for _fp in (slots.get("_forbidden_actions") or []):
+        if _fp.lower() in reply_lower:
+            return {"is_valid": False, "reason": f"forbidden_action:{_fp[:40]}"}
+
+    # Reject "Могу сравнить?" when user explicitly asked for tariff comparison
+    if user_text and _TARIFF_EXPLICIT_REQUEST_RE.search(user_text):
+        if _ASKS_PERMISSION_RE.search(reply):
+            return {"is_valid": False, "reason": "asks_permission_instead_of_answer"}
+
+    # Reject generic fallback when user intent is clear
+    if user_text and _CLEAR_INTENT_RE.search(user_text):
+        if _GENERIC_FALLBACK_RE.search(reply):
+            return {"is_valid": False, "reason": "generic_fallback_for_clear_intent"}
+
+    # Scenario playbook: realization already confirmed → reject contradictory advice
+    _known = slots.get("_known_slots") or {}
+    if _known.get("realization_started") is True:
+        if re.search(r"дождитесь\s+(введения|судебного)", reply_lower):
+            return {"is_valid": False, "reason": "contradicts_realization_started"}
+
+    # Reject "юрлицо или физлицо?" when debtor type is already known
+    if slots.get("client_type") in ("ЮЛ", "ФЛ", "ИП") or slots.get("debtor_type") in ("ЮЛ", "ФЛ", "ИП"):
+        if _DEBTOR_TYPE_QUESTION_RE.search(reply):
+            return {"is_valid": False, "reason": "repeated_known_debtor_type_question"}
+
+    # Reject reply that ignores the focused bank when a bank-conditions scenario is active
+    _active_scen = slots.get("_active_scenario") or ""
+    _expected_bank_kw = _BANK_CONDITIONS_SCENARIO_KW.get(_active_scen)
+    if _expected_bank_kw and len(reply) > 60 and _expected_bank_kw not in reply_lower:
+        return {"is_valid": False, "reason": f"bank_focus_not_in_reply:{_expected_bank_kw}"}
+
+    # Reject if bank/pricing scenario falls back to allowed_stages content
+    if _active_scen in _BANK_PRICING_SCENARIOS and len(reply) > 80:
+        if _OBSERVATION_STAGE_RE.search(reply):
+            return {"is_valid": False, "reason": "bank_scenario_falls_back_to_allowed_stages"}
 
     # Нерусский/китайский текст в ответе
     if _CJK_RE.search(reply):

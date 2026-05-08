@@ -1,233 +1,322 @@
-Задача: сделать речь бота естественнее — убрать обязательный вопрос в конце каждого ответа.
+Fix semantic intent false positives and scenario scoring.
 
-Проблема:
-Сейчас в pipeline.md / BRAIN_SYSTEM_PROMPT и answer_contract слишком жёстко прописано:
-- “1–3 предложения, один вопрос в конце”
-- next_question ожидается почти всегда
-- validator/fallback могут считать отсутствие вопроса ошибкой
+Problem:
+After adding semantic intent matching, embeddings are producing false positives and ScenarioPolicy trusts them too much.
 
-Из-за этого бот звучит неестественно:
-- клиент дал согласие → бот всё равно спрашивает
-- клиент отправил данные → бот всё равно спрашивает
-- клиент попрощался → бот всё равно продолжает
-- клиент готов открыть счёт → бот вместо перехода задаёт лишний вопрос
+Observed failures:
 
-Нужно заменить правило “всегда вопрос” на “вопрос только если он нужен”.
+1. User:
+"здравствуйте, у меня ЮЛ должник
+нужен счет"
 
-============================================================
-1. Смягчить BRAIN_SYSTEM_PROMPT / pipeline.md
-============================================================
+Expected:
+bank_selection_yul / open_account_yul
 
-Было:
-“Пиши коротко: 1–3 предложения, один вопрос в конце.”
+Actual:
+IntentExtractor accepted:
+- bonus_interest
+- direct_bank_objection
+- bank_selection
 
-Стало:
-“Пиши коротко: обычно 1–3 предложения. Задавай уточняющий вопрос в конце только если он реально нужен: чтобы собрать недостающие данные, выбрать банк, уточнить тип клиента или продвинуть клиента к следующему шагу. Если клиент уже дал данные, подтвердил выбор, согласился на оформление, попрощался или просто поблагодарил — вопрос не нужен.”
+ScenarioPolicy selected:
+active=direct_bank_objection
+score=102.05
 
-Добавить правило:
+This is wrong. "нужен счет" is not a direct bank objection.
 
-Не задавай вопрос ради вопроса.
-Если следующий шаг уже понятен — подтверди его и действуй.
+2. User:
+"окей давайте
+у меня ЮЛ"
 
-Примеры:
+Expected:
+User accepted previous offer and gave debtor_type=legal_entity.
+Switch to bank_selection_yul.
 
-User: “ИНН 1234567890”
-Good:
-“Принял ИНН, передам менеджеру для проверки.”
+Actual:
+Semantic accepted direct_bank_objection and policy kept active=direct_bank_objection with score=112.05.
 
-Bad:
-“Принял ИНН. Что ещё подсказать?”
+3. User:
+"да"
 
-User: “Уралсиб подходит, оформляем”
-Good:
-“Отлично, Уралсиб фиксируем. Подключу старшего менеджера, он доведёт по документам и открытию.”
+Expected:
+yes_to_offer / continue_to_bank_selection, depending last_bot_question.
 
-Bad:
-“Отлично, Уралсиб фиксируем. Документы подсказать?”
+Actual:
+Semantic accepted small_talk, confusion_or_correction, repetition_complaint.
 
-User: “спасибо, понял”
-Good:
-“Пожалуйста, обращайтесь.”
-
-Bad:
-“Пожалуйста. Что ещё хотите уточнить?”
+Required changes:
 
 ============================================================
-2. Сделать next_question опциональным
+TASK 1 — Add semantic intent gating
 ============================================================
 
-В answer_contract:
-next_question может быть строкой или null.
+Semantic intent matching must not accept intents only by cosine similarity.
+Each intent must have gating conditions.
 
-Пример:
+Add to intent catalog:
 
-{
-  "next_question": null
-}
+direct_bank_objection:
+requires_any_terms:
+- "выгода"
+- "зачем"
+- "почему"
+- "напрямую"
+- "через вас"
+- "сам"
+- "сама"
+- "посредник"
+- "что вы даете"
+- "почему не в банк"
 
-Если next_question=null:
-- LLM не должна придумывать вопрос сама;
-- validator не должен требовать вопрос;
-- fallback не должен автоматически добавлять вопрос.
+bonus_interest:
+requires_any_terms:
+- "бонус"
+- "процент"
+- "годовых"
+- "ставка"
+- "остаток"
+- "доходность"
+- "%"
 
-Если next_question задан:
-- LLM может использовать его, если вопрос уместен;
-- но даже тогда вопрос не обязателен, если клиент уже дал ответ или готов к handoff.
+small_talk:
+requires_any_terms:
+- "как дела"
+- "как ты"
+- "как настроение"
 
-============================================================
-3. Добавить question_policy в answer_contract
-============================================================
+repetition_complaint:
+requires_any_terms:
+- "повторяешь"
+- "повторил"
+- "уже говорил"
+- "одно и то же"
+- "не повторяй"
 
-Вместо одного поля next_question добавить/поддержать:
+confusion_or_correction:
+requires_any_terms:
+- "причем"
+- "о чем"
+- "не понял"
+- "не это"
+- "я же сказал"
+- "я ответил"
 
-{
-  "question_policy": "required|optional|forbidden"
-}
+documents_requested:
+requires_any_terms:
+- "документы"
+- "что нужно"
+- "что требуется"
+- "что прислать"
+- "какие нужны"
 
-Правила:
-
-required:
-- нужно собрать критически недостающую информацию
-- например: тип клиента неизвестен, сумма перевода неизвестна, банк не выбран
-
-optional:
-- можно задать вопрос, если это помогает продолжить диалог
-- например: “документы подсказать?”, “сравнить с другим банком?”
-
-forbidden:
-- вопрос в конце не нужен
-- клиент дал данные
-- клиент согласился на handoff
-- клиент попрощался
-- клиент сказал “спасибо”
-- клиент явно попросил открыть счёт
-- бот просто подтверждает принятие информации
-
-Примеры:
-
-1. Клиент спрашивает список банков:
-question_policy=required
-next_question="Счёт подбираем для юрлица или физлица?"
-
-2. Клиент спрашивает тарифы:
-question_policy=optional
-next_question="Документы подсказать?"
-
-3. Клиент говорит “оформляем”:
-question_policy=forbidden
-next_question=null
-
-4. Клиент говорит “спасибо”:
-question_policy=forbidden
-next_question=null
-
-============================================================
-4. Обновить response_validator
-============================================================
-
-Validator не должен требовать вопрос в каждом ответе.
-
-Добавить проверки:
-
-Если question_policy="forbidden":
-- reply не должен заканчиваться вопросом
-- если reply содержит лишний вопрос → validation_error="unnecessary_question"
-
-Если question_policy="required":
-- reply должен содержать вопрос или явный запрос данных
-- если нет → validation_error="missing_required_question"
-
-Если question_policy="optional":
-- вопрос допустим, но не обязателен
+If semantic score passes threshold but gating terms are missing:
+- do not accept
+- add to semantic_rejects with reason="missing_required_terms"
 
 Acceptance:
-- “Принял ИНН, передам менеджеру.” проходит validator.
-- “Уралсиб фиксируем, подключу менеджера.” проходит validator.
-- “Спасибо, обращайтесь.” проходит validator.
-- Лишний вопрос после “спасибо” блокируется.
+"у меня ЮЛ должник нужен счет" must NOT accept direct_bank_objection or bonus_interest.
 
 ============================================================
-5. Обновить context_fallback
+TASK 2 — Skip semantic matching for short yes/no answers
 ============================================================
 
-Fallback сейчас может добавлять вопрос автоматически.
-Нужно:
-- смотреть answer_contract.question_policy
-- если forbidden → не добавлять вопрос
-- если required → добавить нужный вопрос
-- если optional → добавить только если ответ без него выглядит оборванным
+If normalized text is:
+- "да"
+- "нет"
+- "угу"
+- "ок"
+- "хорошо"
+- "давайте"
 
-Пример handoff fallback:
+then:
+- do not run semantic intent matching
+- process as dialog act:
+  yes / no / confirm / continue
+- resolve based on last_bot_question, pending_slot, required_next_step, active_scenario
 
-Good:
-“Хорошо, поможем открыть. Подключу старшего менеджера, он доведёт по документам и оформлению.”
-
-Bad:
-“Хорошо, поможем открыть. Что ещё подсказать?”
-
-============================================================
-6. Обновить conversation_brain prompt
-============================================================
-
-Добавить блок:
-
-═══ ВОПРОС В КОНЦЕ ═══
-Не каждый ответ должен заканчиваться вопросом.
-Задавай вопрос только если:
-- не хватает данных;
-- нужно выбрать банк;
-- нужно уточнить тип клиента;
-- нужно продвинуть клиента к следующему шагу.
-
-Не задавай вопрос, если:
-- клиент дал данные;
-- клиент подтвердил выбор;
-- клиент готов к оформлению;
-- клиент попрощался;
-- клиент просто сказал спасибо;
-- action=handoff или stop;
-- answer_contract.question_policy=forbidden.
-
-Если question_policy=forbidden — заверши ответ утверждением, без вопроса.
+Acceptance:
+"да" must not produce small_talk, confusion_or_correction, repetition_complaint.
 
 ============================================================
-7. Тесты
+TASK 3 — Add yes_to_offer handling
 ============================================================
 
-Добавить:
+If last bot reply offered:
+"Хотите подобрать банк под ваш случай?"
 
-test_no_question_after_thanks
-User: “спасибо, понял”
-Expected: no question at end
+and user says:
+"да", "давайте", "окей давайте", "хорошо"
 
-test_no_question_after_inn
-User: “ИНН 1234567890”
-Expected: acknowledge data, no question
+then:
+set:
+intent=yes_to_offer_bank_selection
 
-test_no_question_on_handoff
-User: “подходит, оформляем”
-Expected: handoff bridge, no extra question
+If debtor_type known:
+- legal_entity -> active_scenario=bank_selection_yul
+- individual -> active_scenario=bank_selection_fl
 
-test_required_question_when_client_type_missing
-User: “банк подобрать”
-Expected: asks ЮЛ/ФЛ/ИП
+If debtor_type unknown:
+ask:
+"Подберём. Должник юрлицо или физлицо?"
 
-test_optional_question_allowed_for_pricing
-User: “какие тарифы в Уралсибе?”
-Expected: may ask “документы подсказать?”, but not mandatory
+If user says:
+"окей давайте\nу меня ЮЛ"
 
-test_validator_blocks_unnecessary_question
-question_policy=forbidden
-reply ends with “Что ещё подсказать?”
-Expected: validation_error=unnecessary_question
+then:
+active_scenario=bank_selection_yul
+known_slots.debtor_type=legal_entity
+required_next_step=list_partner_banks_yul
+
+Expected reply:
+"Для юрлиц сейчас активные варианты — Альфа-Банк, ТКБ и Уралсиб. Т-Банк, МКБ и Росбанк сейчас на паузе. Если хотите, могу сразу сравнить тарифы."
 
 ============================================================
-FINAL ACCEPTANCE
+TASK 4 — Adjust ScenarioPolicy scoring by intent source
 ============================================================
 
-Готово, если:
-1. Бот больше не задаёт вопрос в конце каждого ответа.
-2. next_question может быть null.
-3. question_policy управляет тем, нужен вопрос или нет.
-4. После “спасибо”, “понял”, “оформляем”, “ИНН ...” бот не допрашивает клиента.
-5. Когда данных реально не хватает, бот всё ещё задаёт уточняющий вопрос.
+Do not give hard score 100+ for semantic-only intent.
+
+Rules:
+- exact/regex hard intent can get high priority score.
+- semantic intent can only boost scenario modestly unless supported by:
+  - required terms
+  - slots
+  - active scenario compatibility
+  - explicit topic switch phrases
+
+Example:
+direct_bank_objection:
+- regex match "в чем выгода" -> strong score
+- semantic match + required terms -> medium score
+- semantic match without required terms -> rejected
+
+Acceptance:
+For "у меня ЮЛ должник нужен счет":
+bank_selection_yul must outrank direct_bank_objection.
+
+============================================================
+TASK 5 — Explicit bank/account request overrides direct_bank_objection
+============================================================
+
+If active_scenario=direct_bank_objection but current message contains:
+- "ЮЛ" / legal_entity
+- "ФЛ" / individual
+- "нужен счет"
+- "нужен банк"
+- "банк подобрать"
+- "подешевле"
+- "счет открыть"
+
+then this is a topic switch to bank/account selection.
+
+Switch:
+- ЮЛ + low cost -> bank_selection_yul_low_cost
+- ЮЛ + account/bank -> bank_selection_yul
+- ФЛ + account/bank -> bank_selection_fl
+
+Do not keep direct_bank_objection.
+Do not force direct_bank_objection KB retrieval.
+
+Acceptance:
+"окей давайте\nу меня ЮЛ" after direct_bank_objection must switch to bank_selection_yul.
+
+============================================================
+TASK 6 — Fix forced_scenarios selection
+============================================================
+
+Currently forced_scenarios=['direct_bank_objection','partner_banks'] is applied when active_scenario=direct_bank_objection even if user switches topic.
+
+Change:
+Apply direct_bank_objection forced_scenarios only if:
+- current accepted intent is direct_bank_objection
+OR
+- active_scenario=direct_bank_objection AND current message is a value-objection follow-up:
+  - "подробнее"
+  - "почему"
+  - "в чем именно"
+  - "вы не ответили"
+  - "зачем с вами работать"
+
+Do NOT apply direct_bank_objection forced_scenarios for:
+- "нужен счет"
+- "нужен банк"
+- "ЮЛ"
+- "ФЛ"
+- "подобрать банк"
+- "подешевле"
+- "тарифы"
+- "документы"
+
+============================================================
+TASK 7 — Add negative anchors / intent exclusions
+============================================================
+
+For direct_bank_objection, add excluded patterns:
+- "нужен счет"
+- "нужен банк"
+- "подобрать банк"
+- "у меня ЮЛ"
+- "у меня ФЛ"
+
+For bonus_interest, exclude unless terms contain:
+bonus/percent/rate/yearly/interest.
+
+For small_talk, exclude:
+- "да"
+- "нет"
+- business phrases with bank/account/debtor terms.
+
+============================================================
+TASK 8 — Tests
+============================================================
+
+Add regression tests:
+
+1. False positive:
+Input:
+"здравствуйте, у меня ЮЛ должник\nнужен счет"
+Expected:
+- debtor_type=legal_entity
+- bank_selection accepted
+- direct_bank_objection rejected with reason missing_required_terms
+- bonus_interest rejected with reason missing_required_terms
+- active_scenario=bank_selection_yul
+
+2. Yes answer:
+Input:
+"да"
+with last_bot_question/offer="Хотите подобрать банк под ваш случай?"
+Expected:
+- no semantic intents
+- yes_to_offer_bank_selection
+- active_scenario switches to bank_selection_yul if debtor_type known, otherwise asks ЮЛ/ФЛ
+
+3. Topic switch after objection:
+Previous active=direct_bank_objection
+Input:
+"окей давайте\nу меня ЮЛ"
+Expected:
+- switch to bank_selection_yul
+- no forced_scenarios direct_bank_objection
+- no repeated value proposition
+
+4. Short confirm:
+Input:
+"давайте"
+Expected:
+- confirm/continue, not small_talk/direct_bank_objection
+
+5. Actual direct objection still works:
+Input:
+"а в чем выгода через вас работать? я же могу напрямую в банк пойти"
+Expected:
+- direct_bank_objection accepted via regex/exact
+- forced KB benefits
+- value proposition reply
+
+6. Actual bonus still works:
+Input:
+"какой процент годовых?"
+Expected:
+- bonus_interest accepted
+- not bank_selection

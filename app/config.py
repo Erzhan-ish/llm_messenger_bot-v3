@@ -65,7 +65,18 @@ class Settings(BaseSettings):
     ENABLE_BACKGROUND_ANALYSIS: bool = False
     CRM_ENABLED: bool = True
 
+    # LLM tracing
+    LLM_TRACE_ENABLED: bool = False
+    LLM_TRACE_FULL_PROMPT: bool = False
+    LLM_TRACE_DIR: str = Field(default="logs/llm_traces")
+    LLM_TRACE_REDACT: bool = False
+    LLM_TRACE_INCLUDE_RESPONSE: bool = True
+
+    # Debug endpoints
+    ENABLE_DEBUG_ENDPOINTS: bool = False
+
     # Application
+    APP_ENV: str = Field(default="development")  # development | production
     LOG_LEVEL: str = "INFO"
     SESSION_TTL_HOURS: int = 24
     CONTEXT_MESSAGES_LIMIT: int = 10

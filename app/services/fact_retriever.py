@@ -520,6 +520,10 @@ async def retrieve_context_for_brain(
     user_text: str,
     memory: dict,
     current_entities: dict,
+    forced_scenarios: Optional[List[str]] = None,
+    forced_topics: Optional[List[str]] = None,
+    session_id: Optional[int] = None,
+    trace_id: Optional[str] = None,
 ) -> dict:
     """Широкий KB-поиск для conversation_brain — без query_mode, без intent.
 
@@ -561,6 +565,11 @@ async def retrieve_context_for_brain(
     domain_kws = ["карта", "реализация", "перевод", "комиссия", "открытие", "ведение"]
     if any(kw in text_lower for kw in domain_kws):
         queries.append(" ".join(kw for kw in domain_kws if kw in text_lower))
+
+    # Forced queries for direct_bank_objection (value/benefit questions)
+    if forced_scenarios and "direct_bank_objection" in forced_scenarios:
+        queries.append("преимущества работы через агентство выгода партнер")
+        queries.append("почему через нас а не напрямую в банк бонус вознаграждение")
 
     try:
         from typing import Tuple
@@ -682,16 +691,47 @@ async def retrieve_context_for_brain(
         except Exception:
             logger.exception("ScenarioFactIndex matching failed (ignored)")
 
+        # Forced primary facts for scenarios that need guaranteed KB coverage
+        _primary_kb_facts: list[dict] = []
+        if forced_scenarios and "direct_bank_objection" in forced_scenarios:
+            try:
+                si = kb.scenario_index
+                benefit_chunks = [
+                    ch for ch in si.by_scenario.get("partner_banks", [])
+                    if getattr(ch, "type", "") in ("feature", "bonus", "selection", "availability")
+                ]
+                for ch in benefit_chunks[:6]:
+                    fact = getattr(ch, "fact", None)
+                    text = getattr(ch, "text", "") or ""
+                    _primary_kb_facts.append({
+                        "type": getattr(ch, "type", ""),
+                        "bank": getattr(ch, "bank", None),
+                        "fact": fact,
+                        "text": text[:300],
+                    })
+            except Exception:
+                logger.exception("forced direct_bank_objection retrieval failed (ignored)")
+
+        dropped = max(0, len(ranked) - 14)
+        _sid = session_id if session_id is not None else memory.get("session_id")
         logger.info(
-            "retrieve_context_for_brain | chunks={} | scenarios={} | bank_focus={}",
-            len(facts), len(scenario_matches_list), bank_focus,
+            "RAGTrace | trace_id={} | session={} | query={!r} | forced_scenarios={} "
+            "| forced_topics={} | primary_chunks={} | raw_chunks={} | dropped={} | scenarios={}",
+            trace_id, _sid, user_text[:80],
+            forced_scenarios, forced_topics,
+            len(_primary_kb_facts), len(facts), dropped,
+            [m["scenario_id"] for m in scenario_matches_list],
         )
-        return {
+
+        result: dict = {
             "scenario_matches": scenario_matches_list,
             "scenario_facts": scenario_facts_pack,
             "kb_static": kb_static,
             "raw_kb_facts": facts[:16],
         }
+        if _primary_kb_facts:
+            result["_primary_kb_facts"] = _primary_kb_facts
+        return result
 
     except Exception:
         logger.exception("retrieve_context_for_brain failed (ignored)")

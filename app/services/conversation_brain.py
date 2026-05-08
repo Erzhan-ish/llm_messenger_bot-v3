@@ -21,30 +21,42 @@ from app.logging import logger
 
 _prompt_cache: dict[str, tuple[str, str]] = {}  # path -> (content, hash_prefix)
 
+# Project root: app/services/conversation_brain.py → parent×3 → project root
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def _resolve_prompt_path(path_str: str) -> Path:
+    """Resolve prompt path relative to project root when not absolute."""
+    p = Path(path_str)
+    return p if p.is_absolute() else _PROJECT_ROOT / p
+
 
 def load_brain_prompt() -> tuple[str, str, str]:
     """Load brain system prompt from LLM_SYSTEM_PROMPT_PATH.
 
-    Returns (content, resolved_path, sha256[:12]).
+    Returns (content, resolved_path_str, sha256[:12]).
     Caches after first load. Raises FileNotFoundError if path is missing.
+    Relative paths are anchored to the project root, not CWD.
     """
     path_str = (settings.LLM_SYSTEM_PROMPT_PATH or "").strip()
     if not path_str:
         raise RuntimeError("LLM_SYSTEM_PROMPT_PATH is not set in config")
 
-    if path_str in _prompt_cache:
-        content, sha = _prompt_cache[path_str]
-        return content, path_str, sha
+    resolved = _resolve_prompt_path(path_str)
+    cache_key = str(resolved)
 
-    p = Path(path_str)
-    if not p.is_file():
-        raise FileNotFoundError(f"Brain system prompt not found: {path_str!r}")
+    if cache_key in _prompt_cache:
+        content, sha = _prompt_cache[cache_key]
+        return content, cache_key, sha
 
-    content = p.read_text(encoding="utf-8").strip()
+    if not resolved.is_file():
+        raise FileNotFoundError(f"Brain system prompt not found: {resolved!r}")
+
+    content = resolved.read_text(encoding="utf-8").strip()
     sha = hashlib.sha256(content.encode()).hexdigest()[:12]
-    _prompt_cache[path_str] = (content, sha)
-    logger.info("BrainPrompt loaded | path={} | hash={} | chars={}", path_str, sha, len(content))
-    return content, path_str, sha
+    _prompt_cache[cache_key] = (content, sha)
+    logger.info("BrainPrompt loaded | path={} | hash={} | chars={}", cache_key, sha, len(content))
+    return content, cache_key, sha
 
 
 # Keep the old name as an alias for any direct references in tests
@@ -195,7 +207,7 @@ def _default_brain_response() -> dict:
     })
 
 
-async def _repair_brain_json(raw: str) -> dict | None:
+async def _repair_brain_json(raw: str, trace_ctx: dict | None = None) -> dict | None:
     """Попросить LLM исправить невалидный JSON brain result."""
     if not raw or not raw.strip():
         return None
@@ -203,8 +215,10 @@ async def _repair_brain_json(raw: str) -> dict | None:
         {"role": "system", "content": _REPAIR_JSON_PROMPT},
         {"role": "user", "content": f"Исправь:\n{raw[:3000]}"},
     ]
+    tctx = dict(trace_ctx or {})
+    tctx["phase"] = "json_repair"
     try:
-        repaired_raw = await ask_llm(messages, max_tokens=_budget("BRAIN"))
+        repaired_raw = await ask_llm(messages, max_tokens=_budget("BRAIN"), trace_ctx=tctx)
         return normalize_brain_result(_extract_json(repaired_raw))
     except Exception:
         logger.exception("_repair_brain_json failed")
@@ -279,12 +293,12 @@ async def run_conversation_brain(
     kb_facts: list[dict],
     tool_results: dict | None = None,
     fact_pack: dict | None = None,
+    trace_ctx: dict | None = None,
 ) -> dict:
     """Вызвать LLM-мозг и вернуть структурированное решение."""
     fp = dict(fact_pack) if fact_pack else {}
     sf = fp.get("scenario_facts")
     if sf:
-        # Replace nested JSON with a flat text block to prevent LLM confusion
         sf_text = _scenario_facts_to_text(sf)
         if sf_text:
             fp["scenario_facts"] = sf_text
@@ -307,10 +321,18 @@ async def run_conversation_brain(
         m.get("scenario_id", "?")
         for m in (fp.get("scenario_matches") or [])
     ]
+
+    from app.services.llm_trace import make_trace_id
+    tctx = dict(trace_ctx or {})
+    if "trace_id" not in tctx:
+        tctx["trace_id"] = make_trace_id()
+    tctx.setdefault("phase", "brain")
+    tctx["fact_pack"] = fp
+
     logger.info(
-        "BrainCall | provider={} | model={} | prompt={}#{} | "
+        "BrainCall | trace_id={} | provider={} | model={} | prompt={}#{} | "
         "user_len={} | dialog={} | kb_facts={} | scenarios={} | fp_keys={}",
-        provider, model, prompt_path, prompt_hash,
+        tctx["trace_id"], provider, model, prompt_path, prompt_hash,
         len(user_text), len(recent_dialog),
         len(kb_facts), scenario_ids,
         sorted(fp.keys()),
@@ -321,15 +343,19 @@ async def run_conversation_brain(
         {"role": "user", "content": _build_user_message(payload)},
     ]
     try:
-        raw = await ask_llm(messages, max_tokens=_budget("BRAIN"))
+        raw = await ask_llm(messages, max_tokens=_budget("BRAIN"), trace_ctx=tctx)
         try:
             result = _extract_json(raw)
         except ValueError:
-            logger.warning("ConversationBrain | JSON parse failed — trying repair")
-            result = await _repair_brain_json(raw) or _default_brain_response()
+            logger.warning(
+                "ConversationBrain | trace_id={} | JSON parse failed — trying repair",
+                tctx["trace_id"],
+            )
+            result = await _repair_brain_json(raw, trace_ctx=tctx) or _default_brain_response()
         result = normalize_brain_result(result)
         logger.info(
-            "ConversationBrain | action={} | reply_len={} | needs_tool={} | handoff={} | conf={}",
+            "ConversationBrain | trace_id={} | action={} | reply_len={} | needs_tool={} | handoff={} | conf={}",
+            tctx["trace_id"],
             result.get("action"),
             len(result.get("reply") or ""),
             (result.get("needs_tool") or {}).get("name"),
@@ -338,7 +364,7 @@ async def run_conversation_brain(
         )
         return result
     except Exception:
-        logger.exception("conversation_brain failed")
+        logger.exception("conversation_brain failed | trace_id={}", tctx.get("trace_id"))
         return _default_brain_response()
 
 
@@ -350,6 +376,7 @@ async def conversation_brain_repair(
     kb_facts: list[dict],
     tool_results: dict | None = None,
     fact_pack: dict | None = None,
+    trace_ctx: dict | None = None,
 ) -> str | None:
     """Попросить LLM исправить неверный текст ответа."""
     payload = {
@@ -365,10 +392,13 @@ async def conversation_brain_repair(
         {"role": "system", "content": REPAIR_PROMPT},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]
+    tctx = dict(trace_ctx or {})
+    tctx["phase"] = "repair"
+    tctx.setdefault("fact_pack", fact_pack or {})
     try:
-        raw = await ask_llm(messages, max_tokens=_budget("BRAIN"))
+        raw = await ask_llm(messages, max_tokens=_budget("BRAIN"), trace_ctx=tctx)
         from app.processing.utils import cleanup_text
         return cleanup_text(raw)
     except Exception:
-        logger.exception("conversation_brain_repair failed")
+        logger.exception("conversation_brain_repair failed | trace_id={}", tctx.get("trace_id"))
         return None

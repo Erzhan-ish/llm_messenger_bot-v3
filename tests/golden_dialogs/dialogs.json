@@ -1,0 +1,275 @@
+[
+  {
+    "name": "01_value_objection_initial",
+    "description": "User asks why use agency instead of going directly to bank",
+    "turns": [
+      {
+        "user": "в чем выгода через вас? могу напрямую в банк",
+        "expect_scenario": "direct_bank_objection",
+        "expect_contains": ["документ", "финмониторинг"],
+        "forbid_contains": ["уточните вопрос", "о каких банках хотите узнать"]
+      }
+    ]
+  },
+  {
+    "name": "02_value_objection_followup",
+    "description": "Follow-up 'подробнее' after value objection answered",
+    "turns": [
+      {
+        "user": "в чем выгода через вас?",
+        "expect_scenario": "direct_bank_objection",
+        "expect_contains": ["документ"],
+        "forbid_contains": ["уточните вопрос"]
+      },
+      {
+        "user": "подробнее",
+        "expect_scenario": "direct_bank_objection",
+        "expect_contains": ["документ", "финмониторинг"],
+        "forbid_contains": ["о каких банках хотите узнать", "уточните вопрос"]
+      }
+    ]
+  },
+  {
+    "name": "03_repetition_complaint",
+    "description": "User complains bot is repeating itself",
+    "turns": [
+      {
+        "user": "в чем выгода через вас?",
+        "expect_scenario": "direct_bank_objection",
+        "expect_contains": ["документ"],
+        "forbid_contains": []
+      },
+      {
+        "user": "зачем повторяешься?",
+        "expect_contains": [],
+        "forbid_contains": ["уточните вопрос"]
+      }
+    ]
+  },
+  {
+    "name": "04_topic_switch_after_objection",
+    "description": "User switches to bank selection after value objection",
+    "turns": [
+      {
+        "user": "зачем через вас работать?",
+        "expect_scenario": "direct_bank_objection",
+        "expect_contains": ["документ"],
+        "forbid_contains": []
+      },
+      {
+        "user": "у меня ЮЛ, нужен банк подешевле",
+        "expect_scenario": "bank_selection_yul_low_cost",
+        "expect_contains": ["Альфа-Банк", "ТКБ"],
+        "forbid_contains": ["зачем через", "выгода"]
+      }
+    ]
+  },
+  {
+    "name": "05_low_cost_yul",
+    "description": "User asks for cheapest bank for legal entity",
+    "turns": [
+      {
+        "user": "нужен банк подешевле для ЮЛ",
+        "expect_scenario": "bank_selection_yul_low_cost",
+        "expect_contains": ["Альфа-Банк", "ТКБ", "Уралсиб"],
+        "forbid_contains": ["уточните вопрос", "Счёт подбираем для юрлица или физлица"]
+      }
+    ]
+  },
+  {
+    "name": "06_only_these_two_followup",
+    "description": "Follow-up asking if only 2 banks exist",
+    "turns": [
+      {
+        "user": "нужен банк подешевле для ЮЛ",
+        "expect_scenario": "bank_selection_yul_low_cost",
+        "expect_contains": ["Альфа-Банк", "ТКБ"],
+        "forbid_contains": []
+      },
+      {
+        "user": "только эти оба?",
+        "expect_contains": ["Альфа-Банк", "ТКБ", "Уралсиб"],
+        "forbid_contains": ["уточните вопрос"]
+      }
+    ]
+  },
+  {
+    "name": "07_tariff_comparison_immediate",
+    "description": "User asks for tariff comparison — must get answer immediately, no 'can I compare?'",
+    "turns": [
+      {
+        "user": "с какими банками для ЮЛ работаете?",
+        "expect_scenario": "bank_selection_yul",
+        "expect_contains": ["Альфа-Банк", "ТКБ", "Уралсиб"],
+        "forbid_contains": []
+      },
+      {
+        "user": "какие условия и тарифы у них?",
+        "expect_contains": ["Альфа-Банк", "ТКБ", "Уралсиб", "паузе"],
+        "forbid_contains": ["Могу сравнить", "хотите сравнить", "уточните вопрос"]
+      }
+    ]
+  },
+  {
+    "name": "08_specific_uralsib",
+    "description": "User asks specifically about Uralsib — playbook enriches LLM, no generic fallback",
+    "turns": [
+      {
+        "user": "Уралсиб что? условия у них?",
+        "expect_contains": [],
+        "forbid_contains": ["уточните вопрос", "о каких банках хотите узнать"]
+      }
+    ]
+  },
+  {
+    "name": "09_fl_bank",
+    "description": "FL debtor — bank selection without asking ЮЛ/ФЛ again",
+    "turns": [
+      {
+        "user": "должник ФЛ, банк нужен",
+        "expect_contains": ["ТКБ"],
+        "forbid_contains": ["Счёт подбираем для юрлица или физлица", "уточните вопрос"]
+      }
+    ]
+  },
+  {
+    "name": "10_bonus_interest",
+    "description": "User asks about annual bonus/interest rate",
+    "turns": [
+      {
+        "user": "какой бонус годовых?",
+        "expect_contains": [],
+        "forbid_contains": ["льготы", "скидки", "Мы специализируемся", "уточните вопрос"]
+      }
+    ]
+  },
+  {
+    "name": "11_au_personal_bonus",
+    "description": "User asks about personal AU bonus — must get compliance-safe answer",
+    "turns": [
+      {
+        "user": "бонус для АУ",
+        "expect_contains": [],
+        "forbid_contains": ["льготы", "скидки", "уточните вопрос"]
+      }
+    ]
+  },
+  {
+    "name": "12_card_realization_yes_flow",
+    "description": "Card realization: question → yes → next steps",
+    "turns": [
+      {
+        "user": "карту для должника надо открыть",
+        "expect_scenario": "debtor_card_realization",
+        "expect_contains": ["реализация", "финансовый управляющий"],
+        "forbid_contains": []
+      },
+      {
+        "user": "да",
+        "expect_contains": ["финансовый управляющий"],
+        "forbid_contains": ["дождитесь введения реализации"]
+      }
+    ]
+  },
+  {
+    "name": "13_observation_stage",
+    "description": "Account on observation stage → user asks what is required",
+    "turns": [
+      {
+        "user": "счёт на стадии наблюдения?",
+        "expect_scenario": "allowed_stages",
+        "expect_contains": [],
+        "forbid_contains": ["уточните вопрос"]
+      },
+      {
+        "user": "что требуется?",
+        "expect_contains": ["определение суда"],
+        "forbid_contains": ["уточните вопрос"]
+      }
+    ]
+  },
+  {
+    "name": "14_red_zone_company",
+    "description": "YUL in red zone — should ask INN/stage, not random pricing",
+    "turns": [
+      {
+        "user": "у меня ЮЛ в красной зоне",
+        "expect_scenario": "red_zone_company",
+        "expect_contains": [],
+        "forbid_contains": ["800 ₽", "2800 ₽", "уточните вопрос"]
+      }
+    ]
+  },
+  {
+    "name": "15_confusion",
+    "description": "User says 'причем тут ТКБ?' — must get context recovery",
+    "turns": [
+      {
+        "user": "причем тут ТКБ?",
+        "expect_contains": [],
+        "forbid_contains": ["уточните вопрос", "я алексей, менеджер"]
+      }
+    ]
+  },
+  {
+    "name": "16_small_talk",
+    "description": "Small talk: 'как дела?' → useful answer, no fallback",
+    "turns": [
+      {
+        "user": "как дела?",
+        "expect_contains": [],
+        "forbid_contains": ["уточните вопрос", "секунду уточняю"]
+      }
+    ]
+  },
+  {
+    "name": "17_gratitude_close",
+    "description": "User thanks and closes — polite close, no repeated scenario",
+    "turns": [
+      {
+        "user": "хорошо спасибо",
+        "expect_contains": ["пожалуйста"],
+        "forbid_contains": ["уточните вопрос"]
+      }
+    ]
+  },
+  {
+    "name": "18_not_interested",
+    "description": "User says 'not interested' — respectful close",
+    "turns": [
+      {
+        "user": "нет, не интересно",
+        "expect_contains": [],
+        "forbid_contains": ["уточните вопрос"]
+      }
+    ]
+  },
+  {
+    "name": "19_objection_then_documents",
+    "description": "Value objection then document request — must switch to docs scenario",
+    "turns": [
+      {
+        "user": "зачем через вас?",
+        "expect_scenario": "direct_bank_objection",
+        "expect_contains": ["документ"],
+        "forbid_contains": []
+      },
+      {
+        "user": "какие документы нужны?",
+        "expect_contains": ["документ"],
+        "forbid_contains": ["уточните вопрос", "выгода через"]
+      }
+    ]
+  },
+  {
+    "name": "20_debounce_merge",
+    "description": "Multi-message debounce: ЮЛ + банк подешевле merged",
+    "turns": [
+      {
+        "user": "у меня ЮЛ\nбанк подешевле",
+        "expect_contains": ["Альфа-Банк", "ТКБ"],
+        "forbid_contains": ["уточните вопрос", "Счёт подбираем для юрлица или физлица"]
+      }
+    ]
+  }
+]

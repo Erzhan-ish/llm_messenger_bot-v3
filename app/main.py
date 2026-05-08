@@ -12,6 +12,7 @@ from app.webhooks.debug.debug_jobs import debug_router_jobs
 from app.webhooks.debug.debug_history import debug_router_his
 from app.webhooks.debug.debug_session import debug_router_sess
 from app.webhooks.debug.debug_outbound_fail import debug_router_out
+from app.webhooks.debug.debug_llm_traces import debug_router_llm_traces
 
 
 
@@ -36,16 +37,17 @@ async def on_startup():
     from app.config import settings
     from app.services.conversation_brain import load_brain_prompt
 
-    if settings.LLM_PROVIDER == "stub":
+    if settings.APP_ENV == "production" and settings.LLM_PROVIDER == "stub":
         raise RuntimeError(
-            "LLM_PROVIDER=stub is not allowed in production. "
+            "LLM_PROVIDER=stub is not allowed when APP_ENV=production. "
             "Set LLM_PROVIDER=ollama or LLM_PROVIDER=timeweb in your .env"
         )
 
-    try:
-        load_brain_prompt()
-    except (FileNotFoundError, RuntimeError) as exc:
-        raise RuntimeError(f"Startup failed — brain prompt unavailable: {exc}") from exc
+    if settings.APP_ENV == "production":
+        try:
+            load_brain_prompt()
+        except (FileNotFoundError, RuntimeError) as exc:
+            raise RuntimeError(f"Startup failed — brain prompt unavailable: {exc}") from exc
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -58,6 +60,7 @@ app.include_router(debug_router_his)
 app.include_router(debug_router_jobs)
 app.include_router(debug_router_out)
 app.include_router(debug_router_sess)
+app.include_router(debug_router_llm_traces)
 
 
 app.include_router(telegram_router, prefix="/telegram/webhook")

@@ -3,7 +3,7 @@ import httpx
 from app.config import settings
 from app.logging import logger
 
-_OLLAMA_NUM_PREDICT_CAP = 700
+_OLLAMA_NUM_PREDICT_HARD_MAX = 2048
 
 
 class OllamaProvider:
@@ -14,10 +14,9 @@ class OllamaProvider:
     async def generate(self, messages: list[dict], *, max_tokens: int | None = None) -> str:
         url = f"{self.base_url}/api/chat"
 
-        num_predict = min(
-            max_tokens if max_tokens is not None else settings.OLLAMA_RENDER_MAX_TOKENS,
-            _OLLAMA_NUM_PREDICT_CAP,
-        )
+        requested = max_tokens if max_tokens is not None else settings.OLLAMA_RENDER_MAX_TOKENS
+        cap_applied = requested > _OLLAMA_NUM_PREDICT_HARD_MAX
+        num_predict = min(requested, _OLLAMA_NUM_PREDICT_HARD_MAX)
 
         payload = {
             "model": self.model,
@@ -32,7 +31,11 @@ class OllamaProvider:
             }
         }
 
-        logger.info("Ollama request | model={} | num_predict={}", self.model, num_predict)
+        logger.info(
+            "Ollama request | model={} | num_predict={}{}",
+            self.model, num_predict,
+            f" | cap_reason=hard_max_{_OLLAMA_NUM_PREDICT_HARD_MAX}" if cap_applied else "",
+        )
 
         try:
             async with httpx.AsyncClient(timeout=settings.LLM_TIMEOUT) as client:
