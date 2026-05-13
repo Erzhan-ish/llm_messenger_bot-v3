@@ -295,37 +295,18 @@ def run_scenario_playbook(
         )
 
     # -----------------------------------------------------------------------
-    # direct_bank_objection — value proposition for "зачем через вас?"
+    # direct_bank_objection — enrich with constraints, let LLM write naturally
     # -----------------------------------------------------------------------
     if active == "direct_bank_objection":
         log["scenario_playbook_applied"] = "direct_bank_objection"
-        objection_answered = known.get("objection_answered")
-
-        if _OBJECTION_ELABORATE_RE.match((user_text or "").strip()) or objection_answered:
-            # Follow-up or repeated objection — give expanded value proposition
-            return _reply(
-                "Если коротко: через нас вы получаете не просто список банков, "
-                "а сопровождение открытия. Мы помогаем с документами, коммуникацией "
-                "с банком и финмониторингом, плюс по базе у нас есть льготные условия "
-                "по сравнению с прямым обращением. То есть АУ меньше тратит время на "
-                "согласования и быстрее доводит открытие счёта до результата.",
-                {
-                    SLOT_KNOWN:     {**known, "objection_answered": True},
-                    SLOT_NEXT_STEP: "offer_case_check_or_bank_selection",
-                    SLOT_FORBIDDEN: ["о каких банках хотите узнать"],
-                },
-            )
-
-        # First objection — concise value proposition
-        return _reply(
-            "Через нас вы получаете не просто список банков — мы сопровождаем открытие счёта: "
-            "документы, коммуникация с банком, финмониторинг. "
-            "Плюс по базе есть льготные условия по сравнению с прямым обращением. "
-            "Хотите подобрать банк под ваш случай?",
+        return _enrich(
             {
                 SLOT_KNOWN:     {**known, "objection_answered": True},
-                SLOT_NEXT_STEP: "offer_case_check_or_bank_selection",
-                SLOT_FORBIDDEN: ["о каких банках хотите узнать"],
+                SLOT_FORBIDDEN: ["о каких банках хотите узнать", "уточните вопрос"],
+            },
+            {
+                "_known_slots":       {**known, "objection_answered": True},
+                "_forbidden_phrases": ["о каких банках хотите узнать", "уточните вопрос"],
             },
         )
 
@@ -336,17 +317,10 @@ def run_scenario_playbook(
         log["scenario_playbook_applied"] = "debtor_card_realization"
         realization_known = known.get("realization_started")
 
-        # First entry: no realization info yet, user hasn't answered yet — ask the key question
+        # First entry: no realization info yet, user hasn't answered yet
+        # → skip so ActionExecutor (explain_card_rules) handles the initial question
         if realization_known is None and pending is None and detect_yes_no(user_text) is None:
-            return _reply(
-                "Если реализация имущества введена, карту оформляет и подписывает финансовый управляющий. "
-                "Если реализации ещё нет — карту пока оформить нельзя. Реализация уже введена?",
-                {
-                    SLOT_PENDING:  "realization_started",
-                    SLOT_EXPECTED: "yes_no",
-                    SLOT_NEXT_STEP: "ask_realization_status",
-                },
-            )
+            return _skip()
 
         # Waiting for yes/no on "Реализация уже введена?"
         if realization_known is None and (pending == "realization_started" or pending is None):
@@ -441,10 +415,7 @@ def run_scenario_playbook(
 
         return _enrich(
             {SLOT_KNOWN: {**known, "account_opening_allowed": True}},
-            {
-                "_known_slots":        {**known, "account_opening_allowed": True},
-                "_required_next_step": "explain_account_opening_at_stage",
-            },
+            {"_known_slots": {**known, "account_opening_allowed": True}},
         )
 
     # -----------------------------------------------------------------------
@@ -454,37 +425,16 @@ def run_scenario_playbook(
         log["scenario_playbook_applied"] = "bank_selection_yul_low_cost"
         low_cost_listed = known.get("low_cost_listed")
 
-        # Follow-up: "только эти оба?" / "а еще?" / "другие есть?"
-        if low_cost_listed and _ONLY_MORE_RE.search(user_text):
-            return _reply(
-                "Нет, активных вариантов для юрлиц больше: Альфа-Банк, ТКБ и Уралсиб. "
-                "Просто если смотреть дешевле по старту, чаще выделяются Альфа-Банк и ТКБ. "
-                "Уралсиб тоже можно рассмотреть — условия уточняются отдельно.",
-                {
-                    SLOT_KNOWN:     {**known, "low_cost_listed": True},
-                    SLOT_NEXT_STEP: "explain_low_cost_options_or_compare_tariffs",
-                    SLOT_FORBIDDEN: ["Счёт подбираем для юрлица или физлица"],
-                },
-            )
-
-        # Tariff comparison while in low-cost context
-        if _TARIFF_COMPARE_RE.search(user_text):
-            return _reply(
-                _build_tariff_compare_reply(fact_pack),
-                {
-                    SLOT_KNOWN:     {**known, "low_cost_listed": True},
-                    SLOT_NEXT_STEP: "ask_which_bank_to_check_or_collect_inn",
-                    SLOT_FORBIDDEN: ["Могу сравнить", "хотите сравнить", "Счёт подбираем для юрлица или физлица"],
-                },
-            )
-
-        # First entry — give deterministic low-cost answer
-        return _reply(
-            _build_low_cost_reply(fact_pack),
+        # Enrich with constraints — LLM answers naturally with low-cost focus
+        return _enrich(
             {
                 SLOT_KNOWN:     {**known, "low_cost_listed": True, "debtor_type": "legal_entity"},
-                SLOT_NEXT_STEP: "explain_low_cost_options_or_compare_tariffs",
-                SLOT_FORBIDDEN: ["Счёт подбираем для юрлица или физлица"],
+                SLOT_FORBIDDEN: ["Счёт подбираем для юрлица или физлица", "Могу сравнить?"],
+            },
+            {
+                "_known_slots":       {**known, "low_cost_listed": True},
+                "_forbidden_phrases": ["Счёт подбираем для юрлица или физлица", "Могу сравнить?"],
+                "_pricing_focus":     "low_cost",
             },
         )
 
@@ -495,42 +445,15 @@ def run_scenario_playbook(
         log["scenario_playbook_applied"] = "bank_selection_fl"
         banks_listed = known.get("banks_listed")
 
-        if _TARIFF_COMPARE_RE.search(user_text):
-            return _reply(
-                "Для физлиц по тарифам:\n"
-                "— ТКБ: открытие 1 500 ₽, ведение бесплатно.\n"
-                "— Уралсиб: ведение бесплатно, переводы до 100 000 ₽ бесплатно, свыше — 0,2%.\n"
-                "Т-Банк, МКБ и Росбанк сейчас на паузе.",
-                {
-                    SLOT_KNOWN:     {**known, "banks_listed": True, "debtor_type": "individual"},
-                    SLOT_NEXT_STEP: "ask_which_bank_to_check_or_collect_inn",
-                    SLOT_FORBIDDEN: ["Счёт подбираем для юрлица или физлица"],
-                },
-            )
-
-        if not banks_listed:
-            return _reply(
-                "Для физлиц сейчас основной вариант — ТКБ. "
-                "Уралсиб тоже работает с физлицами-должниками. "
-                "Т-Банк, МКБ и Росбанк сейчас на паузе. "
-                "Хотите уточнить тарифы или сразу к документам?",
-                {
-                    SLOT_KNOWN:     {**known, "banks_listed": True, "debtor_type": "individual"},
-                    SLOT_NEXT_STEP: "offer_fl_tariff_or_docs",
-                    SLOT_FORBIDDEN: ["Счёт подбираем для юрлица или физлица"],
-                },
-            )
-
+        # Enrich with FL context — LLM answers naturally
         return _enrich(
             {
                 SLOT_KNOWN:     {**known, "banks_listed": True},
-                SLOT_NEXT_STEP: "offer_fl_tariff_or_docs",
                 SLOT_FORBIDDEN: ["Счёт подбираем для юрлица или физлица"],
             },
             {
-                "_known_slots":        {**known, "banks_listed": True},
-                "_required_next_step": "offer_fl_tariff_or_docs",
-                "_forbidden_phrases":  ["Счёт подбираем для юрлица или физлица"],
+                "_known_slots":       {**known, "banks_listed": True},
+                "_forbidden_phrases": ["Счёт подбираем для юрлица или физлица"],
             },
         )
 
@@ -545,44 +468,19 @@ def run_scenario_playbook(
         )
         banks_listed = known.get("banks_listed")
 
-        # Tariff comparison request while in this scenario
-        if _TARIFF_COMPARE_RE.search(user_text):
-            return _reply(
-                _build_tariff_compare_reply(fact_pack),
-                {
-                    SLOT_KNOWN:     {**known, "banks_listed": True},
-                    SLOT_NEXT_STEP: "ask_which_bank_to_check_or_collect_inn",
-                    SLOT_FORBIDDEN: ["Могу сравнить", "хотите сравнить", "Счёт подбираем для юрлица или физлица"],
-                },
-            )
-
-        if is_yul and not banks_listed:
-            new_known = {**known, "banks_listed": True}
-            return _reply(
-                "Для юрлиц сейчас активные варианты — Альфа-Банк, ТКБ и Уралсиб. "
-                "Т-Банк, МКБ и Росбанк сейчас на паузе. "
-                "Могу сразу сравнить тарифы по активным банкам?",
-                {
-                    SLOT_KNOWN:     new_known,
-                    SLOT_NEXT_STEP: "offer_tariff_comparison",
-                    SLOT_FORBIDDEN: ["Счёт подбираем для юрлица или физлица"],
-                },
-            )
-
+        # Enrich with YUL context — LLM answers naturally
         forbidden_list = (
             ["Счёт подбираем для юрлица или физлица"] if is_yul else []
         )
         return _enrich(
             {
-                SLOT_KNOWN:     {**known, "banks_listed": True},
-                SLOT_NEXT_STEP: "offer_tariff_comparison",
+                SLOT_KNOWN: {**known, "banks_listed": True},
                 **(
                     {SLOT_FORBIDDEN: forbidden_list} if forbidden_list else {}
                 ),
             },
             {
-                "_known_slots":        {**known, "banks_listed": True},
-                "_required_next_step": "offer_tariff_comparison",
+                "_known_slots": {**known, "banks_listed": True},
                 **(
                     {"_forbidden_phrases": forbidden_list} if forbidden_list else {}
                 ),
@@ -599,31 +497,18 @@ def run_scenario_playbook(
             or slots.get("client_type") in ("ЮЛ", "ИП")
         )
 
-        # Tariff comparison request
-        if _TARIFF_COMPARE_RE.search(user_text):
-            return _reply(
-                _build_tariff_compare_reply(fact_pack),
-                {
-                    SLOT_KNOWN:     known,
-                    SLOT_NEXT_STEP: "ask_which_bank_to_check_or_collect_inn",
-                    SLOT_FORBIDDEN: ["Могу сравнить", "хотите сравнить", "Счёт подбираем для юрлица или физлица"],
-                },
-            )
-
         forbidden_list = (
-            ["Счёт подбираем для юрлица или физлица"] if is_yul else []
+            ["Счёт подбираем для юрлица или физлица", "Могу сравнить?"] if is_yul else []
         )
         return _enrich(
             {
-                SLOT_KNOWN:     known,
-                SLOT_NEXT_STEP: "ask_bank_choice_or_collect_inn",
+                SLOT_KNOWN: known,
                 **(
                     {SLOT_FORBIDDEN: forbidden_list} if forbidden_list else {}
                 ),
             },
             {
-                "_known_slots":          known,
-                "_required_next_step":   "ask_bank_choice_or_collect_inn",
+                "_known_slots":           known,
                 "_uralsib_fallback_hint": (
                     "По Уралсибу условия лучше уточнить отдельно, "
                     "но банк сейчас активен для юрлиц."
@@ -639,6 +524,38 @@ def run_scenario_playbook(
     # -----------------------------------------------------------------------
     if active in _BANK_COND_SCENARIOS:
         log["scenario_playbook_applied"] = active
+
+        # If client is ready to open — switch from tariff enrichment to handoff/docs mode
+        _ds = slots.get("_deal_state") or {}
+        if _ds.get("deal_stage") == "ready_to_open" or _ds.get("handoff_needed"):
+            log["deal_stage_override"] = "ready_to_open"
+            _forbidden_tariff = [
+                "Счёт подбираем для юрлица или физлица",
+                "Могу сравнить?",
+            ]
+            return _enrich(
+                {
+                    SLOT_KNOWN:     {**known, "ready_to_open": True},
+                    SLOT_NEXT_STEP: "handoff_to_manager",
+                    SLOT_FORBIDDEN: _forbidden_tariff,
+                },
+                {
+                    "_known_slots":       {**known, "ready_to_open": True},
+                    "_required_next_step": "handoff_to_manager",
+                    "_forbidden_phrases": _forbidden_tariff,
+                    "_deal_stage":        "ready_to_open",
+                },
+            )
+
+        # Docs/requirements question in deal context — enrich with explain_documents hint
+        if detect_what_required(user_text) or detect_what_next(user_text):
+            if _ds.get("deal_stage") in ("bank_selected", "ready_to_open") or _ds.get("selected_bank"):
+                log["docs_in_deal_context"] = True
+                return _enrich(
+                    {SLOT_KNOWN: known, SLOT_NEXT_STEP: "explain_documents"},
+                    {"_known_slots": known, "_required_next_step": "explain_documents"},
+                )
+
         is_yul = (
             slots.get("debtor_type") in ("ЮЛ", "ИП")
             or slots.get("client_type") in ("ЮЛ", "ИП")
@@ -646,21 +563,53 @@ def run_scenario_playbook(
         forbidden_list = (
             ["Счёт подбираем для юрлица или физлица"] if is_yul else []
         )
-        bank_kw = active.replace("_yul_conditions", "").replace("_fl_conditions", "")
         return _enrich(
             {
-                SLOT_KNOWN:     known,
-                SLOT_NEXT_STEP: f"explain_{bank_kw}_conditions",
+                SLOT_KNOWN: known,
                 **(
                     {SLOT_FORBIDDEN: forbidden_list} if forbidden_list else {}
                 ),
             },
             {
-                "_known_slots":        known,
-                "_required_next_step": f"explain_{bank_kw}_conditions",
+                "_known_slots": known,
                 **(
                     {"_forbidden_phrases": forbidden_list} if forbidden_list else {}
                 ),
+            },
+        )
+
+    # -----------------------------------------------------------------------
+    # Global: detect action/docs intent at deal stage regardless of active scenario
+    # -----------------------------------------------------------------------
+    _ds_global = slots.get("_deal_state") or {}
+    if _ds_global.get("handoff_needed") or _ds_global.get("deal_stage") == "ready_to_open":
+        log["scenario_playbook_applied"] = "deal_state_ready_to_open"
+        _forbidden_selling = ["Счёт подбираем для юрлица или физлица", "Могу сравнить?"]
+        if detect_what_required(user_text) or detect_what_next(user_text):
+            return _enrich(
+                {
+                    SLOT_KNOWN: {**known, "ready_to_open": True},
+                    SLOT_NEXT_STEP: "explain_documents",
+                    SLOT_FORBIDDEN: _forbidden_selling,
+                },
+                {
+                    "_known_slots":       {**known, "ready_to_open": True},
+                    "_required_next_step": "explain_documents",
+                    "_forbidden_phrases": _forbidden_selling,
+                    "_deal_stage":        "ready_to_open",
+                },
+            )
+        return _enrich(
+            {
+                SLOT_KNOWN:     {**known, "ready_to_open": True},
+                SLOT_NEXT_STEP: "handoff_to_manager",
+                SLOT_FORBIDDEN: _forbidden_selling,
+            },
+            {
+                "_known_slots":       {**known, "ready_to_open": True},
+                "_required_next_step": "handoff_to_manager",
+                "_forbidden_phrases": _forbidden_selling,
+                "_deal_stage":        "ready_to_open",
             },
         )
 

@@ -19,6 +19,11 @@ def _timeweb_model(model: str | None) -> str | None:
     return settings.TIMEWEB_AI_MODEL or None
 
 
+def _fireworks_model(model: str | None) -> str | None:
+    """Return the configured Fireworks model (ignores Ollama-specific model names)."""
+    return settings.FIREWORKS_MODEL or None
+
+
 async def ask_llm(
     messages: list[dict[str, Any]],
     model: str | None = None,
@@ -31,7 +36,12 @@ async def ask_llm(
     trace_id = trace_ctx.get("trace_id", "")
 
     # Log every call with trace_id so normal logs link to JSONL traces
-    _model = model or (settings.TIMEWEB_AI_MODEL if provider == "timeweb" else settings.OLLAMA_MODEL)
+    if provider == "timeweb":
+        _model = model or settings.TIMEWEB_AI_MODEL
+    elif provider == "fireworks":
+        _model = model or settings.FIREWORKS_MODEL
+    else:
+        _model = model or settings.OLLAMA_MODEL
     logger.info(
         "LLMCall | trace_id={} | provider={} | model={} | phase={} | msgs={}",
         trace_id, provider, _model, trace_ctx.get("phase", "unknown"), len(messages),
@@ -47,6 +57,9 @@ async def ask_llm(
         elif provider == "timeweb":
             from app.llm.providers.timeweb import ask_timeweb
             raw = await ask_timeweb(messages, model=_timeweb_model(model), max_tokens=max_tokens)
+        elif provider == "fireworks":
+            from app.llm.providers.fireworks import ask_fireworks
+            raw = await ask_fireworks(messages, model=_fireworks_model(model), max_tokens=max_tokens)
         else:
             raw = await ask_stub(messages)
     except Exception as exc:

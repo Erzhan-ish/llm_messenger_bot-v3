@@ -1,322 +1,582 @@
-Fix semantic intent false positives and scenario scoring.
+FINAL PLAN — Stabilize Dialog Orchestration After Switching to a 70B Model
 
-Problem:
-After adding semantic intent matching, embeddings are producing false positives and ScenarioPolicy trusts them too much.
+Context
 
-Observed failures:
+After switching to a cloud 70B model, the language quality of the replies improved, but the main issues remain in the orchestration layer around the model:
 
-1. User:
-"здравствуйте, у меня ЮЛ должник
-нужен счет"
+1. The system still loses or corrupts FL/YUL context.
+2. A new explicit user intent does not always override an old active scenario.
+3. Validators sometimes require information the user did not ask for.
+4. Repair can make replies worse by adding irrelevant facts.
+5. Repetition complaints are handled incorrectly.
+6. Escalation triggers, but metadata may contain the wrong debtor type or bank.
+7. Bitrix may fail to receive the escalation, yet the system still logs “Escalation completed.”
+8. On startup, the worker may crash because the `jobs` table does not exist yet.
+
+Important constraints:
+- Do not change the model.
+- Do not add phrase-by-phrase hardcoded replies.
+- Do not revert the project to a rigid FSM.
+- Fix general architectural causes, not isolated wording cases.
+
+======================================================================
+TASK 1 — Strengthen DealState consistency and debtor_type persistence
+======================================================================
+
+Problem
+
+The user asks about FL, but the bot suddenly answers about YUL:
+
+- User: “for physical persons, which banks and tariffs?”
+- User: “only one bank?”
+- Bot replies about “three active banks for legal entities.”
+
+Also, during escalation for opening an account in T-Bank for FL, metadata was logged as:
+- selected_bank = T-Bank
+- debtor_type = YUL
+
+This is critical.
+
+What to do
+
+Make `debtor_type` part of DealState with priority above scenario scoring.
+
+Requirements
+
+1. If the session already knows:
+   debtor_type = "FL"
+
+   then:
+   - retrieval must prioritize only FL-related chunks;
+   - ScenarioPolicy must not select YUL scenarios as the main answer path;
+   - manager_context must explicitly contain debtor_type=FL;
+   - ConversationResponder must not answer with YUL facts unless the user explicitly switches the topic.
+
+2. If the user explicitly changes the entity type:
+   - “and for legal entities?”
+   - “now about YUL”
+   - “for physical persons”
+
+   then debtor_type may be updated.
+
+3. During escalation, debtor_type must be taken from the current DealState, not from stale or loosely merged slot payloads.
+
+Acceptance
+
+Case 1
+User:
+- “for physical persons, which tariffs and banks?”
+- “only one bank?”
 
 Expected:
-bank_selection_yul / open_account_yul
+- the bot stays in FL context;
+- it does not answer about YUL;
+- if the KB says there is only one main working FL bank, say so;
+- if the KB contains more FL options, list only FL options.
 
-Actual:
-IntentExtractor accepted:
-- bonus_interest
-- direct_bank_objection
-- bank_selection
+Case 2
+User:
+- “I want to open for a physical person in Tinkoff, which documents are needed?”
 
-ScenarioPolicy selected:
-active=direct_bank_objection
-score=102.05
+Expected escalation metadata:
+{
+  "selected_bank": "T-Bank",
+  "debtor_type": "FL"
+}
 
-This is wrong. "нужен счет" is not a direct bank objection.
+======================================================================
+TASK 2 — Make explicit topic switches override stale active scenarios
+======================================================================
 
-2. User:
-"окей давайте
-у меня ЮЛ"
+Problem
+
+After:
+- User: “why do I need intermediaries?”
+
+the active scenario is `direct_bank_objection`.
+
+Then the user asks:
+- “what other bonuses are available for arbitration managers?”
+
+Intent `interest_or_bonus` is detected, but the active scenario remains `direct_bank_objection`, so the bot repeats the previous value proposition instead of answering the bonus question.
+
+What to do
+
+In ScenarioPolicy, add a general rule:
+
+A new explicit intent must override the old active scenario if the user clearly moved to a new topic.
+
+Priority topic switches
+
+1. `interest_or_bonus` > `direct_bank_objection`
+2. `repetition_complaint` > any business scenario
+3. `documents_requested` > bank conditions when a bank is already selected or the user is ready to open
+4. `timelines` > tariffs/details when the user asks “how long?”
+5. `specific_bank_focus` > generic partner bank listing
+
+Acceptance
+
+Case:
+- “why do I need intermediaries?”
+- “what other bonuses are available for AU?”
 
 Expected:
-User accepted previous offer and gave debtor_type=legal_entity.
-Switch to bank_selection_yul.
+- active scenario switches to `au_bonus_question` or an equivalent bonus-related scenario;
+- forced retrieval no longer stays limited to `direct_bank_objection`;
+- the answer is about AU bonuses from KB, not a repeated value proposition.
 
-Actual:
-Semantic accepted direct_bank_objection and policy kept active=direct_bank_objection with score=112.05.
+======================================================================
+TASK 3 — Fix repetition complaint handling
+======================================================================
 
-3. User:
-"да"
+Problem
+
+Phrases such as:
+- “why are you repeating yourself?”
+- typo form: “why are you repeating yourself” with misspelling
+
+are handled incorrectly.
+
+In one case, `repetition_complaint` is accepted, but retrieval still forces `direct_bank_objection`.
+In another case, semantic similarity is almost perfect, but the intent is rejected because lexical gating requires exact terms and does not tolerate typos.
+
+What to do
+
+3.1 Increase the priority of `repetition_complaint`
+
+If `repetition_complaint` is accepted:
+- it must override the active business scenario;
+- retrieval must NOT force `direct_bank_objection`, `partner_banks`, tariffs, or other business chunks;
+- responder must receive a manager_context such as:
+
+{
+  "dialog_act": "repetition_complaint",
+  "instruction": "Acknowledge the repetition, apologize, do not repeat the same information, and briefly suggest moving forward."
+}
+
+3.2 Make gating robust to typos
+
+For repetition complaints:
+- either add lexical variants such as:
+  - повторяешься
+  - повторяешся
+  - повторил
+  - одно и то же
+  - снова повторяешь
+
+- or allow a high-confidence semantic override:
+  if intent == "repetition_complaint" and semantic_score >= 0.90:
+      accept even if lexical gate is weak
+
+Expected reply
+
+For:
+- “why are you repeating yourself?”
 
 Expected:
-yes_to_offer / continue_to_bank_selection, depending last_bot_question.
-
-Actual:
-Semantic accepted small_talk, confusion_or_correction, repetition_complaint.
-
-Required changes:
-
-============================================================
-TASK 1 — Add semantic intent gating
-============================================================
-
-Semantic intent matching must not accept intents only by cosine similarity.
-Each intent must have gating conditions.
-
-Add to intent catalog:
-
-direct_bank_objection:
-requires_any_terms:
-- "выгода"
-- "зачем"
-- "почему"
-- "напрямую"
-- "через вас"
-- "сам"
-- "сама"
-- "посредник"
-- "что вы даете"
-- "почему не в банк"
-
-bonus_interest:
-requires_any_terms:
-- "бонус"
-- "процент"
-- "годовых"
-- "ставка"
-- "остаток"
-- "доходность"
-- "%"
-
-small_talk:
-requires_any_terms:
-- "как дела"
-- "как ты"
-- "как настроение"
-
-repetition_complaint:
-requires_any_terms:
-- "повторяешь"
-- "повторил"
-- "уже говорил"
-- "одно и то же"
-- "не повторяй"
-
-confusion_or_correction:
-requires_any_terms:
-- "причем"
-- "о чем"
-- "не понял"
-- "не это"
-- "я же сказал"
-- "я ответил"
-
-documents_requested:
-requires_any_terms:
-- "документы"
-- "что нужно"
-- "что требуется"
-- "что прислать"
-- "какие нужны"
-
-If semantic score passes threshold but gating terms are missing:
-- do not accept
-- add to semantic_rejects with reason="missing_required_terms"
-
-Acceptance:
-"у меня ЮЛ должник нужен счет" must NOT accept direct_bank_objection or bonus_interest.
-
-============================================================
-TASK 2 — Skip semantic matching for short yes/no answers
-============================================================
-
-If normalized text is:
-- "да"
-- "нет"
-- "угу"
-- "ок"
-- "хорошо"
-- "давайте"
-
-then:
-- do not run semantic intent matching
-- process as dialog act:
-  yes / no / confirm / continue
-- resolve based on last_bot_question, pending_slot, required_next_step, active_scenario
-
-Acceptance:
-"да" must not produce small_talk, confusion_or_correction, repetition_complaint.
-
-============================================================
-TASK 3 — Add yes_to_offer handling
-============================================================
-
-If last bot reply offered:
-"Хотите подобрать банк под ваш случай?"
-
-and user says:
-"да", "давайте", "окей давайте", "хорошо"
-
-then:
-set:
-intent=yes_to_offer_bank_selection
-
-If debtor_type known:
-- legal_entity -> active_scenario=bank_selection_yul
-- individual -> active_scenario=bank_selection_fl
-
-If debtor_type unknown:
-ask:
-"Подберём. Должник юрлицо или физлицо?"
-
-If user says:
-"окей давайте\nу меня ЮЛ"
-
-then:
-active_scenario=bank_selection_yul
-known_slots.debtor_type=legal_entity
-required_next_step=list_partner_banks_yul
-
-Expected reply:
-"Для юрлиц сейчас активные варианты — Альфа-Банк, ТКБ и Уралсиб. Т-Банк, МКБ и Росбанк сейчас на паузе. Если хотите, могу сразу сравнить тарифы."
-
-============================================================
-TASK 4 — Adjust ScenarioPolicy scoring by intent source
-============================================================
-
-Do not give hard score 100+ for semantic-only intent.
-
-Rules:
-- exact/regex hard intent can get high priority score.
-- semantic intent can only boost scenario modestly unless supported by:
-  - required terms
-  - slots
-  - active scenario compatibility
-  - explicit topic switch phrases
+- acknowledge the repetition;
+- apologize briefly;
+- do not repeat tariffs or benefits;
+- offer to continue usefully.
 
 Example:
-direct_bank_objection:
-- regex match "в чем выгода" -> strong score
-- semantic match + required terms -> medium score
-- semantic match without required terms -> rejected
+“Sorry, I did repeat myself. I will not duplicate the same point again. I can continue directly with your case or move to the next practical step.”
 
-Acceptance:
-For "у меня ЮЛ должник нужен счет":
-bank_selection_yul must outrank direct_bank_objection.
+======================================================================
+TASK 4 — Make validators intent-sensitive
+======================================================================
 
-============================================================
-TASK 5 — Explicit bank/account request overrides direct_bank_objection
-============================================================
+Problem
 
-If active_scenario=direct_bank_objection but current message contains:
-- "ЮЛ" / legal_entity
-- "ФЛ" / individual
-- "нужен счет"
-- "нужен банк"
-- "банк подобрать"
-- "подешевле"
-- "счет открыть"
+On:
+- “how long will it take?”
 
-then this is a topic switch to bank/account selection.
+the validator complains:
+- `missing_fl_tariff_details`
 
-Switch:
-- ЮЛ + low cost -> bank_selection_yul_low_cost
-- ЮЛ + account/bank -> bank_selection_yul
-- ФЛ + account/bank -> bank_selection_fl
+This is wrong because the user asked about timing, not tariffs.
 
-Do not keep direct_bank_objection.
-Do not force direct_bank_objection KB retrieval.
+This causes repair to inject old tariff content and creates the feeling that the bot is repeating itself.
 
-Acceptance:
-"окей давайте\nу меня ЮЛ" after direct_bank_objection must switch to bank_selection_yul.
+What to do
 
-============================================================
-TASK 6 — Fix forced_scenarios selection
-============================================================
+Rewrite response validation so requirements depend on the actual current user intent.
 
-Currently forced_scenarios=['direct_bank_objection','partner_banks'] is applied when active_scenario=direct_bank_objection even if user switches topic.
+Examples
 
-Change:
-Apply direct_bank_objection forced_scenarios only if:
-- current accepted intent is direct_bank_objection
-OR
-- active_scenario=direct_bank_objection AND current message is a value-objection follow-up:
-  - "подробнее"
-  - "почему"
-  - "в чем именно"
-  - "вы не ответили"
-  - "зачем с вами работать"
+If intent = `timelines`
+Require:
+- answer about timing;
+- if KB contains a confirmed timeframe, use it;
+- do NOT require tariffs.
 
-Do NOT apply direct_bank_objection forced_scenarios for:
-- "нужен счет"
-- "нужен банк"
-- "ЮЛ"
-- "ФЛ"
-- "подобрать банк"
-- "подешевле"
-- "тарифы"
-- "документы"
+If intent = `tariff_comparison_requested`
+Require:
+- tariff information;
+- do NOT require timelines.
 
-============================================================
-TASK 7 — Add negative anchors / intent exclusions
-============================================================
+If intent = `documents_requested`
+Require:
+- documents or required data;
+- do NOT require tariffs.
 
-For direct_bank_objection, add excluded patterns:
-- "нужен счет"
-- "нужен банк"
-- "подобрать банк"
-- "у меня ЮЛ"
-- "у меня ФЛ"
+If intent = `specific_bank_conditions`
+Require:
+- conditions for the relevant bank;
+- do NOT require a full list of all active banks.
 
-For bonus_interest, exclude unless terms contain:
-bonus/percent/rate/yearly/interest.
+Acceptance
 
-For small_talk, exclude:
-- "да"
-- "нет"
-- business phrases with bank/account/debtor terms.
+Case:
+- “I have FL”
+- “how long will it take?”
 
-============================================================
-TASK 8 — Tests
-============================================================
-
-Add regression tests:
-
-1. False positive:
-Input:
-"здравствуйте, у меня ЮЛ должник\nнужен счет"
 Expected:
-- debtor_type=legal_entity
-- bank_selection accepted
-- direct_bank_objection rejected with reason missing_required_terms
-- bonus_interest rejected with reason missing_required_terms
-- active_scenario=bank_selection_yul
+- the answer discusses timing/process only;
+- it does not repeat tariff blocks;
+- validator does not return `missing_fl_tariff_details`.
 
-2. Yes answer:
-Input:
-"да"
-with last_bot_question/offer="Хотите подобрать банк под ваш случай?"
-Expected:
-- no semantic intents
-- yes_to_offer_bank_selection
-- active_scenario switches to bank_selection_yul if debtor_type known, otherwise asks ЮЛ/ФЛ
+======================================================================
+TASK 5 — Reduce repair drift and make repair minimal
+======================================================================
 
-3. Topic switch after objection:
-Previous active=direct_bank_objection
-Input:
-"окей давайте\nу меня ЮЛ"
-Expected:
-- switch to bank_selection_yul
-- no forced_scenarios direct_bank_objection
-- no repeated value proposition
+Problem
 
-4. Short confirm:
-Input:
-"давайте"
-Expected:
-- confirm/continue, not small_talk/direct_bank_objection
+Repair sometimes “fixes” validation formally but makes the reply worse:
+- adds an irrelevant bank;
+- repeats previously stated facts;
+- expands the answer far beyond the user’s question.
 
-5. Actual direct objection still works:
-Input:
-"а в чем выгода через вас работать? я же могу напрямую в банк пойти"
-Expected:
-- direct_bank_objection accepted via regex/exact
-- forced KB benefits
-- value proposition reply
+Example:
+The user asked about Uralsib and timing, but after repair the answer added an unrelated TKB block.
 
-6. Actual bonus still works:
-Input:
-"какой процент годовых?"
+What to do
+
+5.1 Repair should fix only the concrete error
+
+The repair prompt must include:
+- original user question;
+- original model answer;
+- validation error;
+- strict instruction:
+
+“Fix only the specified validation issue.
+Do not change the topic.
+Do not add banks or tariffs the user did not ask about.
+Do not expand the answer unnecessarily.”
+
+5.2 Add a validator against repair topic drift
+
+After repair, check:
+- whether new banks appeared that were not part of the original context;
+- whether new topics were introduced;
+- whether the response became much longer without reason;
+- whether near-duplicate repetition appeared.
+
+If drift is found:
+- reject the repair;
+- use responder retry with corrected manager_context.
+
+Acceptance
+
+Repair for:
+- “what about Uralsib, and how long does it take?”
+
+must not add a new TKB block if the user did not ask for it.
+
+======================================================================
+TASK 6 — Audit and stabilize KB facts for FL / T-Bank / Uralsib
+======================================================================
+
+Problem
+
+Dialogs show potentially contradictory facts:
+- in some places the main FL working option is only TKB;
+- elsewhere the bot mentions TKB and Uralsib;
+- elsewhere it claims Tinkoff/T-Bank exists for FL;
+- escalation to T-Bank was emitted with the wrong debtor type.
+
+What to do
+
+Audit the current KB for:
+
+1. `bank_selection_fl`
+2. `tkb_fl_conditions`
+3. `uralsib_fl_conditions`
+4. `tbank_fl_conditions` or equivalent
+5. active/paused status of T-Bank for FL
+6. tariffs for FL banks
+7. timelines for FL banks
+
+Requirement
+
+If the KB contains ambiguous or conflicting chunks:
+- fix the KB itself;
+- do not hide the inconsistency with prompt tricks.
+
+Acceptance
+
+After the audit, the bot must answer consistently:
+- which banks are available for FL;
+- what Uralsib offers for FL;
+- whether T-Bank is available for FL;
+- which tariffs are truly confirmed by the KB.
+
+======================================================================
+TASK 7 — Fix escalation metadata and delivery status reporting
+======================================================================
+
+Problem
+
+Escalation for `ready_to_open` fires, but:
+- metadata may contain the wrong debtor type;
+- Bitrix returns 401 ACCESS_DENIED;
+- the service still logs `Escalation completed`.
+
+What to do
+
+7.1 Metadata
+
+Escalation must take:
+- selected_bank;
+- debtor_type;
+- deal_stage;
+- client_intent;
+
+from the current DealState.
+
+7.2 Delivery status
+
+Separate these statuses clearly:
+- handoff_triggered
+- crm_lookup_failed
+- dialog_upload_failed
+- manager_message_failed
+- manager_notified=false
+
+Do NOT log:
+- `Escalation completed`
+
+if:
+- Bitrix deal lookup failed;
+- dialog file upload failed;
+- manager message was not delivered.
+
+7.3 Final escalation status
+
+Example:
+{
+  "handoff_triggered": true,
+  "crm_delivery_status": "failed",
+  "manager_notified": false,
+  "failure_reason": "bitrix_access_denied"
+}
+
+Acceptance
+
+When Bitrix returns 401:
+- logs clearly show the handoff trigger happened;
+- logs clearly show manager delivery failed;
+- there is no false `completed` message.
+
+======================================================================
+TASK 8 — Fix startup race / missing jobs table
+======================================================================
+
+Problem
+
+After restart:
+- `sqlite3.OperationalError: no such table: jobs`
+
+The worker starts polling the queue before the database schema is ready or before the correct database is mounted/connected.
+
+What to do
+
+1. Verify startup ordering:
+   - initialize DB;
+   - run migrations or `create_all`;
+   - only then start worker loop.
+
+2. If SQLite is used in dev:
+   - guarantee schema initialization before `fetch_and_lock_jobs`.
+
+3. If the table is missing:
+   - fail clearly during startup;
+   - do not start the worker in a half-broken state.
+
+Acceptance
+
+Running:
+- `python run.py`
+
+on a clean local DB:
+- must not fail with `no such table: jobs`;
+- tables must be created before the worker loop starts.
+
+======================================================================
+TASK 9 — Fix primary chunk selection when relevant context exists
+======================================================================
+
+Problem
+
+In many relevant cases, logs show:
+- `primary_chunks=0`
+
+even though raw chunks are found.
+
+This weakens the responder and gives the model a mixed, less structured context.
+
+What to do
+
+Make primary chunk selection more meaningful.
+
+Examples
+
+If current intent = `timelines`
+and bank_focus = TKB
+and debtor_type = FL
+
+primary chunks should include:
+- `internal_ops_timelines`
+- `tkb_fl_conditions`
+
+If current intent = `interest_or_bonus`
+primary chunks should include:
+- `au_bonus_question`
+- `interest_on_balance`
+- relevant partner benefits if applicable
+
+If current intent = `specific_bank_conditions`
+and bank_focus = Uralsib
+and debtor_type = FL
+
+primary chunks should include:
+- `uralsib_fl_conditions`
+
+Acceptance
+
+RAGTrace for key queries must show:
+- `primary_chunks > 0`
+
+and these chunks must be truly relevant to the current user question.
+
+======================================================================
+TASK 10 — Add golden dialog tests for all observed failures
+======================================================================
+
+Add end-to-end golden dialog tests.
+
+Dialog A — FL context must not drift to YUL
+
+User:
+- “for physical persons, which tariffs and banks?”
+- “only one bank?”
+- “no, which banks for physical persons?”
+
 Expected:
-- bonus_interest accepted
-- not bank_selection
+- the conversation stays FL-only;
+- YUL facts do not appear;
+- replies are factually consistent.
+
+Dialog B — Bonus intent overrides direct objection
+
+User:
+- “why do I need intermediaries?”
+- “what other bonuses are available for AU?”
+
+Expected:
+- the second answer is about bonuses for AU;
+- no repeated generic value proposition.
+
+Dialog C — Repetition complaint
+
+User:
+- “why are you repeating yourself?”
+
+Expected:
+- complaint-aware answer;
+- no business fact repetition.
+
+Also test typo form:
+- “why are you repeeting yourself?” equivalent Russian typo form
+
+Dialog D — Timeline validation
+
+User:
+- “I have FL”
+- “how long will it take?”
+
+Expected:
+- answer about timing;
+- no repeated tariff block;
+- validator does not demand tariff details.
+
+Dialog E — Ready-to-open escalation metadata
+
+User:
+- “I want to open for a physical person in Tinkoff, which documents are needed?”
+
+Expected:
+- handoff triggered;
+- selected_bank and debtor_type correct;
+- no wrong YUL metadata.
+
+Dialog F — Bitrix failure reporting
+
+Mock Bitrix 401.
+
+Expected:
+- `handoff_triggered=true`;
+- `manager_notified=false`;
+- no false `Escalation completed`.
+
+Dialog G — Startup DB
+
+Fresh DB + `python run.py`.
+
+Expected:
+- no `no such table: jobs`.
+
+======================================================================
+TASK 11 — Do not change the project strategy
+======================================================================
+
+Do not:
+- turn the system into a set of isolated regex patches;
+- replace the current LLM-led responder with hardcoded templates;
+- hide problems behind generic fallback replies.
+
+Fix:
+- state management;
+- scenario switching;
+- intent-aware validation;
+- repair discipline;
+- escalation reliability;
+- KB consistency.
+
+======================================================================
+Definition of Done
+======================================================================
+
+The task is complete only when:
+
+1. FL/YUL context does not drift in replies or escalation metadata.
+2. A new explicit intent overrides stale active scenarios.
+3. Repetition complaints are handled as complaints, not as a new sales intent.
+4. A timing question does not force tariff repetition.
+5. Repair does not drift into irrelevant topics.
+6. Escalation metadata is correct.
+7. Bitrix delivery failures are not falsely marked as completed.
+8. Startup no longer crashes because the `jobs` table is missing.
+9. Primary chunks are actually selected for key intents.
+10. All new golden dialog tests pass.
+
+Final emphasis:
+The 70B model is already strong enough.
+The next quality gain must come from fixing orchestration around it:
+- stronger DealState;
+- better scenario override rules;
+- intent-aware validation;
+- disciplined repair;
+- reliable escalation;
+- consistent KB grounding.

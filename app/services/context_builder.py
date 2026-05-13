@@ -473,6 +473,7 @@ async def build_conversation_context(
         "last_answer_summary": slots.get("_last_answer_summary"),
         "sales_context": slots.get("_sales_context"),
         "_introduced": bool(slots.get("_introduced")),
+        "active_scenario": slots.get("_active_scenario"),
     }
 
     fact_pack = build_fact_pack(user_text, memory, current_entities, signals=signals)

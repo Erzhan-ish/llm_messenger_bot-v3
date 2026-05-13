@@ -194,7 +194,7 @@ class TestDecidePolicyBankSwitch(unittest.TestCase):
         self.assertEqual(result["decision"], "switch")
         self.assertEqual(result["active_scenario"], "bank_selection_yul")
         self.assertTrue(result["scenario_switch_allowed"])
-        self.assertIn("bank_pricing_intent", result["reason"])
+        self.assertIn("bank_switch", result["reason"])
 
     def test_allowed_stages_to_uralsib_when_named(self):
         result = _policy(

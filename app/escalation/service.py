@@ -67,17 +67,36 @@ def _format_request_text(need: str | None, slots: dict) -> str:
             "ФИН.ОЗДОРОВЛЕНИЕ": "финансовое оздоровление",
         }.get(v, v.lower())
 
+    # DealState fields — selected_bank and product from sales stage memory
+    _deal_state = (slots or {}).get("_deal_state") or {}
+    _ds_bank = _deal_state.get("selected_bank") or ""
+    _ds_product = _deal_state.get("selected_product") or ""
+
+    # Upgrade "Консультация" to "Открытие счёта" when DealState says ready_to_open
+    if _deal_state.get("deal_stage") in ("ready_to_open", "collecting_documents", "handoff"):
+        if base == "Консультация":
+            base = "Открытие счёта"
+
     details: list[str] = []
     if debtor:
         details.append(f"для {_debtor_label(debtor)}")
+    elif _deal_state.get("debtor_type"):
+        _dt = _deal_state["debtor_type"]
+        details.append(f"для {_debtor_label(_dt) if _dt in ('ЮЛ', 'ФЛ', 'ИП') else _dt.lower()}")
     if account:
         details.append(_account_label(account))
     if procedure:
         details.append(f"процедура: {_procedure_label(procedure)}")
+    elif _deal_state.get("procedure_stage"):
+        details.append(f"процедура: {_deal_state['procedure_stage'].lower()}")
     if docs_ready is True:
         details.append("документы готовы")
     elif docs_ready is False:
         details.append("документы не готовы")
+    if _ds_bank and not any(_ds_bank.lower() in d.lower() for d in details):
+        details.append(f"банк: {_ds_bank}")
+    if _ds_product and _ds_product not in ("bankruptcy_account", ""):
+        details.append(f"продукт: {_ds_product}")
 
     if details:
         text = f"{base}, " + ", ".join(details)
@@ -211,6 +230,17 @@ async def escalate_to_manager(session_id: int):
     # 2️⃣ Слоты / ИНН
     slots = await get_slots(session.id)
     inn = (slots or {}).get("inn")
+    _deal_state = (slots or {}).get("_deal_state") or {}
+    logger.info(
+        "EscalationMetadata | session_id={} | external_user_id={} | reason={}"
+        " | selected_bank={} | debtor_type={} | deal_stage={} | source=telegram",
+        session.id,
+        external_user_id,
+        (slots or {}).get("_escalation_reason", "unknown"),
+        _deal_state.get("selected_bank"),
+        _deal_state.get("debtor_type"),
+        _deal_state.get("deal_stage"),
+    )
     duty_manager_id = settings.DUTY_MANAGER_ID
 
     # 2.1 Need fallback

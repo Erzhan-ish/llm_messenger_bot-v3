@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str
 
     # LLM
-    LLM_PROVIDER: str = Field(default="stub")  # stub | ollama | timeweb
+    LLM_PROVIDER: str = Field(default="stub")  # stub | ollama | timeweb | fireworks
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "qwen2.5:7b-instruct"
     OLLAMA_ANALYZER_MODEL: str = "qwen2.5:7b-instruct"
@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     TIMEWEB_AI_BASE_URL: str = ""
     TIMEWEB_AI_MODEL: str = "deepseek-v3"
     TIMEWEB_AI_ANALYZER_MODEL: str = ""  # falls back to TIMEWEB_AI_MODEL if empty
+
+    # Fireworks AI (OpenAI-compatible)
+    FIREWORKS_API_KEY: str = ""
+    FIREWORKS_BASE_URL: str = "https://api.fireworks.ai/inference/v1"
+    FIREWORKS_MODEL: str = "llama-v3p3-70b-instruct"
 
     # Provider-aware token budgets
     TIMEWEB_RENDER_MAX_TOKENS: int = 3000
@@ -60,6 +65,11 @@ class Settings(BaseSettings):
     TIMEWEB_BRAIN_MAX_TOKENS: int = 1000
     OLLAMA_BRAIN_MAX_TOKENS: int = 1000
     OLLAMA_NUM_CTX: int = 6144
+    FIREWORKS_RENDER_MAX_TOKENS: int = 3000
+    FIREWORKS_ANALYZER_MAX_TOKENS: int = 1500
+    FIREWORKS_ENRICHMENT_MAX_TOKENS: int = 1000
+    FIREWORKS_ESCALATION_MAX_TOKENS: int = 2000
+    FIREWORKS_BRAIN_MAX_TOKENS: int = 1000
 
     # MVP stability switches
     ENABLE_BACKGROUND_ANALYSIS: bool = False
@@ -123,9 +133,13 @@ settings = Settings()
 
 
 def llm_token_budget(kind: str) -> int:
-    """Return provider-aware token budget for RENDER/ANALYZER/ENRICHMENT/ESCALATION."""
+    """Return provider-aware token budget for RENDER/ANALYZER/ENRICHMENT/ESCALATION/BRAIN."""
     k = (kind or "RENDER").upper()
     provider = (getattr(settings, "LLM_PROVIDER", "stub") or "stub").lower()
-    prefix = "OLLAMA" if provider == "ollama" else "TIMEWEB"
-    default = 600 if provider == "ollama" else 1500
+    if provider == "ollama":
+        prefix, default = "OLLAMA", 600
+    elif provider == "fireworks":
+        prefix, default = "FIREWORKS", 1500
+    else:
+        prefix, default = "TIMEWEB", 1500
     return int(getattr(settings, f"{prefix}_{k}_MAX_TOKENS", default))

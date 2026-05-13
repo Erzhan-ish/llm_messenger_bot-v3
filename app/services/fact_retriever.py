@@ -571,6 +571,12 @@ async def retrieve_context_for_brain(
         queries.append("преимущества работы через агентство выгода партнер")
         queries.append("почему через нас а не напрямую в банк бонус вознаграждение")
 
+    # Forced queries for ready_to_open — guarantee docs/requirements coverage (§7)
+    if forced_scenarios and "ready_to_open" in forced_scenarios:
+        queries.append("документы требования ИНН судебный акт арбитражный управляющий")
+        if bank_focus:
+            queries.append(f"{bank_focus} документы требования открытие счёт")
+
     try:
         from typing import Tuple
         bank_hints = _extract_bank_hints(bank_focus or user_text)
@@ -711,6 +717,79 @@ async def retrieve_context_for_brain(
                     })
             except Exception:
                 logger.exception("forced direct_bank_objection retrieval failed (ignored)")
+
+        # Forced primary docs/conditions chunks for ready_to_open (§7)
+        if forced_scenarios and "ready_to_open" in forced_scenarios:
+            try:
+                si = kb.scenario_index
+                _bank_lower = (bank_focus or "").lower()
+                _ct_lower = (client_type or "").lower()
+
+                # Map bank+debtor_type to relevant scenario IDs
+                if "ткб" in _bank_lower:
+                    _target_scens = ["tkb_yul_conditions"] if "юл" in _ct_lower else ["tkb_fl_conditions"]
+                elif "альфа" in _bank_lower:
+                    _target_scens = ["alfabank_yul_conditions"]
+                elif "уралсиб" in _bank_lower:
+                    _target_scens = ["uralsib_yul_conditions"] if "юл" in _ct_lower else ["uralsib_fl_conditions"]
+                else:
+                    _target_scens = []
+
+                for _sid in _target_scens:
+                    for ch in si.by_scenario.get(_sid, [])[:5]:
+                        if getattr(ch, "type", "") in ("docs", "constraint"):
+                            _t = (getattr(ch, "text", "") or "")[:300]
+                            _primary_kb_facts.append({
+                                "type": getattr(ch, "type", ""),
+                                "bank": getattr(ch, "bank", None),
+                                "fact": getattr(ch, "fact", None),
+                                "text": _t,
+                                "_forced_from": _sid,
+                            })
+
+                # Also lift docs/constraint chunks already in top_chunks for the bank
+                for ch in top_chunks:
+                    if getattr(ch, "type", "") not in ("docs", "constraint"):
+                        continue
+                    _cbank = (getattr(ch, "bank", "") or "").lower()
+                    if _bank_lower and (_bank_lower not in _cbank and _cbank not in _bank_lower):
+                        continue
+                    _t = (getattr(ch, "text", "") or "")[:300]
+                    if not any(f.get("text") == _t for f in _primary_kb_facts):
+                        _primary_kb_facts.append({
+                            "type": getattr(ch, "type", ""),
+                            "bank": getattr(ch, "bank", None),
+                            "fact": getattr(ch, "fact", None),
+                            "text": _t,
+                            "_forced_from": "ready_to_open_top",
+                        })
+            except Exception:
+                logger.exception("forced ready_to_open retrieval failed (ignored)")
+
+        # §7 — primary_chunks fix: when active scenario + bank known, boost matching
+        # scenario chunks to primary so LLM always sees them (fixes primary_chunks=0 issue).
+        _active_scenario = memory.get("active_scenario") or memory.get("_active_scenario") or ""
+        _bank_known = bool(bank_focus)
+        if _active_scenario and _bank_known and not _primary_kb_facts:
+            try:
+                si = kb.scenario_index
+                _scen_chunks = si.by_scenario.get(_active_scenario, [])
+                _bank_lower_s = (bank_focus or "").lower()
+                for ch in _scen_chunks[:8]:
+                    _cbank = (getattr(ch, "bank", "") or "").lower()
+                    if _bank_lower_s and _bank_lower_s not in _cbank and _cbank not in _bank_lower_s:
+                        continue
+                    _t = (getattr(ch, "text", "") or "")[:300]
+                    if not any(f.get("text") == _t for f in _primary_kb_facts):
+                        _primary_kb_facts.append({
+                            "type": getattr(ch, "type", ""),
+                            "bank": getattr(ch, "bank", None),
+                            "fact": getattr(ch, "fact", None),
+                            "text": _t,
+                            "_forced_from": f"active_scenario:{_active_scenario}",
+                        })
+            except Exception:
+                logger.exception("active scenario primary boost failed (ignored)")
 
         dropped = max(0, len(ranked) - 14)
         _sid = session_id if session_id is not None else memory.get("session_id")

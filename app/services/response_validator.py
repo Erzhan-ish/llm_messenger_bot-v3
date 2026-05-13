@@ -13,6 +13,27 @@ _STOP_WORDS = {
     "вы", "с", "к", "из", "же", "то", "так", "уже", "ещё", "при", "без",
 }
 
+# Manager/handoff reference required when deal_stage=ready_to_open
+_MANAGER_REF_RE = re.compile(
+    r"(менеджер|передам|передаём|передаем|возьм[её]м\s+в\s+работу|берём\s+в\s+работу"
+    r"|берем\s+в\s+работу|кейс|проверим|помо[жг]\w*|оформим|запустим"
+    r"|начн[её]м|подключ\w*\s+менеджера|escalat|handoff)",
+    re.I | re.U,
+)
+
+# Replies that are ONLY tariff/pricing content — forbidden when ready_to_open
+_TARIFF_ONLY_RE = re.compile(
+    r"^[^.!?\n]*(?:открытие|ведение|тариф|руб\.?\s*\/?\s*мес|₽)[^.!?\n]*[.!?]?\s*$",
+    re.I | re.U,
+)
+
+# Docs / documents words for "что требуется" validation
+_DOCS_WORDS_RE = re.compile(
+    r"(документ|инн|данные|ау|управляющ|судебный\s+акт|определение\s+суда"
+    r"|процедур|подготовить|прислать|передать|требуется|нужн)",
+    re.I | re.U,
+)
+
 # Паттерн тарифных цифр (800, 2800, 3500, 2090, 1600) в контексте стоимости
 _TARIFF_NUMBERS_RE = re.compile(r"\b(800|2800|3500|2090|1600|1500)\s*руб", re.I | re.U)
 
@@ -175,6 +196,17 @@ def validate_reply(
 
     reply_lower = reply.lower()
 
+    # DealState: ready_to_open — reply must reference manager/handoff
+    _deal_state = slots.get("_deal_state") or {}
+    if _deal_state.get("deal_stage") == "ready_to_open" and not _deal_state.get("handoff_needed") is False:
+        if not _MANAGER_REF_RE.search(reply):
+            return {"is_valid": False, "reason": "ready_to_open_no_manager_reference"}
+
+    # DealState: docs_intent — reply must contain docs/data info
+    if _deal_state.get("next_manager_move") == "explain_documents":
+        if not _DOCS_WORDS_RE.search(reply):
+            return {"is_valid": False, "reason": "docs_intent_no_docs_in_reply"}
+
     # Scenario playbook: forbidden phrases from _forbidden_actions slot
     for _fp in (slots.get("_forbidden_actions") or []):
         if _fp.lower() in reply_lower:
@@ -280,10 +312,7 @@ def validate_reply(
             if _ENDS_WITH_QUESTION_RE.search(reply.strip()):
                 return {"is_valid": False, "reason": "unnecessary_question"}
         elif question_policy == "required":
-            has_question = _ENDS_WITH_QUESTION_RE.search(reply.strip())
-            has_data_request = _DATA_REQUEST_RE.search(reply)
-            if not has_question and not has_data_request:
-                return {"is_valid": False, "reason": "missing_required_question"}
+            pass  # A natural reply does not have to end with a question
 
     # Answer contract checks
     if answer_contract:

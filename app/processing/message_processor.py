@@ -119,8 +119,15 @@ _OUT_OF_DOMAIN_REPLY = (
 )
 
 
-def should_force_handoff(user_text: str, brain_result: dict, memory: dict) -> bool:
+def should_force_handoff(user_text: str, brain_result: dict, memory: dict, slots: Optional[dict] = None) -> bool:
     """Проверить, нужно ли принудительно поднять handoff независимо от решения LLM."""
+    # DealState says ready_to_open — always force handoff
+    _ds = (slots or {}).get("_deal_state") or {}
+    if _ds.get("handoff_needed"):
+        active_task = (memory or {}).get("active_task") or {}
+        if active_task.get("type") not in ("transfer_fee_quote", "bank_comparison", "compare"):
+            return True
+
     if not _OPEN_ACCOUNT_EXPLICIT_RE.search(user_text or ""):
         return False
     # Информационный вопрос ("где быстрее всего счет открыть?") — не handoff
@@ -514,6 +521,28 @@ async def process_message(message):
                 session.id, _r["intent"], _r["score"], _r["matched_anchor"], _r["threshold"],
             )
 
+        # DealState — detect sales stage transition and persist in slots
+        from app.processing.deal_state import update_deal_state
+        _deal_state_before = (slots.get("_deal_state") or {}).get("deal_stage")
+        _deal_state = update_deal_state(slots, user_text, intent_signals=_intent_signals)
+        _deal_stage_after = _deal_state.get("deal_stage")
+        if _deal_state.get("deal_stage") or _deal_state.get("handoff_needed"):
+            logger.info(
+                "DealState | session={} | stage_before={} | stage_after={}"
+                " | selected_bank={} | debtor_type={} | client_intent={}"
+                " | next_move={} | handoff={}",
+                session.id, _deal_state_before, _deal_stage_after,
+                _deal_state.get("selected_bank"), _deal_state.get("debtor_type"),
+                _deal_state.get("client_intent"), _deal_state.get("next_manager_move"),
+                _deal_state.get("handoff_needed"),
+            )
+        if _deal_state.get("handoff_needed"):
+            logger.info(
+                "Escalation | session={} | needed=true | reason={} | selected_bank={} | debtor_type={}",
+                session.id, _deal_state.get("deal_stage", "ready_to_open"),
+                _deal_state.get("selected_bank"), _deal_state.get("debtor_type"),
+            )
+
         # Build trace context — links all LLM calls for this message to one trace_id
         from app.services.llm_trace import make_trace_id
         _trace_ctx: dict = {
@@ -570,8 +599,25 @@ async def process_message(message):
             _forced_scenarios = _catalog_kb.get("forced_scenarios") or None
         else:
             _forced_scenarios = None
+
+        # Extend forced_scenarios for ready_to_open DealState — guarantee docs coverage (§7)
+        if (
+            _deal_state.get("deal_stage") == "ready_to_open"
+            and not (_is_value_obj_signal or _is_objection_followup)
+        ):
+            _forced_scenarios = list(_forced_scenarios or []) + ["ready_to_open"]
+
+        # Contextual KB query expansion — enriches short/referential queries
+        from app.processing.kb_query_expander import expand_kb_query
+        _kb_query = expand_kb_query(user_text, slots, recent_dialog)
+        if _kb_query != user_text:
+            logger.info(
+                "KBQueryExpand | session={} | original={!r} | expanded={!r}",
+                session.id, user_text[:60], _kb_query[:80],
+            )
+
         kb_result = await retrieve_context_for_brain(
-            user_text, memory, current_entities,
+            _kb_query, memory, current_entities,
             forced_scenarios=_forced_scenarios,
             session_id=session.id,
             trace_id=_trace_ctx["trace_id"],
@@ -604,16 +650,6 @@ async def process_message(message):
             scenario_policy.get("scores", {}),
         )
         slots["_active_scenario"] = scenario_policy["active_scenario"]
-
-        # TASK 6 — Multi-intent: write required_next_step from policy to slots so playbook can serve it
-        from app.processing.scenario_playbook import SLOT_NEXT_STEP
-        _rns = scenario_policy.get("required_next_step")
-        if _rns:
-            slots[SLOT_NEXT_STEP] = _rns
-            logger.info(
-                "MultiIntent | session={} | scenario={} | required_next_step={}",
-                session.id, scenario_policy["active_scenario"], _rns,
-            )
 
         # Re-fetch locked scenario facts when they dropped out of RAG results
         if scenario_policy["decision"] in ("keep_active", "compare"):
@@ -700,11 +736,25 @@ async def process_message(message):
         # 3. Pause phrase (human timing)
         await _maybe_send_pause_phrase(session.id, message.channel, message.external_user_id, "default", slots)
 
-        # 4. Call brain (first pass)
-        brain_result = await run_conversation_brain(
-            user_text, recent_dialog, memory, kb_facts, fact_pack=fact_pack,
+        # 4. LLM ConversationResponder — natural manager-style primary responder
+        from app.services.conversation_responder import (
+            responder_to_brain_result,
+            run_conversation_responder,
+        )
+        _candidate_intents = list(_intent_signals.get("intents") or [])
+        _candidate_scenarios = [m.get("scenario_id", "") for m in scenario_matches[:3]]
+        _responder_result = await run_conversation_responder(
+            user_text=user_text,
+            recent_dialog=recent_dialog,
+            known_slots=slots,
+            candidate_intents=_candidate_intents,
+            candidate_scenarios=_candidate_scenarios,
+            kb_facts=kb_facts,
+            dialog_state=str(dialog_state) if dialog_state else None,
+            fact_pack=fact_pack,
             trace_ctx=_trace_ctx,
         )
+        brain_result = responder_to_brain_result(_responder_result, known_slots=slots)
 
         # 5. Handle stop action — only truly stop if it's an end-dialog phrase
         if brain_result.get("stop") or brain_result.get("action") == "stop":
@@ -755,23 +805,32 @@ async def process_message(message):
                     trace_ctx={**_trace_ctx, "phase": "brain_tool"},
                 )
 
-        # 6.5. Code-level handoff override for explicit open-account phrases
-        if should_force_handoff(user_text, brain_result, memory):
-            logger.info("Session {} | Force handoff override for explicit open phrase", session.id)
+        # 6.5. Code-level handoff override for explicit open-account phrases / DealState
+        if should_force_handoff(user_text, brain_result, memory, slots=slots):
+            _force_reason = (slots.get("_deal_state") or {}).get("deal_stage") or "ready_to_open"
+            logger.info(
+                "Session {} | Force handoff override | reason={} | deal_state_handoff={}",
+                session.id, _force_reason,
+                (slots.get("_deal_state") or {}).get("handoff_needed"),
+            )
             brain_result["action"] = "handoff"
-            brain_result["handoff"] = {"needed": True, "reason": "ready_to_open"}
+            brain_result["handoff"] = {"needed": True, "reason": _force_reason}
 
         # 7. Handle brain handoff action
         action = brain_result.get("action") or "answer"
         handoff = brain_result.get("handoff") or {}
 
         if action == "handoff" or handoff.get("needed"):
-            # Accept handoff if: hard consent regex, explicit open phrase, or forced override
-            is_consent = (
+            # Hard consent: explicit consent phrase / open phrase → suppress bot after handoff
+            _is_hard_consent = bool(
                 slots.get("_had_consent")
                 or _CONSENT_HARD_RE.search(user_text)
                 or _OPEN_ACCOUNT_EXPLICIT_RE.search(user_text)
             )
+            # DealState consent: ready_to_open detected — send reply but keep bot active for follow-ups
+            _is_deal_state_consent = bool((slots.get("_deal_state") or {}).get("handoff_needed"))
+            is_consent = _is_hard_consent or _is_deal_state_consent
+
             if is_consent:
                 bridge_reply = cleanup_text(brain_result.get("reply") or "")
                 if not bridge_reply:
@@ -781,7 +840,9 @@ async def process_message(message):
                 if current_entities.get("mentioned_bank"):
                     slots["_last_bank"] = current_entities["mentioned_bank"]
                 slots.pop("_had_consent", None)
-                slots["_escalation_sent"] = True
+                # Hard consent suppresses bot; DealState consent keeps bot active for follow-up questions
+                if _is_hard_consent:
+                    slots["_escalation_sent"] = True
                 await set_slots(session.id, slots)
                 await send_bot(
                     session, message.channel, message.external_user_id, bridge_reply, slots,
@@ -876,11 +937,18 @@ async def process_message(message):
                         "generic_fallback_for_clear_intent: Клиент задал чёткий вопрос. "
                         "Не используй 'Уточните вопрос' — ответь по сути: банки, тарифы, документы или выгода."
                     )
-                elif repair_hint == "missing_required_question":
+                elif repair_hint == "ready_to_open_no_manager_reference":
                     repair_hint = (
-                        "missing_required_question: answer_contract.question_policy=required. "
-                        "В ответе отсутствует уточняющий вопрос. "
-                        "Добавь вопрос из answer_contract.next_question или задай уточнение по теме."
+                        "ready_to_open_no_manager_reference: Клиент готов открыть счёт. "
+                        "Подтверди что берём в работу, скажи что передаю кейс менеджеру. "
+                        "Назови минимум нужных данных: ИНН должника, данные АУ, документы процедуры. "
+                        "Верни handoff.needed=true."
+                    )
+                elif repair_hint == "docs_intent_no_docs_in_reply":
+                    repair_hint = (
+                        "docs_intent_no_docs_in_reply: Клиент спросил что от него требуется. "
+                        "Ответь конкретно: ИНН должника, данные арбитражного управляющего, "
+                        "судебный акт о введении процедуры. Скажи что уже передаю кейс менеджеру."
                     )
                 repaired = await conversation_brain_repair(
                     previous_reply=reply,
@@ -905,23 +973,49 @@ async def process_message(message):
                         logger.info("Session {} | Repaired reply accepted len={}", session.id, len(reply))
                     else:
                         logger.warning(
-                            "Session {} | Repaired reply invalid: {} — using context fallback",
+                            "Session {} | Repaired reply invalid: {} — retrying responder",
                             session.id, repaired_val["reason"],
                         )
-                        reply = _build_context_fallback(
-                            fact_pack, current_entities, slots,
-                            scenario_facts=scenario_facts, signals=signals,
-                        )
+                        # Retry responder once with a cleaner compact context hint
+                        try:
+                            _retry_result = await run_conversation_responder(
+                                user_text=user_text,
+                                recent_dialog=recent_dialog,
+                                known_slots=slots,
+                                candidate_intents=_candidate_intents,
+                                candidate_scenarios=_candidate_scenarios,
+                                kb_facts=kb_facts,
+                                dialog_state=str(dialog_state) if dialog_state else None,
+                                fact_pack={**fact_pack, "_retry_hint": repaired_val["reason"]},
+                                trace_ctx={**_trace_ctx, "phase": "responder_retry"},
+                            )
+                            _retry_reply = cleanup_text(_retry_result.get("reply") or "")
+                        except Exception:
+                            _retry_reply = ""
+                        if _retry_reply and _retry_reply.strip():
+                            reply = _retry_reply
+                            logger.info("Session {} | Retry responder accepted len={}", session.id, len(reply))
+                        else:
+                            reply = _build_context_fallback(
+                                fact_pack, current_entities, slots,
+                                scenario_facts=scenario_facts, signals=signals,
+                            )
                 else:
                     reply = ""
 
         # 10. Fallback if still no reply
         if not reply or not reply.strip():
-            logger.warning("Session {} | Brain returned no reply — using context fallback", session.id)
-            reply = _build_context_fallback(
-                fact_pack, current_entities, slots,
-                scenario_facts=scenario_facts, signals=signals,
-            )
+            _ds_fb = slots.get("_deal_state") or {}
+            if _ds_fb.get("deal_stage") == "ready_to_open" or _ds_fb.get("handoff_needed"):
+                # Handoff fallback — generic fallback is forbidden for ready_to_open
+                logger.warning("Session {} | No reply for ready_to_open — using handoff fallback", session.id)
+                reply = "Понял, передам кейс менеджеру. Для старта подготовьте ИНН должника и документы по процедуре."
+            else:
+                logger.warning("Session {} | Brain returned no reply — using context fallback", session.id)
+                reply = _build_context_fallback(
+                    fact_pack, current_entities, slots,
+                    scenario_facts=scenario_facts, signals=signals,
+                )
 
         # 11. Dynamic greeting injection (only for first turn)
         if (

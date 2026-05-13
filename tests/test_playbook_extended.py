@@ -1,10 +1,10 @@
 """Extended playbook regression tests for new scenarios.
 
 Covers plan.txt requirements:
-  1. direct_bank_objection: initial and follow-up replies
-  2. bank_selection_yul_low_cost: initial listing, follow-up "только эти оба?"
-  3. Tariff comparison replies in bank_selection_yul / bank_pricing_yul
-  4. RAGTrace session_id not None
+  1. direct_bank_objection: enrich with constraints — LLM writes the answer naturally
+  2. bank_selection_yul_low_cost: enrich with pricing context
+  3. Tariff queries in bank_selection_yul / bank_pricing_yul: enrich with constraints
+  4. Pricing helpers: _build_low_cost_reply, _build_tariff_compare_reply
   5. Ollama num_predict respects configured budget
 
 Run:
@@ -45,36 +45,28 @@ def _fake_pricing() -> dict:
 
 
 # ============================================================================
-# 1. direct_bank_objection — initial
+# 1. direct_bank_objection — enrich with constraints (LLM answers naturally)
 # ============================================================================
 class TestDirectBankObjectionInitial(unittest.TestCase):
     def _result(self, text="а в чем выгода через вас работать"):
         return _playbook(text, active="direct_bank_objection")
 
-    def test_action_is_reply(self):
+    def test_action_is_enrich(self):
         r = self._result()
-        self.assertEqual(r["action"], "reply")
+        self.assertEqual(r["action"], "enrich")
 
-    def test_llm_skipped(self):
+    def test_llm_not_skipped(self):
         r = self._result()
-        self.assertTrue(r["log"]["llm_skipped"])
+        self.assertFalse(r["log"]["llm_skipped"])
 
-    def test_reply_mentions_documents(self):
+    def test_reply_is_none(self):
         r = self._result()
-        reply = r["reply"].lower()
-        self.assertIn("документ", reply)
+        self.assertIsNone(r["reply"])
 
-    def test_reply_mentions_support(self):
+    def test_no_rigid_next_step(self):
         r = self._result()
-        reply = r["reply"].lower()
-        self.assertTrue(
-            "сопровождение" in reply or "коммуникац" in reply,
-            f"Expected 'сопровождение' or 'коммуникац' in: {reply!r}",
-        )
-
-    def test_required_next_step(self):
-        r = self._result()
-        self.assertIn("offer_case_check_or_bank_selection", r["updates"].get(SLOT_NEXT_STEP, ""))
+        # Business scenarios must not impose a rigid next_step — LLM decides
+        self.assertIsNone(r["updates"].get(SLOT_NEXT_STEP))
 
     def test_forbidden_includes_bank_question(self):
         r = self._result()
@@ -88,6 +80,18 @@ class TestDirectBankObjectionInitial(unittest.TestCase):
         r = self._result()
         self.assertTrue(r["updates"][SLOT_KNOWN].get("objection_answered"))
 
+    def test_fact_pack_has_forbidden_phrases(self):
+        r = self._result()
+        fp = r["fact_pack_additions"]
+        self.assertIn("_forbidden_phrases", fp)
+        self.assertTrue(len(fp["_forbidden_phrases"]) > 0)
+
+    def test_fact_pack_no_required_next_step(self):
+        r = self._result()
+        fp = r["fact_pack_additions"]
+        # Rigid required_next_step must not be injected into fact_pack for business scenarios
+        self.assertNotIn("_required_next_step", fp)
+
     def test_phrase_variants(self):
         for phrase in [
             "я же могу напрямую в банк пойти",
@@ -96,30 +100,33 @@ class TestDirectBankObjectionInitial(unittest.TestCase):
         ]:
             with self.subTest(phrase=phrase):
                 r = _playbook(phrase, active="direct_bank_objection")
-                self.assertEqual(r["action"], "reply", f"Expected reply for: {phrase!r}")
+                self.assertEqual(r["action"], "enrich", f"Expected enrich for: {phrase!r}")
 
 
 # ============================================================================
-# 2. direct_bank_objection — follow-up "подробнее?"
+# 2. direct_bank_objection — follow-up phrases
 # ============================================================================
 class TestDirectBankObjectionFollowUp(unittest.TestCase):
-    def test_подробнее_returns_expanded_reply(self):
+    def test_подробнее_returns_enrich(self):
         r = _playbook("подробнее?", active="direct_bank_objection",
                       known={"objection_answered": True})
-        self.assertEqual(r["action"], "reply")
-        reply = r["reply"].lower()
-        self.assertIn("документ", reply)
-        self.assertIn("финмониторинг", reply)
+        self.assertEqual(r["action"], "enrich")
+        self.assertIsNone(r["reply"])
+
+    def test_подробнее_forbidden_constraints_still_set(self):
+        r = _playbook("подробнее?", active="direct_bank_objection",
+                      known={"objection_answered": True})
+        forbidden = r["updates"].get(SLOT_FORBIDDEN) or []
+        self.assertTrue(len(forbidden) > 0, "Expected forbidden constraints in follow-up")
 
     def test_почему_follow_up(self):
         r = _playbook("почему?", active="direct_bank_objection",
                       known={"objection_answered": True})
-        self.assertEqual(r["action"], "reply")
+        self.assertEqual(r["action"], "enrich")
 
     def test_вы_не_ответили(self):
         r = _playbook("вы не ответили", active="direct_bank_objection")
-        self.assertEqual(r["action"], "reply")
-        # Should not ask about banks
+        self.assertEqual(r["action"], "enrich")
         forbidden = r["updates"].get(SLOT_FORBIDDEN) or []
         self.assertTrue(
             any("о каких банках" in f.lower() for f in forbidden),
@@ -133,52 +140,47 @@ class TestDirectBankObjectionFollowUp(unittest.TestCase):
 
 
 # ============================================================================
-# 3. bank_selection_yul_low_cost — initial listing
+# 3. bank_selection_yul_low_cost — enrich with low-cost context
 # ============================================================================
 class TestBankSelectionLowCost(unittest.TestCase):
-    def test_action_is_reply(self):
+    def test_action_is_enrich(self):
         r = _playbook("у меня должник ЮЛ нужен банк подешевле",
                       active="bank_selection_yul_low_cost")
-        self.assertEqual(r["action"], "reply")
+        self.assertEqual(r["action"], "enrich")
 
-    def test_reply_mentions_alfa(self):
+    def test_llm_not_skipped(self):
+        r = _playbook("нужен банк подешевле", active="bank_selection_yul_low_cost")
+        self.assertFalse(r["log"]["llm_skipped"])
+
+    def test_reply_is_none(self):
         r = _playbook("нужен банк подешевле", active="bank_selection_yul_low_cost",
                       fact_pack=_fake_pricing())
-        self.assertIn("Альфа-Банк", r["reply"])
-
-    def test_reply_mentions_tkb(self):
-        r = _playbook("нужен банк подешевле", active="bank_selection_yul_low_cost",
-                      fact_pack=_fake_pricing())
-        self.assertIn("ТКБ", r["reply"])
-
-    def test_reply_mentions_uralsib(self):
-        r = _playbook("нужен банк подешевле", active="bank_selection_yul_low_cost",
-                      fact_pack=_fake_pricing())
-        self.assertIn("Уралсиб", r["reply"])
-
-    def test_reply_includes_alfa_price(self):
-        r = _playbook("нужен банк подешевле", active="bank_selection_yul_low_cost",
-                      fact_pack=_fake_pricing())
-        # Alfa: 800 ₽ opening
-        self.assertIn("800", r["reply"])
+        self.assertIsNone(r["reply"])
 
     def test_known_marks_low_cost_listed(self):
         r = _playbook("нужен банк подешевле", active="bank_selection_yul_low_cost")
         self.assertTrue(r["updates"][SLOT_KNOWN].get("low_cost_listed"))
 
-    def test_required_next_step(self):
+    def test_no_rigid_next_step(self):
         r = _playbook("нужен банк подешевле", active="bank_selection_yul_low_cost")
-        self.assertIn("explain_low_cost", r["updates"].get(SLOT_NEXT_STEP, ""))
+        self.assertIsNone(r["updates"].get(SLOT_NEXT_STEP))
 
-    def test_uralsib_no_price_uses_fallback_text(self):
-        """When Uralsib price not in fact_pack, use 'условия уточняются' text."""
+    def test_fact_pack_pricing_focus(self):
+        r = _playbook("нужен банк подешевле", active="bank_selection_yul_low_cost")
+        self.assertEqual(r["fact_pack_additions"].get("_pricing_focus"), "low_cost")
+
+    def test_forbidden_includes_mogу_sravnit(self):
+        r = _playbook("нужен банк подешевле", active="bank_selection_yul_low_cost")
+        forbidden = r["updates"].get(SLOT_FORBIDDEN) or []
+        self.assertTrue(
+            any("могу сравнить" in f.lower() for f in forbidden),
+            f"Expected 'Могу сравнить?' in forbidden: {forbidden}",
+        )
+
+    def test_action_is_enrich_with_empty_pricing(self):
         r = _playbook("нужен банк подешевле", active="bank_selection_yul_low_cost",
                       fact_pack={"bank_pricing_yul": []})
-        reply = r["reply"].lower()
-        self.assertTrue(
-            "уточн" in reply or "уралсиб" in reply.lower(),
-            f"Expected Uralsib mention or clarification in: {reply!r}",
-        )
+        self.assertEqual(r["action"], "enrich")
 
 
 # ============================================================================
@@ -198,30 +200,27 @@ class TestBankSelectionLowCostMoreOptions(unittest.TestCase):
         return _playbook(phrase, active="bank_selection_yul_low_cost",
                          known={"low_cost_listed": True})
 
-    def test_action_is_reply(self):
+    def test_action_is_enrich(self):
         for phrase in self.FOLLOW_UP_PHRASES:
             with self.subTest(phrase=phrase):
                 r = self._r(phrase)
-                self.assertEqual(r["action"], "reply", f"Expected reply for: {phrase!r}")
+                self.assertEqual(r["action"], "enrich", f"Expected enrich for: {phrase!r}")
 
-    def test_reply_mentions_all_three_banks(self):
+    def test_known_marks_low_cost_listed(self):
         r = self._r("только эти оба?")
-        reply = r["reply"]
-        self.assertIn("Альфа-Банк", reply)
-        self.assertIn("ТКБ", reply)
-        self.assertIn("Уралсиб", reply)
+        self.assertTrue(r["updates"][SLOT_KNOWN].get("low_cost_listed"))
 
-    def test_reply_explains_why_only_two_highlighted(self):
+    def test_no_mogу_sravnit_in_forbidden(self):
         r = self._r("а еще?")
-        reply = r["reply"].lower()
+        forbidden = r["updates"].get(SLOT_FORBIDDEN) or []
         self.assertTrue(
-            "дешевле" in reply or "старт" in reply or "дешевл" in reply,
-            f"Expected price explanation in: {reply!r}",
+            any("могу сравнить" in f.lower() for f in forbidden),
+            f"Expected 'Могу сравнить?' in forbidden: {forbidden}",
         )
 
 
 # ============================================================================
-# 5. Tariff comparison in bank_selection_yul and bank_pricing_yul
+# 5. Tariff queries in bank_selection_yul and bank_pricing_yul — enrich
 # ============================================================================
 class TestTariffComparisonPlaybook(unittest.TestCase):
     COMPARE_PHRASES = [
@@ -242,35 +241,23 @@ class TestTariffComparisonPlaybook(unittest.TestCase):
         return _playbook(phrase, active="bank_selection_yul_low_cost",
                          known={"low_cost_listed": True}, fact_pack=_fake_pricing())
 
-    def test_bank_selection_yul_gives_comparison(self):
+    def test_bank_selection_yul_gives_enrich(self):
         for phrase in self.COMPARE_PHRASES:
             with self.subTest(phrase=phrase):
                 r = self._r_yul(phrase)
-                self.assertEqual(r["action"], "reply", f"Expected reply for: {phrase!r}")
+                self.assertEqual(r["action"], "enrich", f"Expected enrich for: {phrase!r}")
 
-    def test_bank_pricing_yul_gives_comparison(self):
+    def test_bank_pricing_yul_gives_enrich(self):
         for phrase in self.COMPARE_PHRASES:
             with self.subTest(phrase=phrase):
                 r = self._r_pricing(phrase)
-                self.assertEqual(r["action"], "reply", f"Expected reply for: {phrase!r}")
+                self.assertEqual(r["action"], "enrich", f"Expected enrich for: {phrase!r}")
 
-    def test_low_cost_gives_comparison(self):
+    def test_low_cost_gives_enrich(self):
         for phrase in self.COMPARE_PHRASES:
             with self.subTest(phrase=phrase):
                 r = self._r_low_cost(phrase)
-                self.assertEqual(r["action"], "reply", f"Expected reply for: {phrase!r}")
-
-    def test_comparison_includes_alfa(self):
-        r = self._r_yul("какие тарифы")
-        self.assertIn("Альфа-Банк", r["reply"])
-
-    def test_comparison_includes_tkb(self):
-        r = self._r_yul("сравни тарифы")
-        self.assertIn("ТКБ", r["reply"])
-
-    def test_comparison_mentions_paused_banks(self):
-        r = self._r_yul("какие условия и тарифы у них?")
-        self.assertIn("паузе", r["reply"].lower())
+                self.assertEqual(r["action"], "enrich", f"Expected enrich for: {phrase!r}")
 
     def test_no_can_i_compare_question(self):
         for phrase in self.COMPARE_PHRASES:
@@ -280,13 +267,23 @@ class TestTariffComparisonPlaybook(unittest.TestCase):
                 self.assertNotIn("могу сравнить", reply)
                 self.assertNotIn("хотите сравнить", reply)
 
-    def test_required_next_step_ask_which_bank(self):
+    def test_bank_selection_yul_no_rigid_next_step(self):
         r = self._r_yul("сравни тарифы")
-        self.assertIn("ask_which_bank", r["updates"].get(SLOT_NEXT_STEP, ""))
+        self.assertIsNone(r["updates"].get(SLOT_NEXT_STEP))
+
+    def test_bank_pricing_yul_no_rigid_next_step(self):
+        r = self._r_pricing("какие тарифы")
+        self.assertIsNone(r["updates"].get(SLOT_NEXT_STEP))
+
+    def test_reply_is_none_for_all(self):
+        for phrase in self.COMPARE_PHRASES:
+            with self.subTest(phrase=phrase):
+                r = self._r_yul(phrase)
+                self.assertIsNone(r["reply"])
 
 
 # ============================================================================
-# 6. Pricing helpers
+# 6. Pricing helpers (still deterministic — used by LLM fallback if needed)
 # ============================================================================
 class TestPricingHelpers(unittest.TestCase):
     def test_build_low_cost_with_prices(self):
