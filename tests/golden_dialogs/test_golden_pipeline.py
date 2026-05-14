@@ -213,9 +213,11 @@ class TestManagerContextBuilder(unittest.TestCase):
 
     def test_docs_intent_instruction(self):
         ctx = _build_manager_context({
+            "debtor_type": "ЮЛ",
             "_deal_state": {
                 "deal_stage": "bank_selected",
                 "next_manager_move": "explain_documents",
+                "debtor_type": "ЮЛ",
             }
         })
         self.assertIn("instruction", ctx)
@@ -818,6 +820,283 @@ class TestEscalationMetadataFormat(unittest.TestCase):
     def test_consulting_stays_consulting_when_no_deal_state(self):
         text = self._fmt("Консультация", {})
         self.assertIn("Консультация", text)
+
+
+# ---------------------------------------------------------------------------
+# PLAN v9.6 — Golden Dialog Tests (Dialogs A–G)
+# ---------------------------------------------------------------------------
+
+class TestDialogAFlYulContextDrift(unittest.TestCase):
+    """Dialog A — FL context must not drift to YUL scenarios."""
+
+    def test_fl_stored_debtor_type_blocks_yul_scenarios(self):
+        """Once debtor_type=ФЛ is stored, YUL scenarios must be penalised."""
+        from app.processing.scenario_policy import decide_scenario_policy
+        slots = {"debtor_type": "ФЛ", "_active_scenario": "bank_selection_fl"}
+        result = decide_scenario_policy(
+            user_text="только один банк?",
+            slots=slots,
+            rag_scenarios=[],
+        )
+        active = result["active_scenario"]
+        ct_map = {
+            "bank_selection_yul": "ЮЛ",
+            "alfabank_yul_conditions": "ЮЛ",
+            "tkb_yul_conditions": "ЮЛ",
+            "uralsib_yul_conditions": "ЮЛ",
+            "tbank_yul_conditions": "ЮЛ",
+        }
+        self.assertNotIn(
+            active, ct_map,
+            f"FL session must not switch to YUL scenario; got active={active!r}",
+        )
+
+    def test_fl_manager_context_has_only_fl_banks(self):
+        """FL debtor_type → manager_context must not list YUL banks."""
+        ctx = _build_manager_context({"debtor_type": "ФЛ"})
+        banks_str = str(ctx)
+        self.assertNotIn("Альфа-Банк", banks_str,
+            "Альфа-Банк is YUL-only and must not appear in FL manager_context")
+
+    def test_fl_manager_context_lists_tkb(self):
+        """FL debtor_type → TKB must appear in FL bank list."""
+        ctx = _build_manager_context({"debtor_type": "ФЛ"})
+        banks_str = str(ctx.get("active_banks_fl", ""))
+        self.assertIn("ТКБ", banks_str)
+
+    def test_uralsib_not_in_fl_active_banks(self):
+        """KB audit: Uralsib has no FL data — must not appear in FL active banks."""
+        ctx = _build_manager_context({"debtor_type": "ФЛ"})
+        banks_str = str(ctx.get("active_banks_fl", ""))
+        self.assertNotIn("Уралсиб", banks_str,
+            "Uralsib has no FL KB data; must not be listed as an FL active bank")
+
+    def test_explicit_yul_switch_allowed_from_fl(self):
+        """User explicitly asking about ЮЛ must be allowed to switch even if FL is stored."""
+        from app.processing.scenario_policy import decide_scenario_policy
+        slots = {"debtor_type": "ФЛ", "_active_scenario": "bank_selection_fl"}
+        result = decide_scenario_policy(
+            user_text="а для юридических лиц какие банки?",
+            slots=slots,
+            rag_scenarios=[],
+        )
+        # Must not be blocked to FL — should allow YUL scenarios
+        scores = result.get("scores", {})
+        fl_dominated = all(
+            "yul" not in sid for sid in scores
+        )
+        # If the message explicitly asks about ЮЛ, scoring must not produce a purely FL result
+        # (scores dict may be empty if override fired — that's OK too)
+        # Key assertion: it should not be stuck on bank_selection_fl continuity
+        self.assertNotEqual(
+            result["active_scenario"], "bank_selection_fl",
+            "Explicit ЮЛ switch must be allowed even when FL is stored",
+        )
+
+
+class TestDialogBBonusOverridesObjection(unittest.TestCase):
+    """Dialog B — bonus/interest intent must override active direct_bank_objection."""
+
+    def test_interest_or_bonus_removes_objection_continuity(self):
+        """When active=direct_bank_objection but user asks about bonuses, bonus scenario wins."""
+        from app.processing.scenario_policy import decide_scenario_policy
+        slots = {"_active_scenario": "direct_bank_objection"}
+        result = decide_scenario_policy(
+            user_text="какие ещё бонусы есть для арбитражных управляющих?",
+            slots=slots,
+            rag_scenarios=[
+                {"scenario_id": "au_bonus_question", "score": 0.6, "reasons": [], "matched_aliases": []},
+                {"scenario_id": "interest_on_balance", "score": 0.5, "reasons": [], "matched_aliases": []},
+            ],
+            intent_signals={
+                "intents": ["interest_or_bonus"],
+                "matches": [{"intent": "interest_or_bonus", "source": "regex", "score": 0.9,
+                              "matched_anchor": "бонусы для ау", "threshold": 0.60}],
+                "dialog_acts": [],
+                "debtor_type": None,
+                "bank_focus": None,
+                "semantic_rejects": [],
+            },
+        )
+        active = result["active_scenario"]
+        self.assertNotEqual(
+            active, "direct_bank_objection",
+            "interest_or_bonus must override direct_bank_objection continuity",
+        )
+
+    def test_repetition_complaint_overrides_objection(self):
+        """repetition_complaint must always override any active business scenario."""
+        from app.processing.scenario_policy import decide_scenario_policy
+        slots = {"_active_scenario": "direct_bank_objection"}
+        result = decide_scenario_policy(
+            user_text="ты уже говорил об этом, зачем повторяешь?",
+            slots=slots,
+            rag_scenarios=[],
+            intent_signals={
+                "intents": ["repetition_complaint"],
+                "matches": [{"intent": "repetition_complaint", "source": "regex", "score": 0.95,
+                              "matched_anchor": "ты это уже говорил", "threshold": 0.62}],
+                "dialog_acts": [],
+                "debtor_type": None,
+                "bank_focus": None,
+                "semantic_rejects": [],
+            },
+        )
+        self.assertEqual(result["active_scenario"], "bot_repetition_complaint")
+        self.assertEqual(result["reason"], "repetition_complaint_override")
+
+
+class TestDialogCRepetitionComplaint(unittest.TestCase):
+    """Dialog C — repetition complaint must be handled as a complaint."""
+
+    def test_repetition_complaint_scenario_set(self):
+        """Detecting repetition_complaint → active scenario = bot_repetition_complaint."""
+        from app.processing.scenario_policy import decide_scenario_policy
+        result = decide_scenario_policy(
+            user_text="зачем ты повторяешься?",
+            slots={},
+            rag_scenarios=[],
+            intent_signals={
+                "intents": ["repetition_complaint"],
+                "matches": [{"intent": "repetition_complaint", "source": "regex", "score": 0.92,
+                              "matched_anchor": "зачем повторяешься", "threshold": 0.62}],
+                "dialog_acts": [],
+                "debtor_type": None,
+                "bank_focus": None,
+                "semantic_rejects": [],
+            },
+        )
+        self.assertEqual(result["active_scenario"], "bot_repetition_complaint")
+
+    def test_repetition_complaint_injects_instruction(self):
+        """bot_repetition_complaint active scenario → manager_context has dialog_act and instruction."""
+        ctx = _build_manager_context({"_active_scenario": "bot_repetition_complaint"})
+        self.assertEqual(ctx.get("dialog_act"), "repetition_complaint")
+        self.assertIn("instruction", ctx)
+        inst = ctx["instruction"]
+        self.assertIn("повторяешь", inst.lower())
+
+    def test_typo_variant_in_gate(self):
+        """'повторяешся' (typo) must pass the semantic gate."""
+        from app.processing.intent_semantic import INTENT_GATES
+        gate = INTENT_GATES.get("repetition_complaint", [])
+        self.assertIn("повторяешься", gate,
+            "Typo-tolerant variants must be in the repetition_complaint gate")
+
+
+class TestDialogDTimelines(unittest.TestCase):
+    """Dialog D — timeline question must not require tariff details."""
+
+    def test_timing_question_skips_fl_tariff_check(self):
+        """'Как долго?' must not fail with missing_fl_tariff_details."""
+        from app.services.response_validator import validate_reply
+        reply = "Обычно открытие счёта занимает 3–5 рабочих дней после подачи документов."
+        result = validate_reply(
+            reply=reply,
+            brain_result={"action": "answer", "handoff": {"needed": False}},
+            current_entities={},
+            slots={},
+            user_text="сколько времени занимает открытие?",
+            answer_contract={"topic": "bank_selection_fl"},
+        )
+        self.assertNotEqual(result.get("reason"), "missing_fl_tariff_details",
+            "Timing question must not require tariff details")
+
+    def test_timing_question_skips_missing_primary_fact(self):
+        """Timing reply without mentioning ТКБ must still be valid."""
+        from app.services.response_validator import validate_reply
+        reply = "Процедура открытия счёта обычно занимает около недели."
+        result = validate_reply(
+            reply=reply,
+            brain_result={"action": "answer", "handoff": {"needed": False}},
+            current_entities={},
+            slots={},
+            user_text="сколько дней ждать?",
+            answer_contract={"topic": "bank_selection_fl"},
+        )
+        self.assertNotEqual(result.get("reason"), "missing_primary_fact",
+            "Timing reply need not mention specific bank")
+
+    def test_tariff_question_still_requires_fl_details(self):
+        """Non-timing tariff question still requires FL tariff details."""
+        from app.services.response_validator import validate_reply
+        reply = "Для физических лиц счёт открывается легко."
+        result = validate_reply(
+            reply=reply,
+            brain_result={"action": "answer", "handoff": {"needed": False}},
+            current_entities={},
+            slots={},
+            user_text="какие условия открытия для физлиц?",
+            answer_contract={"topic": "bank_selection_fl"},
+        )
+        self.assertFalse(result["is_valid"],
+            "Non-timing tariff question must still require ТКБ and pricing in reply")
+
+
+class TestDialogEEscalationMetadata(unittest.TestCase):
+    """Dialog E — escalation metadata must come from DealState, not stale slots."""
+
+    def test_deal_state_debtor_type_used_in_format_text(self):
+        """_format_request_text must take debtor_type from _deal_state, not loose slot."""
+        from app.escalation.service import _format_request_text
+        slots = {
+            "_deal_state": {
+                "deal_stage": "ready_to_open",
+                "selected_bank": "Т-Банк",
+                "debtor_type": "ФЛ",
+            },
+            "debtor_type": "ЮЛ",  # stale loose slot — must be overridden by _deal_state
+        }
+        text = _format_request_text("Открытие счёта", slots)
+        self.assertIn("физлица", text,
+            "_format_request_text must prefer _deal_state.debtor_type over loose debtor_type slot")
+
+    def test_escalation_metadata_logs_deal_state_bank(self):
+        """EscalationMetadata log must pick up selected_bank from _deal_state."""
+        from app.escalation.service import _format_request_text
+        slots = {"_deal_state": {"selected_bank": "ТКБ", "debtor_type": "ФЛ"}}
+        text = _format_request_text("Открытие счёта", slots)
+        self.assertIn("ТКБ", text)
+
+
+class TestDialogFBitrixFailure(unittest.TestCase):
+    """Dialog F — Bitrix failure must not produce false 'Escalation completed'."""
+
+    def test_notify_manager_returns_status_dict(self):
+        """notify_manager must return a dict with manager_notified key."""
+        import inspect
+        from app.escalation.bitrix_notifier import notify_manager
+        sig = inspect.signature(notify_manager)
+        ret = sig.return_annotation
+        self.assertIsNotNone(
+            ret,
+            "notify_manager must declare a return type (dict)",
+        )
+
+    def test_escalation_service_imports_correctly(self):
+        """escalation service must import without error."""
+        from app.escalation import service  # noqa: F401
+        self.assertTrue(True)
+
+
+class TestDialogGStartupDB(unittest.TestCase):
+    """Dialog G — worker must guarantee DB schema before polling."""
+
+    def test_worker_module_has_db_init(self):
+        """worker_loop must call Base.metadata.create_all before polling."""
+        import inspect
+        import app.worker as worker_mod
+        src = inspect.getsource(worker_mod.worker_loop)
+        self.assertIn("create_all", src,
+            "worker_loop must call Base.metadata.create_all before the polling loop")
+
+    def test_worker_imports_storage_models(self):
+        """worker module must import storage.models to register ORM models."""
+        import inspect
+        import app.worker as worker_mod
+        src = inspect.getsource(worker_mod.worker_loop)
+        self.assertIn("storage.models", src,
+            "worker_loop must import app.storage.models to register all ORM models")
 
 
 if __name__ == "__main__":

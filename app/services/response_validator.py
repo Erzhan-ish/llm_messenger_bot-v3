@@ -81,6 +81,39 @@ _WHY_RE = re.compile(r"^\s*(почему|а\s+почему|почему\s+нел
 # CJK и нерусские символы в ответе
 _CJK_RE = re.compile(r"[一-鿿぀-ゟ゠-ヿ＀-￯]")
 
+# Иностранные артефакты: Latin Extended Additional (вьетнамские диакритики и пр.)
+_FOREIGN_ARTIFACT_RE = re.compile(r"[Ḁ-ỿ]", re.U)
+
+# Фразы-заглушки в конце ответа (plan §1)
+_FILLER_TAIL_RE = re.compile(
+    r"(всё\s+понял\s*\?"
+    r"|окей\s*\?"
+    r"|ок\s*\?"
+    r"|погнали\s*(?:оформлять)?\s*\?"
+    r"|всё\s+ясно\s*\?"
+    r"|всё\s+понятно\s*\?"
+    r"|договорились\s*\?"
+    r"|продолжаем\s*\?)\s*$",
+    re.I | re.U,
+)
+
+# Handoff-claim слова — запрещены без handoff.needed=true (plan §4)
+_HANDOFF_CLAIM_RE = re.compile(
+    r"\b(передам\s+менеджеру|подключу\s+менеджера|передаём\s+менеджеру"
+    r"|передаем\s+менеджеру|передаю\s+кейс\s+менеджеру"
+    r"|подключаю\s+менеджера|свяжется\s+менеджер)\b",
+    re.I | re.U,
+)
+
+# ЮЛ-специфичные документы для открытия (plan §5) — запрещены при неизвестном debtor_type
+_YUL_SPECIFIC_DOCS_RE = re.compile(
+    r"\b(огрн|устав\s+(?:организации|компании|общества|ооо|оао|зао|ао)"
+    r"|учредительн\w+"
+    r"|выписка\s+(?:из\s+)?егрюл"
+    r"|протокол\s+(?:общего\s+)?собрания)\b",
+    re.I | re.U,
+)
+
 # Ответ заканчивается вопросом
 _ENDS_WITH_QUESTION_RE = re.compile(r"\?\s*$", re.U)
 
@@ -131,6 +164,15 @@ _BANK_PRICING_SCENARIOS = frozenset({
     "alfabank_yul_conditions", "tkb_yul_conditions", "tkb_fl_conditions",
     "tbank_yul_conditions", "mkb_yul_conditions", "rosbank_yul_conditions",
 })
+
+# TASK 4 — Timing questions must not trigger tariff-related validators
+_TIMING_QUESTION_RE = re.compile(
+    r"\b(как\s+долго|сколько\s+времени|сколько\s+дней|сколько\s+ждать"
+    r"|как\s+быстро|срок\w*|когда\s+будет|долго\s+ли|за\s+сколько\s+дней"
+    r"|как\s+скоро|время\s+открытия|открытие\s+займёт|займёт\s+сколько"
+    r"|как\s+долго\s+ждать)\b",
+    re.I | re.U,
+)
 
 _OBSERVATION_STAGE_RE = re.compile(
     r"\b(стади[яеи]\s+наблюден\w*|на\s+стадии\s+наблюден\w*|в\s+стадии\s+наблюден\w*)\b",
@@ -248,6 +290,26 @@ def validate_reply(
     if _CJK_RE.search(reply):
         return {"is_valid": False, "reason": "non_russian_output"}
 
+    # Иностранные артефакты (вьетнамские диакритики и т.п.) — plan §6
+    if _FOREIGN_ARTIFACT_RE.search(reply):
+        return {"is_valid": False, "reason": "non_russian_output"}
+
+    # Фраза-заглушка в конце ответа — plan §1
+    if _FILLER_TAIL_RE.search(reply.strip()):
+        return {"is_valid": False, "reason": "filler_tail_ending"}
+
+    # Handoff-claim без handoff.needed — plan §4
+    handoff_for_claim = (brain_result.get("handoff") or {})
+    action_for_claim = brain_result.get("action") or "answer"
+    if _HANDOFF_CLAIM_RE.search(reply):
+        if not handoff_for_claim.get("needed") and action_for_claim == "answer":
+            return {"is_valid": False, "reason": "handoff_claim_without_handoff_flag"}
+
+    # ЮЛ-специфичные документы при неизвестном debtor_type — plan §5
+    _debtor_type = slots.get("debtor_type") or slots.get("client_type") or ""
+    if not _debtor_type and _YUL_SPECIFIC_DOCS_RE.search(reply):
+        return {"is_valid": False, "reason": "debtor_type_unknown_yul_specific_docs"}
+
     # Повтор предыдущего ответа
     prev_text = slots.get("_last_bot_text") or ""
     if prev_text and _is_near_duplicate(reply, prev_text):
@@ -328,14 +390,17 @@ def validate_reply(
             return {"is_valid": False, "reason": "answered_tariffs_when_asked_bank_list"}
 
         # topic=bank_selection_fl: ТКБ и хотя бы одна цифра тарифа
+        # TASK 4: skip bank/tariff requirements for timing questions
         if topic == "bank_selection_fl":
-            if "ткб" not in reply_lower:
-                return {"is_valid": False, "reason": "missing_primary_fact"}
-            # If user asked for tariffs, must include at least one number
-            _TARIFF_Q_RE = re.compile(r"(тариф|условия|стоимость|сколько|открытие|ведение)", re.I | re.U)
-            if user_text and _TARIFF_Q_RE.search(user_text):
-                if not re.search(r"\b(1500|0\s*руб|бесплатно)", reply_lower):
-                    return {"is_valid": False, "reason": "missing_fl_tariff_details"}
+            _is_timing_q = bool(user_text and _TIMING_QUESTION_RE.search(user_text))
+            if not _is_timing_q:
+                if "ткб" not in reply_lower:
+                    return {"is_valid": False, "reason": "missing_primary_fact"}
+                # If user asked for tariffs, must include at least one number
+                _TARIFF_Q_RE = re.compile(r"(тариф|условия|стоимость|открытие|ведение)", re.I | re.U)
+                if user_text and _TARIFF_Q_RE.search(user_text) and not _TIMING_QUESTION_RE.search(user_text):
+                    if not re.search(r"\b(1500|0\s*руб|бесплатно)", reply_lower):
+                        return {"is_valid": False, "reason": "missing_fl_tariff_details"}
 
         # Общая проверка do_not_include
         for phrase in do_not_include:

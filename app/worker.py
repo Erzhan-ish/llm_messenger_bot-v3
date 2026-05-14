@@ -84,6 +84,17 @@ async def handle_job(job) -> None:
 
 
 async def worker_loop(poll_interval: float = 0.7, batch_size: int = 10):
+    # Ensure DB tables exist before polling (prevents 'no such table: jobs' on clean start)
+    try:
+        from app.storage.db import engine, Base
+        import app.storage.models  # noqa: F401 — register all ORM models with metadata
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Worker DB schema verified")
+    except Exception:
+        logger.exception("Worker DB init failed — worker will not start")
+        raise
+
     logger.info("Worker started")
 
     while True:

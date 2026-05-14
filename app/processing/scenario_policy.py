@@ -58,7 +58,7 @@ _CONFUSION_RE = re.compile(
 _BANK_SCENARIO_MAP: tuple[tuple[str, tuple[str, str]], ...] = (
     ("альфа",    ("alfabank_yul_conditions",  "bank_selection_fl")),
     ("ткб",      ("tkb_yul_conditions",       "tkb_fl_conditions")),
-    ("уралсиб",  ("uralsib_yul_conditions",   "uralsib_fl_conditions")),
+    ("уралсиб",  ("uralsib_yul_conditions",   "bank_selection_fl")),  # no Uralsib FL KB data
     ("т-банк",   ("tbank_yul_conditions",     "bank_selection_fl")),
     ("тинькофф", ("tbank_yul_conditions",     "bank_selection_fl")),
     ("мкб",      ("mkb_yul_conditions",       "bank_selection_fl")),
@@ -298,7 +298,7 @@ _ACCOUNT_REQUEST_RE = re.compile(
 _BANK_FOCUS_SCENARIOS: dict[str, tuple[str, str]] = {
     "alfabank": ("alfabank_yul_conditions", "bank_selection_fl"),
     "tkb":      ("tkb_yul_conditions",      "tkb_fl_conditions"),
-    "uralsib":  ("uralsib_yul_conditions",  "uralsib_fl_conditions"),
+    "uralsib":  ("uralsib_yul_conditions",  "bank_selection_fl"),  # no Uralsib FL KB data
     "tbank":    ("tbank_yul_conditions",    "bank_selection_fl"),
     "mkb":      ("mkb_yul_conditions",      "bank_selection_fl"),
     "rosbank":  ("rosbank_yul_conditions",  "bank_selection_fl"),
@@ -336,6 +336,7 @@ def _compute_scenario_score(
     is_new_topic: bool,
     bank_focus: Optional[str],
     user_text: str,
+    stored_debtor_type: Optional[str] = None,
 ) -> float:
     score = 0.0
     sid = spec.scenario_id
@@ -363,7 +364,20 @@ def _compute_scenario_score(
         elif is_new_topic:
             pass  # no continuity bonus — user explicitly changed topic
         else:
-            score += _S_CONTINUITY
+            # TASK 2 — Topic switch overrides: clear continuity when higher-priority intent present
+            _drop_continuity = False
+            # interest_or_bonus/bonus_interest overrides direct_bank_objection
+            if sid in ("direct_bank_objection", "value_proposition", "value_followup"):
+                if not is_value_obj_regex and not is_value_obj_semantic:
+                    if "interest_or_bonus" in regex_intents or "interest_or_bonus" in semantic_intents:
+                        _drop_continuity = True
+            # timelines intent overrides tariff/bank-listing scenarios
+            if sid in ("bank_selection_yul", "bank_selection_fl", "bank_pricing_yul", "bank_pricing_fl",
+                       "bank_tariff_comparison", "bank_selection_yul_low_cost"):
+                if "timelines" in regex_intents or "timelines" in semantic_intents:
+                    _drop_continuity = True
+            if not _drop_continuity:
+                score += _S_CONTINUITY
 
     # TASK 4+5 — Value objection override: full bonus only for regex detection.
     # If account/bank terms present alongside, block the override entirely.
@@ -401,12 +415,18 @@ def _compute_scenario_score(
         if (is_yul and sid == yul_s) or (not is_yul and sid == fl_s):
             score += _S_BANK_SWITCH
 
-    # Client type mismatch penalty
+    # Client type mismatch penalty (TASK 1: also applies from stored debtor_type)
     ct = _SCENARIO_CLIENT_TYPE.get(sid)
     if ct == "ЮЛ" and _FL_EXPLICIT_RE.search(user_text):
         score += _S_CT_MISMATCH
     elif ct == "ФЛ" and _YUL_EXPLICIT_RE.search(user_text):
         score += _S_CT_MISMATCH
+    elif stored_debtor_type:
+        # Persistent session debtor_type: penalize mismatched scenarios unless user explicitly switches
+        if ct == "ЮЛ" and stored_debtor_type == "ФЛ" and not _YUL_EXPLICIT_RE.search(user_text):
+            score += _S_CT_MISMATCH
+        elif ct == "ФЛ" and stored_debtor_type in ("ЮЛ", "ИП") and not _FL_EXPLICIT_RE.search(user_text):
+            score += _S_CT_MISMATCH
 
     # Blocked intents penalty
     for intent in spec.blocked_if_intents:
@@ -489,6 +509,14 @@ def decide_scenario_policy(
     bank_focus: Optional[str] = sigs.get("bank_focus")
     rag_ids = [m["scenario_id"] for m in rag_scenarios]
 
+    # TASK 1 — Stored debtor_type: persists FL/YUL context across turns
+    _ds = slots.get("_deal_state") or {}
+    stored_debtor_type: Optional[str] = (
+        slots.get("debtor_type")
+        or slots.get("client_type")
+        or _ds.get("debtor_type")
+    ) or None
+
     # Pre-compute signals
     is_fup = _is_followup(user_text, slots)
     # TASK 4 — only REGEX detection triggers the hard value-objection override
@@ -504,6 +532,18 @@ def decide_scenario_policy(
     bank_switch_tgt = _bank_pricing_switch_target(user_text, active, slots)
     domain_shift_tgt = _domain_shift_target(user_text, active)
     is_new_topic = bool(_NEW_TOPIC_RE.search(user_text))
+
+    # TASK 3 — Repetition complaint: hard override, skips all business scenarios
+    if "repetition_complaint" in regex_intents or "repetition_complaint" in semantic_intents:
+        return {
+            "scenario_switch_allowed": True,
+            "decision": "switch",
+            "active_scenario": "bot_repetition_complaint",
+            "candidate_scenarios": [],
+            "scores": {"bot_repetition_complaint": 999.0},
+            "reason": "repetition_complaint_override",
+            "required_next_step": None,
+        }
 
     # Score every catalog scenario
     scored: list[tuple[float, str]] = []
@@ -525,6 +565,7 @@ def decide_scenario_policy(
             is_new_topic=is_new_topic,
             bank_focus=bank_focus,
             user_text=user_text,
+            stored_debtor_type=stored_debtor_type,
         )
         scored.append((s, sid))
 

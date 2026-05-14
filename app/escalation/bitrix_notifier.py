@@ -134,7 +134,7 @@ async def notify_manager(
     need: str,
     dialog_file: str | None,
     deal_id: int | None,
-):
+) -> dict:
     need_text = need or "не указан"
     logger.info(
         "Notify manager started | manager_id={} | client='{}' | inn='{}' | need='{}' | deal_id={}",
@@ -144,6 +144,14 @@ async def notify_manager(
         need_text,
         deal_id,
     )
+
+    status = {
+        "manager_notified": False,
+        "chat_sent": False,
+        "dialog_uploaded": False,
+        "activity_created": False,
+        "failure_reason": None,
+    }
 
     # 1️⃣ Чат
     chat_text = (
@@ -172,12 +180,14 @@ async def notify_manager(
                     chat_text += f"\n[URL={file_url}]Файл диалога[/URL]"
                 else:
                     chat_text += f"\nФайл диалога (ID): {file_id}"
+                status["dialog_uploaded"] = True
             except Exception:
                 logger.exception(
                     "Failed to upload dialog file for duty manager | manager_id={} | client='{}'",
                     manager_id,
                     client_fio,
                 )
+                status["failure_reason"] = "dialog_upload_failed"
 
         try:
             await bitrix.call(
@@ -185,9 +195,12 @@ async def notify_manager(
                 params={"DIALOG_ID": manager_id, "MESSAGE": chat_text},
             )
             logger.info("Chat message sent | manager_id={} | client='{}'", manager_id, client_fio)
+            status["chat_sent"] = True
+            status["manager_notified"] = True
         except Exception:
             logger.exception("Failed to send chat message | manager_id={} | client='{}'", manager_id, client_fio)
-        return
+            status["failure_reason"] = status["failure_reason"] or "manager_message_failed"
+        return status
 
     # Есть сделка: тоже пишем в чат
     try:
@@ -196,8 +209,11 @@ async def notify_manager(
             params={"DIALOG_ID": manager_id, "MESSAGE": chat_text},
         )
         logger.info("Chat message sent | manager_id={} | client='{}'", manager_id, client_fio)
+        status["chat_sent"] = True
+        status["manager_notified"] = True
     except Exception:
         logger.exception("Failed to send chat message | manager_id={} | client='{}'", manager_id, client_fio)
+        status["failure_reason"] = "manager_message_failed"
 
     # 2️⃣ Дело в сделке + файл
     if not dialog_file:
@@ -261,6 +277,8 @@ async def notify_manager(
             manager_id,
             True,
         )
+        status["activity_created"] = True
+        status["dialog_uploaded"] = True
 
         # двигаем стадию
         try:
@@ -274,3 +292,6 @@ async def notify_manager(
 
     except Exception:
         logger.exception("Failed to create activity | deal_id={} | manager_id={}", deal_id, manager_id)
+        status["failure_reason"] = status["failure_reason"] or "dialog_upload_failed"
+
+    return status

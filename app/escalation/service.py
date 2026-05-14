@@ -42,7 +42,9 @@ def _format_request_text(need: str | None, slots: dict) -> str:
         if not base:
             base = "Консультация"
 
-    debtor = (slots or {}).get("debtor_type")
+    # TASK 7 — debtor_type must come from DealState, not stale loose slot
+    _ds_for_debtor = (slots or {}).get("_deal_state") or {}
+    debtor = _ds_for_debtor.get("debtor_type") or (slots or {}).get("debtor_type")
     account = (slots or {}).get("account_type")
     procedure = (slots or {}).get("procedure_type")
     docs_ready = (slots or {}).get("documents_ready")
@@ -300,7 +302,7 @@ async def escalate_to_manager(session_id: int):
     # 3️⃣ Уведомление менеджера
     detailed_need = _format_request_text(need, slots or {})
 
-    await notify_manager(
+    notify_status = await notify_manager(
         manager_id=int(manager_id),
         client_fio=client_fio,
         inn=inn,
@@ -312,9 +314,31 @@ async def escalate_to_manager(session_id: int):
     # 4️⃣ Фиксация эскалации
     await mark_escalated(session.id)
 
-    logger.info(
-        "Escalation completed | session_id={} | manager_id={} | deal_id={}",
-        session.id,
-        manager_id,
-        deal_id,
-    )
+    # 5️⃣ Итоговый статус эскалации — не логировать "completed" если доставка провалилась
+    _esc_status = {
+        "handoff_triggered": True,
+        "crm_delivery_status": "ok" if notify_status.get("manager_notified") else "failed",
+        "manager_notified": notify_status.get("manager_notified", False),
+        "failure_reason": notify_status.get("failure_reason"),
+    }
+    if notify_status.get("manager_notified"):
+        logger.info(
+            "Escalation completed | session_id={} | manager_id={} | deal_id={}"
+            " | chat_sent={} | dialog_uploaded={} | activity_created={}",
+            session.id,
+            manager_id,
+            deal_id,
+            notify_status.get("chat_sent"),
+            notify_status.get("dialog_uploaded"),
+            notify_status.get("activity_created"),
+        )
+    else:
+        logger.warning(
+            "Escalation handoff_triggered but delivery failed | session_id={} | manager_id={} | deal_id={}"
+            " | manager_notified=false | failure_reason={}",
+            session.id,
+            manager_id,
+            deal_id,
+            _esc_status["failure_reason"],
+        )
+    logger.info("EscalationStatus | session_id={} | status={}", session.id, _esc_status)

@@ -94,6 +94,17 @@ _QUESTION_PHRASING_RE = re.compile(
 # Сообщения только из знаков (????!, !!!) — сигнал фрустрации
 _FRUSTRATION_ONLY_RE = re.compile(r"^[?!.\s…–—-]+$")
 
+# Короткие подтверждения после мягкого handoff (plan §2)
+_HANDOFF_ACK_RE = re.compile(
+    r"^\s*(ок|окей|хорошо|ладно|понял|ясно|понятно|принято|спасибо|благодарю"
+    r"|жду|жду\s+звонка|буду\s+ждать|отлично|ждем|всё\s+понятно|всё\s+ясно"
+    r"|хорошо\s+спасибо|ок\s+спасибо|спасибо\s+большое)\s*[.!?]?\s*$",
+    re.I | re.U,
+)
+_HANDOFF_LATCH_REPLY = (
+    "Отлично, ваш кейс уже передан менеджеру. Он свяжется с вами в ближайшее время."
+)
+
 # Вопросы вне домена компании (льготы/скидки/промо — не про банковские бонусы АУ)
 _OUT_OF_DOMAIN_RE = re.compile(
     r"\b(льгот[аыие]|скидк[аиу]|акци[яи]|промокод|кэшбэк|реферальн\w*"
@@ -185,8 +196,9 @@ def _build_context_fallback(
         debtor_type = slots.get("debtor_type") or slots.get("client_type")
         if debtor_type == "ФЛ":
             return (
-                "Для физических лиц сейчас работаем с ТКБ и Уралсибом. "
-                "Если нужны подробности по тарифам — уточните."
+                "Для физических лиц сейчас работаем с ТКБ. "
+                "Открытие счёта 1 500 руб., ведение бесплатно. "
+                "Если нужны подробности или документы — уточните."
             )
         if debtor_type in ("ЮЛ", "ИП"):
             return (
@@ -389,6 +401,17 @@ async def process_message(message):
     slots.pop("_mode", None)
     extract_runtime_slots(user_text, slots)
     await set_slots(session.id, slots)
+
+    # -----------------------------------------------------------------------
+    # HANDOFF LATCH: short acks after deal-state handoff → polite closure (plan §2)
+    # -----------------------------------------------------------------------
+    if slots.get("_handoff_latch") and _HANDOFF_ACK_RE.match(user_text):
+        logger.info("Session {} | Handoff latch — short ack suppressed", session.id)
+        await send_bot(
+            session, message.channel, message.external_user_id,
+            _HANDOFF_LATCH_REPLY, slots, processing_start=processing_start,
+        )
+        return
 
     # -----------------------------------------------------------------------
     # HARD GUARD 1: aggression
@@ -606,6 +629,17 @@ async def process_message(message):
             and not (_is_value_obj_signal or _is_objection_followup)
         ):
             _forced_scenarios = list(_forced_scenarios or []) + ["ready_to_open"]
+
+        # TASK 9 — Primary chunk selection for intent-driven queries (fixes primary_chunks=0)
+        _detected_intents = set(_intent_signals.get("intents") or [])
+        if "interest_or_bonus" in _detected_intents or "bonus_interest" in _detected_intents:
+            _forced_scenarios = list(_forced_scenarios or []) + ["interest_or_bonus"]
+        if "timelines" in _detected_intents:
+            _forced_scenarios = list(_forced_scenarios or []) + ["timelines"]
+        if "specific_bank_conditions" in _detected_intents:
+            _bf = _intent_signals.get("bank_focus") or slots.get("_last_bank") or ""
+            if _bf:
+                _forced_scenarios = list(_forced_scenarios or []) + [f"specific_bank:{_bf}"]
 
         # Contextual KB query expansion — enriches short/referential queries
         from app.processing.kb_query_expander import expand_kb_query
@@ -843,6 +877,8 @@ async def process_message(message):
                 # Hard consent suppresses bot; DealState consent keeps bot active for follow-up questions
                 if _is_hard_consent:
                     slots["_escalation_sent"] = True
+                elif _is_deal_state_consent:
+                    slots["_handoff_latch"] = True  # plan §2: latch short acks after soft handoff
                 await set_slots(session.id, slots)
                 await send_bot(
                     session, message.channel, message.external_user_id, bridge_reply, slots,
@@ -911,7 +947,8 @@ async def process_message(message):
                     )
                 elif repair_hint == "non_russian_output":
                     repair_hint = (
-                        "non_russian_output: Ответ содержит нерусский текст (китайский/английский). "
+                        "non_russian_output: Ответ содержит нерусский текст "
+                        "(китайский/вьетнамский/английский или другие иностранные символы). "
                         "Перепиши ответ полностью на русском языке."
                     )
                 elif repair_hint == "missing_fl_tariff_details":
@@ -949,6 +986,23 @@ async def process_message(message):
                         "docs_intent_no_docs_in_reply: Клиент спросил что от него требуется. "
                         "Ответь конкретно: ИНН должника, данные арбитражного управляющего, "
                         "судебный акт о введении процедуры. Скажи что уже передаю кейс менеджеру."
+                    )
+                elif repair_hint == "filler_tail_ending":
+                    repair_hint = (
+                        "filler_tail_ending: Ответ заканчивается фразой-заглушкой ('Всё понял?', 'Окей?' и т.п.). "
+                        "Убери её — заверши ответ содержательным утверждением."
+                    )
+                elif repair_hint == "handoff_claim_without_handoff_flag":
+                    repair_hint = (
+                        "handoff_claim_without_handoff_flag: Ты написал 'передам менеджеру', "
+                        "но handoff.needed=false. Либо убери это утверждение из ответа, "
+                        "либо верни handoff.needed=true если клиент реально готов."
+                    )
+                elif repair_hint == "debtor_type_unknown_yul_specific_docs":
+                    repair_hint = (
+                        "debtor_type_unknown_yul_specific_docs: Тип должника (ЮЛ/ФЛ/ИП) неизвестен, "
+                        "но ответ содержит документы, специфичные для ЮЛ (ОГРН, устав и т.п.). "
+                        "Вместо этого уточни: должник — юридическое лицо или физическое лицо?"
                     )
                 repaired = await conversation_brain_repair(
                     previous_reply=reply,

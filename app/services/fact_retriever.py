@@ -766,6 +766,87 @@ async def retrieve_context_for_brain(
             except Exception:
                 logger.exception("forced ready_to_open retrieval failed (ignored)")
 
+        # TASK 9 — primary chunks for interest_or_bonus intent
+        if forced_scenarios and "interest_or_bonus" in forced_scenarios:
+            try:
+                si = kb.scenario_index
+                for _bonus_sid in ("au_bonus_question", "interest_on_balance", "percent_yearly"):
+                    for ch in si.by_scenario.get(_bonus_sid, [])[:4]:
+                        _t = (getattr(ch, "text", "") or "")[:300]
+                        if not any(f.get("text") == _t for f in _primary_kb_facts):
+                            _primary_kb_facts.append({
+                                "type": getattr(ch, "type", ""),
+                                "bank": getattr(ch, "bank", None),
+                                "fact": getattr(ch, "fact", None),
+                                "text": _t,
+                                "_forced_from": f"intent:interest_or_bonus:{_bonus_sid}",
+                            })
+            except Exception:
+                logger.exception("forced interest_or_bonus retrieval failed (ignored)")
+
+        # TASK 9 — primary chunks for timelines intent: select internal_ops chunks
+        if forced_scenarios and "timelines" in forced_scenarios:
+            try:
+                si = kb.scenario_index
+                _timelines_chunk = si.by_scenario.get("internal_ops_timelines", [])
+                for ch in _timelines_chunk[:3]:
+                    _t = (getattr(ch, "text", "") or "")[:300]
+                    if not any(f.get("text") == _t for f in _primary_kb_facts):
+                        _primary_kb_facts.append({
+                            "type": getattr(ch, "type", ""),
+                            "bank": getattr(ch, "bank", None),
+                            "fact": getattr(ch, "fact", None),
+                            "text": _t,
+                            "_forced_from": "intent:timelines",
+                        })
+                # Also lift any internal_ops chunks already in top_chunks
+                for ch in top_chunks:
+                    if getattr(ch, "type", "") == "internal_ops":
+                        _t = (getattr(ch, "text", "") or "")[:300]
+                        if not any(f.get("text") == _t for f in _primary_kb_facts):
+                            _primary_kb_facts.append({
+                                "type": "internal_ops",
+                                "bank": getattr(ch, "bank", None),
+                                "fact": getattr(ch, "fact", None),
+                                "text": _t,
+                                "_forced_from": "intent:timelines:top_chunks",
+                            })
+            except Exception:
+                logger.exception("forced timelines retrieval failed (ignored)")
+
+        # TASK 9 — primary chunks for specific_bank_conditions intent
+        _specific_bank_forced = next(
+            (s for s in (forced_scenarios or []) if s.startswith("specific_bank:")), None
+        )
+        if _specific_bank_forced:
+            _sfb_bank = _specific_bank_forced.split(":", 1)[1].lower() if ":" in _specific_bank_forced else ""
+            if _sfb_bank:
+                try:
+                    # Find the right scenario for this bank + client_type
+                    _sfb_ct = (client_type or "").lower()
+                    if "альфа" in _sfb_bank:
+                        _sfb_scen = "alfabank_yul_conditions"
+                    elif "ткб" in _sfb_bank or "транскапитал" in _sfb_bank:
+                        _sfb_scen = "tkb_fl_conditions" if "фл" in _sfb_ct else "tkb_yul_conditions"
+                    elif "урал" in _sfb_bank:
+                        _sfb_scen = "uralsib_yul_conditions"
+                    else:
+                        _sfb_scen = None
+                    if _sfb_scen:
+                        si = kb.scenario_index
+                        for ch in si.by_scenario.get(_sfb_scen, [])[:5]:
+                            _t = (getattr(ch, "text", "") or "")[:300]
+                            if not any(f.get("text") == _t for f in _primary_kb_facts):
+                                _primary_kb_facts.append({
+                                    "type": getattr(ch, "type", ""),
+                                    "bank": getattr(ch, "bank", None),
+                                    "fact": getattr(ch, "fact", None),
+                                    "text": _t,
+                                    "_forced_from": f"intent:specific_bank:{_sfb_scen}",
+                                })
+                except Exception:
+                    logger.exception("forced specific_bank retrieval failed (ignored)")
+
         # §7 — primary_chunks fix: when active scenario + bank known, boost matching
         # scenario chunks to primary so LLM always sees them (fixes primary_chunks=0 issue).
         _active_scenario = memory.get("active_scenario") or memory.get("_active_scenario") or ""

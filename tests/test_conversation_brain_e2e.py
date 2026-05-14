@@ -847,5 +847,198 @@ class TestPlanV13(unittest.TestCase):
         self.assertEqual(r["reason"], "repeated_intro")
 
 
+# ---------------------------------------------------------------------------
+# Регрессионные тесты плана (план §7)
+# ---------------------------------------------------------------------------
+class TestPlanRegression(unittest.TestCase):
+    """Регрессионные тесты по пунктам 1-6 плана."""
+
+    def _validate(self, reply, brain_result=None, entities=None, slots=None,
+                  user_text="", answer_contract=None):
+        from app.services.response_validator import validate_reply
+        return validate_reply(
+            reply,
+            brain_result or {},
+            entities or {},
+            slots or {},
+            user_text=user_text,
+            answer_contract=answer_contract,
+        )
+
+    # --- §1: filler tail endings ---
+
+    def test_filler_tail_vse_ponyal_rejected(self):
+        """Ответ заканчивающийся на 'Всё понял?' — отклоняется валидатором."""
+        r = self._validate("Тарифы по ТКБ: открытие 2800 ₽. Всё понял?")
+        self.assertFalse(r["is_valid"])
+        self.assertEqual(r["reason"], "filler_tail_ending")
+
+    def test_filler_tail_okei_rejected(self):
+        """Ответ заканчивающийся на 'Окей?' — отклоняется."""
+        r = self._validate("Подробности уточним с менеджером. Окей?")
+        self.assertFalse(r["is_valid"])
+        self.assertEqual(r["reason"], "filler_tail_ending")
+
+    def test_filler_tail_pognali_rejected(self):
+        """Ответ заканчивающийся на 'Погнали оформлять?' — отклоняется."""
+        r = self._validate("Всё готово, банк выбран. Погнали оформлять?")
+        self.assertFalse(r["is_valid"])
+        self.assertEqual(r["reason"], "filler_tail_ending")
+
+    def test_filler_tail_ok_in_middle_allowed(self):
+        """'Окей' внутри фразы, не в конце — допустимо."""
+        r = self._validate("Окей, тогда давайте начнём с ТКБ: открытие 2800 ₽.")
+        self.assertTrue(r["is_valid"] or r["reason"] != "filler_tail_ending")
+
+    # --- §2: handoff latch ---
+
+    def test_handoff_ack_re_matches_okei(self):
+        """'окей' одиночное — попадает под _HANDOFF_ACK_RE."""
+        from app.processing.message_processor import _HANDOFF_ACK_RE
+        self.assertIsNotNone(_HANDOFF_ACK_RE.match("окей"))
+        self.assertIsNotNone(_HANDOFF_ACK_RE.match("хорошо"))
+        self.assertIsNotNone(_HANDOFF_ACK_RE.match("спасибо"))
+        self.assertIsNotNone(_HANDOFF_ACK_RE.match("жду звонка"))
+
+    def test_handoff_ack_re_no_match_for_substantive(self):
+        """Содержательное сообщение — НЕ попадает под _HANDOFF_ACK_RE."""
+        from app.processing.message_processor import _HANDOFF_ACK_RE
+        self.assertIsNone(_HANDOFF_ACK_RE.match("а какие документы нужны для Уралсиба?"))
+        self.assertIsNone(_HANDOFF_ACK_RE.match("подождите, у меня вопрос про тарифы"))
+
+    # --- §3: post-docs consent → handoff ---
+
+    def test_post_docs_consent_horosho_triggers_handoff(self):
+        """'хорошо' после explain_documents с известным банком → handoff_needed=True."""
+        from app.processing.deal_state import update_deal_state
+        slots = {
+            "_last_bank": "ТКБ",
+            "debtor_type": "ЮЛ",
+            "_deal_state": {
+                "deal_stage": "bank_selected",
+                "next_manager_move": "explain_documents",
+                "selected_bank": "ТКБ",
+                "handoff_needed": False,
+            },
+        }
+        ds = update_deal_state(slots, "хорошо")
+        self.assertTrue(ds.get("handoff_needed"), "Ожидался handoff_needed=True после affirm")
+        self.assertEqual(ds.get("deal_stage"), "ready_to_open")
+
+    def test_post_docs_consent_davajte_triggers_handoff(self):
+        """'давайте' после explain_documents → handoff."""
+        from app.processing.deal_state import update_deal_state
+        slots = {
+            "_last_bank": "Уралсиб",
+            "_deal_state": {
+                "deal_stage": "bank_selected",
+                "next_manager_move": "explain_documents",
+                "selected_bank": "Уралсиб",
+                "handoff_needed": False,
+            },
+        }
+        ds = update_deal_state(slots, "давайте")
+        self.assertTrue(ds.get("handoff_needed"))
+
+    def test_post_docs_no_handoff_without_bank(self):
+        """'хорошо' без банка после explain_documents — НЕ escalate."""
+        from app.processing.deal_state import update_deal_state
+        slots = {
+            "_deal_state": {
+                "deal_stage": "consulting",
+                "next_manager_move": "explain_documents",
+                "selected_bank": None,
+                "handoff_needed": False,
+            },
+        }
+        ds = update_deal_state(slots, "хорошо")
+        self.assertFalse(ds.get("handoff_needed"))
+
+    # --- §4: handoff-claim validator ---
+
+    def test_handoff_claim_blocked_without_flag(self):
+        """'передам менеджеру' в ответе без handoff.needed → отклоняется."""
+        r = self._validate(
+            "Понял, передам менеджеру ваши данные.",
+            brain_result={"handoff": {"needed": False}, "action": "answer"},
+        )
+        self.assertFalse(r["is_valid"])
+        self.assertEqual(r["reason"], "handoff_claim_without_handoff_flag")
+
+    def test_handoff_claim_allowed_with_flag(self):
+        """'передам менеджеру' с handoff.needed=True → допустимо."""
+        r = self._validate(
+            "Отлично, передам менеджеру ваш кейс.",
+            brain_result={"handoff": {"needed": True}, "action": "handoff"},
+            slots={"_had_consent": True},
+        )
+        self.assertNotEqual(r.get("reason"), "handoff_claim_without_handoff_flag")
+
+    # --- §5: debtor_type guard ---
+
+    def test_debtor_unknown_yul_docs_rejected(self):
+        """ОГРН в ответе при неизвестном debtor_type → отклоняется."""
+        r = self._validate(
+            "Для открытия нужны ОГРН и устав организации.",
+            slots={},  # debtor_type not set
+        )
+        self.assertFalse(r["is_valid"])
+        self.assertEqual(r["reason"], "debtor_type_unknown_yul_specific_docs")
+
+    def test_debtor_known_yul_docs_allowed(self):
+        """ОГРН допустим если debtor_type=ЮЛ."""
+        r = self._validate(
+            "Для ЮЛ нужны ОГРН и устав организации.",
+            slots={"debtor_type": "ЮЛ"},
+        )
+        self.assertNotEqual(r.get("reason"), "debtor_type_unknown_yul_specific_docs")
+
+    def test_docs_intent_asks_yul_fl_when_unknown(self):
+        """instruction содержит просьбу уточнить ЮЛ/ФЛ когда debtor_type неизвестен."""
+        from app.services.conversation_responder import _build_manager_context
+        slots = {
+            "_last_bank": "Уралсиб",
+            "_deal_state": {
+                "deal_stage": "bank_selected",
+                "next_manager_move": "explain_documents",
+                "selected_bank": "Уралсиб",
+                "handoff_needed": False,
+                "debtor_type": None,
+            },
+        }
+        ctx = _build_manager_context(slots)
+        instruction = ctx.get("instruction", "")
+        self.assertIn("ЮЛ", instruction, "Instruction должен упоминать тип должника")
+        self.assertIn("ФЛ", instruction, "Instruction должен упоминать ФЛ")
+
+    # --- §6: foreign-language noise ---
+
+    def test_vietnamese_artifact_rejected(self):
+        """Ответ с вьетнамскими диакритиками → non_russian_output."""
+        r = self._validate("Нам cần документы для открытия счёта.")
+        self.assertFalse(r["is_valid"])
+        self.assertEqual(r["reason"], "non_russian_output")
+
+    def test_pure_russian_foreign_check_passes(self):
+        """Чисто русский ответ — проходит foreign-language проверку."""
+        r = self._validate("По Уралсибу: открытие 3500 ₽, ведение 1600 ₽/мес.")
+        self.assertTrue(r["is_valid"] or r["reason"] != "non_russian_output")
+
+    # --- §1+§7: что скинуть? docs intent detection ---
+
+    def test_chto_skinut_detected_as_docs_intent(self):
+        """'что скинуть?' с известным банком → detect_docs_intent=True."""
+        from app.processing.deal_state import detect_docs_intent
+        slots = {"_last_bank": "ТКБ"}
+        self.assertTrue(detect_docs_intent("что скинуть?", slots))
+
+    def test_chto_skinut_update_deal_state_sets_explain_docs(self):
+        """'что скинуть?' → update_deal_state ставит next_manager_move=explain_documents."""
+        from app.processing.deal_state import update_deal_state
+        slots = {"_last_bank": "ТКБ", "debtor_type": "ЮЛ"}
+        ds = update_deal_state(slots, "что скинуть?")
+        self.assertEqual(ds.get("next_manager_move"), "explain_documents")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

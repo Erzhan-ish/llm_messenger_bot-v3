@@ -49,8 +49,16 @@ _DOCS_INTENT_RE = re.compile(
     r"|что\s+мне\s+(?:прислать|нужно|делать\s+дальше)"
     r"|что\s+дальше|дальше\s+что|следующий\s+шаг"
     r"|как\s+дальше|что\s+прислать|что\s+передать"
+    r"|что\s+скинуть|что\s+скидывать"
     r"|какие\s+документы|какие\s+данные"
     r")",
+    re.I | re.U,
+)
+
+# Short affirmatives after docs explanation — trigger escalation to ready_to_open
+_DOCS_AFFIRM_RE = re.compile(
+    r"^\s*(хорошо|ладно|давайте|да|ок|окей|отлично|подходит|принято|годится"
+    r"|договорились|понял|ясно|понятно|всё\s+ясно|всё\s+понятно)\s*[.!?]?\s*$",
     re.I | re.U,
 )
 
@@ -184,6 +192,19 @@ def update_deal_state(
         else:
             ds["deal_stage"] = ds.get("deal_stage") or "consulting"
             ds["next_manager_move"] = "collect_missing_slot"
+
+    elif (
+        ds.get("next_manager_move") == "explain_documents"
+        and bank
+        and _DOCS_AFFIRM_RE.match(user_text or "")
+        and ds.get("deal_stage") not in ("ready_to_open", "collecting_documents", "handoff")
+    ):
+        # Post-documents consent: docs were just explained, user affirms → escalate
+        ds["deal_stage"] = "ready_to_open"
+        ds["client_intent"] = "open_account"
+        ds["next_manager_move"] = "handoff_to_manager"
+        ds["ready_to_open_reason"] = "post_docs_consent"
+        ds["handoff_needed"] = True
 
     elif is_docs:
         ds["client_intent"] = "ask_documents"
