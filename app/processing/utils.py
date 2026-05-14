@@ -340,6 +340,11 @@ async def send_bot(
     is_first_session = not bool(slots.get("_last_bot_text"))
     slots["_last_bot_text"] = text
 
+    # Track last 3 bot replies for anti-repetition (plan §5)
+    _reply_history: list = list(slots.get("_bot_reply_history") or [])
+    _reply_history.append(text[:500])
+    slots["_bot_reply_history"] = _reply_history[-3:]
+
     if not slots.get("_introduced") and re.search(r"\b(меня\s+зовут|это)\s+алексей\b", text, re.IGNORECASE):
         slots["_introduced"] = True
 

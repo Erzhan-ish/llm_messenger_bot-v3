@@ -115,6 +115,10 @@ class Settings(BaseSettings):
     # Banks
     PARTNER_BANKS: List[str] = ["ТКБ", "Уралсиб", "Росбанк", "Альфа-Банк", "Т-Банк", "ВТБ", "Сбербанк"]
 
+    # Embeddings device (cpu by default, set cuda to enable GPU)
+    INTENT_EMBEDDINGS_DEVICE: str = Field(default="cpu")
+    KB_EMBEDDINGS_DEVICE: str = Field(default="cpu")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=True,

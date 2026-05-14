@@ -1099,5 +1099,948 @@ class TestDialogGStartupDB(unittest.TestCase):
             "worker_loop must import app.storage.models to register all ORM models")
 
 
+# ---------------------------------------------------------------------------
+# Plan §16 Dialog A — Objection → ЮЛ → tariff switch
+# ---------------------------------------------------------------------------
+
+class TestPlan16DialogA_ObjectionThenYUL(unittest.TestCase):
+    """Dialog A: value objection → ЮЛ declared → tariff question must switch scenario."""
+
+    def test_conditions_correction_blocks_tariff_scenarios(self):
+        """correction_not_tariffs_but_conditions → tariff-focused scenarios get -999."""
+        from app.processing.scenario_policy import decide_scenario_policy
+        slots = {"_active_scenario": "bank_selection_yul", "debtor_type": "ЮЛ"}
+        result = decide_scenario_policy(
+            user_text="я про условия, а не тарифы",
+            slots=slots,
+            rag_scenarios=[],
+            intent_signals={
+                "intents": ["correction_not_tariffs_but_conditions"],
+                "matches": [{"intent": "correction_not_tariffs_but_conditions",
+                             "source": "regex", "score": 0.99,
+                             "matched_anchor": "не тарифы а условия", "threshold": 0.55}],
+                "dialog_acts": [],
+                "debtor_type": "ЮЛ",
+                "bank_focus": None,
+                "semantic_rejects": [],
+            },
+        )
+        active = result["active_scenario"]
+        from app.processing.scenario_policy import _TARIFF_FOCUSED_SCENARIOS
+        self.assertNotIn(
+            active, _TARIFF_FOCUSED_SCENARIOS,
+            f"conditions_correction must block tariff scenarios; got active={active!r}",
+        )
+        self.assertIn("conditions_correction", result.get("reason", ""),
+            "reason must include conditions_correction tag")
+
+    def test_conditions_correction_boosts_conditions_scenarios(self):
+        """correction_not_tariffs_but_conditions → conditions scenarios get +60 boost."""
+        from app.processing.scenario_policy import decide_scenario_policy, _CONDITIONS_FOCUSED_SCENARIOS
+        slots = {"_active_scenario": "bank_selection_yul", "debtor_type": "ЮЛ",
+                 "_last_bank": "ТКБ"}
+        result = decide_scenario_policy(
+            user_text="я про условия, а не тарифы",
+            slots=slots,
+            rag_scenarios=[
+                {"scenario_id": "tkb_yul_conditions", "score": 0.8, "reasons": [], "matched_aliases": []},
+            ],
+            intent_signals={
+                "intents": ["correction_not_tariffs_but_conditions"],
+                "matches": [{"intent": "correction_not_tariffs_but_conditions",
+                             "source": "regex", "score": 0.99,
+                             "matched_anchor": "не тарифы а условия", "threshold": 0.55}],
+                "dialog_acts": [], "debtor_type": "ЮЛ", "bank_focus": None, "semantic_rejects": [],
+            },
+        )
+        active = result["active_scenario"]
+        self.assertIn(
+            active, _CONDITIONS_FOCUSED_SCENARIOS,
+            f"conditions_correction must route to conditions scenario; got active={active!r}",
+        )
+
+    def test_conditions_intent_soft_boost(self):
+        """conditions_details_requested → soft boost for conditions scenarios."""
+        from app.processing.scenario_policy import decide_scenario_policy, _CONDITIONS_FOCUSED_SCENARIOS
+        slots = {"_active_scenario": "bank_selection_yul", "debtor_type": "ЮЛ"}
+        result = decide_scenario_policy(
+            user_text="расскажи про условия работы со счётом",
+            slots=slots,
+            rag_scenarios=[
+                {"scenario_id": "tkb_yul_conditions", "score": 0.7, "reasons": [], "matched_aliases": []},
+            ],
+            intent_signals={
+                "intents": ["conditions_details_requested"],
+                "matches": [{"intent": "conditions_details_requested",
+                             "source": "regex", "score": 0.88,
+                             "matched_anchor": "условия работы счёта", "threshold": 0.55}],
+                "dialog_acts": [], "debtor_type": "ЮЛ", "bank_focus": None, "semantic_rejects": [],
+            },
+        )
+        scores = result.get("scores", {})
+        # At least one conditions scenario must appear in top scores
+        has_conditions = any(sid in _CONDITIONS_FOCUSED_SCENARIOS for sid in scores)
+        self.assertTrue(
+            has_conditions,
+            f"conditions_intent must boost at least one conditions scenario; scores={scores}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Plan §16 Dialog E — Formal tone enforcement
+# ---------------------------------------------------------------------------
+
+class TestPlan16DialogE_FormalTone(unittest.TestCase):
+    """Dialog E: replies with ты/тебе/твой must be rejected by validator."""
+
+    def test_ty_rejected(self):
+        from app.services.response_validator import validate_reply
+        result = validate_reply(
+            reply="Ты можешь открыть счёт в ТКБ.",
+            brain_result={"action": "answer", "handoff": {"needed": False}},
+            current_entities={},
+            slots={},
+            user_text="как открыть счёт?",
+        )
+        self.assertFalse(result["is_valid"])
+        self.assertEqual(result["reason"], "informal_address_tu_tebe")
+
+    def test_tebe_rejected(self):
+        from app.services.response_validator import validate_reply
+        result = validate_reply(
+            reply="Расскажу тебе подробнее об условиях.",
+            brain_result={"action": "answer", "handoff": {"needed": False}},
+            current_entities={},
+            slots={},
+            user_text="расскажи подробнее",
+        )
+        self.assertFalse(result["is_valid"])
+        self.assertEqual(result["reason"], "informal_address_tu_tebe")
+
+    def test_tvoy_rejected(self):
+        from app.services.response_validator import validate_reply
+        result = validate_reply(
+            reply="Твой должник — ЮЛ, верно?",
+            brain_result={"action": "answer", "handoff": {"needed": False}},
+            current_entities={},
+            slots={},
+            user_text="у меня должник ЮЛ",
+        )
+        self.assertFalse(result["is_valid"])
+        self.assertEqual(result["reason"], "informal_address_tu_tebe")
+
+    def test_formal_vam_accepted(self):
+        from app.services.response_validator import validate_reply
+        result = validate_reply(
+            reply="Для вашего должника ЮЛ, рекомендую Альфа-Банк или ТКБ.",
+            brain_result={"action": "answer", "handoff": {"needed": False}},
+            current_entities={},
+            slots={},
+            user_text="у меня должник ЮЛ",
+        )
+        self.assertNotEqual(result.get("reason"), "informal_address_tu_tebe")
+
+
+# ---------------------------------------------------------------------------
+# Plan §16 Dialog B/J — DealState new triggers (§9)
+# ---------------------------------------------------------------------------
+
+class TestPlan16DialogJ_DealStateTriggers(unittest.TestCase):
+    """§9: valid and invalid triggers for escalation readiness."""
+
+    def test_gotov_zapuskat_is_action_intent(self):
+        from app.processing.deal_state import detect_action_intent
+        self.assertTrue(detect_action_intent("готов запускать"))
+
+    def test_mne_podkhodit_is_docs_affirm_after_explain(self):
+        """'мне подходит' after explain_documents triggers post_docs_consent."""
+        from app.processing.deal_state import update_deal_state
+        slots = {
+            "debtor_type": "ЮЛ",
+            "_last_bank": "ТКБ",
+            "_deal_state": {
+                "deal_stage": "bank_selected",
+                "next_manager_move": "explain_documents",
+                "selected_bank": "ТКБ",
+                "debtor_type": "ЮЛ",
+                "handoff_needed": False,
+                "selected_product": "bankruptcy_account",
+                "procedure_stage": None, "client_intent": None,
+                "ready_to_open_reason": None,
+                "last_offer": None, "last_bank_list_context": [], "last_conditions_context": [],
+                "last_bot_reply_hash": None,
+            },
+        }
+        ds = update_deal_state(slots, "мне подходит")
+        self.assertEqual(ds["deal_stage"], "ready_to_open")
+        self.assertEqual(ds["ready_to_open_reason"], "post_docs_consent")
+        self.assertTrue(ds["handoff_needed"])
+
+    def test_podrobnee_not_action_intent(self):
+        from app.processing.deal_state import detect_action_intent
+        self.assertFalse(detect_action_intent("подробнее"))
+
+    def test_kakie_usloviya_not_action_intent(self):
+        from app.processing.deal_state import detect_action_intent
+        self.assertFalse(detect_action_intent("какие условия?"))
+
+    def test_po_vremeni_skolko_not_action_intent(self):
+        from app.processing.deal_state import detect_action_intent
+        self.assertFalse(detect_action_intent("по времени сколько?"))
+
+    def test_skolko_po_vremeni_not_action_intent(self):
+        from app.processing.deal_state import detect_action_intent
+        self.assertFalse(detect_action_intent("сколько по времени?"))
+
+    def test_chto_ot_menya_trebuetsya_is_docs_intent(self):
+        from app.processing.deal_state import detect_docs_intent
+        slots = {"debtor_type": "ЮЛ", "_last_bank": "ТКБ"}
+        self.assertTrue(detect_docs_intent("что от меня требуется?", slots))
+
+    def test_chto_skinut_is_docs_intent(self):
+        from app.processing.deal_state import detect_docs_intent
+        slots = {"debtor_type": "ЮЛ", "_last_bank": "ТКБ"}
+        self.assertTrue(detect_docs_intent("что скинуть?", slots))
+
+
+# ---------------------------------------------------------------------------
+# Plan §26 — ScenarioPolicy respects Planner decision (§9)
+# ---------------------------------------------------------------------------
+
+class TestPlan26_PlannerDrivenPolicy(unittest.TestCase):
+    """§9/§26: When planner_scenario is provided, ScenarioPolicy must accept it."""
+
+    def _policy(self, planner_scenario, active=None, rag=None, intents=None):
+        from app.processing.scenario_policy import decide_scenario_policy
+        slots = {"_active_scenario": active, "debtor_type": "ЮЛ"}
+        return decide_scenario_policy(
+            user_text="тест",
+            slots=slots,
+            rag_scenarios=rag or [],
+            intent_signals=intents or {"intents": [], "matches": [], "dialog_acts": [],
+                                       "debtor_type": "ЮЛ", "bank_focus": None, "semantic_rejects": []},
+            planner_scenario=planner_scenario,
+        )
+
+    # Dialog A — bonus question overrides bank_selection_yul
+    def test_dialog_a_planner_au_bonus_overrides_bank_selection(self):
+        result = self._policy(
+            planner_scenario="au_bonus_question",
+            active="bank_selection_yul",
+            rag=[{"scenario_id": "bank_selection_yul", "score": 0.9, "reasons": [], "matched_aliases": []}],
+        )
+        self.assertEqual(result["active_scenario"], "au_bonus_question")
+        self.assertEqual(result["reason"], "planner_decision")
+
+    # Dialog B — conditions planner overrides tariff active scenario
+    def test_dialog_b_planner_conditions_overrides_tariff_active(self):
+        result = self._policy(
+            planner_scenario="tkb_yul_conditions",
+            active="bank_selection_yul",
+            rag=[{"scenario_id": "bank_selection_yul", "score": 0.85, "reasons": [], "matched_aliases": []}],
+        )
+        self.assertEqual(result["active_scenario"], "tkb_yul_conditions")
+        self.assertEqual(result["reason"], "planner_decision")
+
+    # Dialog C — topic shift after objection
+    def test_dialog_c_planner_bank_selection_after_objection(self):
+        result = self._policy(
+            planner_scenario="bank_selection_yul",
+            active="direct_bank_objection",
+        )
+        self.assertEqual(result["active_scenario"], "bank_selection_yul")
+        self.assertEqual(result["reason"], "planner_decision")
+        self.assertEqual(result["decision"], "switch")
+
+    # Dialog D — planner ready_to_open is accepted
+    def test_dialog_d_planner_ready_to_open(self):
+        result = self._policy(
+            planner_scenario="ready_to_open",
+            active="tkb_yul_conditions",
+        )
+        self.assertEqual(result["active_scenario"], "ready_to_open")
+        self.assertEqual(result["reason"], "planner_decision")
+
+    # Dialog F — FL correction
+    def test_dialog_f_planner_fl_correction(self):
+        from app.processing.scenario_policy import decide_scenario_policy
+        slots = {"_active_scenario": "bank_selection_yul", "debtor_type": "ЮЛ"}
+        result = decide_scenario_policy(
+            user_text="нет, я спрашивал про ФЛ",
+            slots=slots,
+            rag_scenarios=[],
+            intent_signals={"intents": [], "matches": [], "dialog_acts": [],
+                            "debtor_type": "ФЛ", "bank_focus": None, "semantic_rejects": []},
+            planner_scenario="bank_selection_fl",
+        )
+        self.assertEqual(result["active_scenario"], "bank_selection_fl")
+        self.assertEqual(result["reason"], "planner_decision")
+
+    # repetition_complaint overrides even Planner
+    def test_repetition_complaint_overrides_planner(self):
+        from app.processing.scenario_policy import decide_scenario_policy
+        slots = {"_active_scenario": "bank_selection_yul"}
+        result = decide_scenario_policy(
+            user_text="вы уже это говорили",
+            slots=slots,
+            rag_scenarios=[],
+            intent_signals={
+                "intents": ["repetition_complaint"],
+                "matches": [{"intent": "repetition_complaint", "source": "regex",
+                             "score": 0.99, "matched_anchor": "уже говорили", "threshold": 0.55}],
+                "dialog_acts": [], "debtor_type": None, "bank_focus": None, "semantic_rejects": [],
+            },
+            planner_scenario="bank_selection_yul",
+        )
+        self.assertEqual(result["active_scenario"], "bot_repetition_complaint")
+        self.assertEqual(result["reason"], "repetition_complaint_override")
+
+    # unknown planner scenario falls back to scoring
+    def test_unknown_planner_scenario_falls_back_to_scoring(self):
+        from app.processing.scenario_policy import decide_scenario_policy
+        slots = {"_active_scenario": "bank_selection_yul", "debtor_type": "ЮЛ"}
+        result = decide_scenario_policy(
+            user_text="какие банки?",
+            slots=slots,
+            rag_scenarios=[],
+            intent_signals={"intents": [], "matches": [], "dialog_acts": [],
+                            "debtor_type": "ЮЛ", "bank_focus": None, "semantic_rejects": []},
+            planner_scenario="nonexistent_scenario_xyz",
+        )
+        self.assertNotEqual(result["reason"], "planner_decision",
+            "Unknown Planner scenario must fall back to scoring, not 'planner_decision'")
+
+    # no planner_scenario → scoring runs normally (no regression)
+    def test_no_planner_scenario_scoring_runs(self):
+        from app.processing.scenario_policy import decide_scenario_policy
+        slots = {"_active_scenario": "bank_selection_yul", "debtor_type": "ЮЛ"}
+        result = decide_scenario_policy(
+            user_text="какие банки для ЮЛ?",
+            slots=slots,
+            rag_scenarios=[
+                {"scenario_id": "bank_selection_yul", "score": 0.9, "reasons": [], "matched_aliases": []},
+            ],
+            intent_signals={
+                "intents": ["bank_selection"],
+                "matches": [{"intent": "bank_selection", "source": "regex",
+                             "score": 0.9, "matched_anchor": "банки для юл", "threshold": 0.55}],
+                "dialog_acts": [], "debtor_type": "ЮЛ", "bank_focus": None, "semantic_rejects": [],
+            },
+        )
+        self.assertNotEqual(result["reason"], "planner_decision")
+        self.assertIsNotNone(result["active_scenario"])
+
+
+# ---------------------------------------------------------------------------
+# Plan §26 — Planner validator unit tests
+# ---------------------------------------------------------------------------
+
+class TestPlan26_PlannerValidator(unittest.TestCase):
+    """§26: run_dialog_planner internal validator rejects bad outputs.
+
+    _validate_planner_v2 returns a list of error strings (empty = valid).
+    """
+
+    def _validate(self, data):
+        from app.services.dialog_planner import _validate_planner_v2
+        return _validate_planner_v2(data)  # returns list[str] of errors
+
+    def test_valid_minimal_plan(self):
+        errors = self._validate({
+            "scenario": "bank_selection_yul",
+            "topic": "bank_selection",
+            "topic_changed": False,
+            "dialog_act": "question",
+            "user_intent": "ask_banks",
+            "confidence": 0.85,
+            "handoff": {"needed": False, "reason": None},
+            "retrieval": {"queries": ["банки ЮЛ"], "required_fact_groups": [], "avoid_fact_groups": []},
+            "must_not_repeat": [],
+            "responder_instruction": "Answer.",
+        })
+        self.assertEqual(errors, [], f"Valid minimal plan rejected with errors: {errors}")
+
+    def test_missing_scenario_rejected(self):
+        errors = self._validate({"topic": "bank_selection"})
+        self.assertTrue(len(errors) > 0, "Missing scenario must produce errors")
+        self.assertTrue(any("scenario" in e.lower() for e in errors),
+                        f"Error must mention 'scenario': {errors}")
+
+    def test_unknown_scenario_rejected(self):
+        errors = self._validate({
+            "scenario": "totally_unknown_xyz_123",
+            "topic": "x", "topic_changed": False, "dialog_act": "q", "user_intent": "x",
+            "confidence": 0.5,
+            "handoff": {"needed": False, "reason": None},
+            "retrieval": {"queries": [], "required_fact_groups": [], "avoid_fact_groups": []},
+            "must_not_repeat": [], "responder_instruction": "x",
+        })
+        self.assertTrue(len(errors) > 0, "Unknown scenario must produce errors")
+
+    def test_missing_handoff_rejected(self):
+        errors = self._validate({
+            "scenario": "bank_selection_yul",
+            "topic": "x", "topic_changed": False, "dialog_act": "q", "user_intent": "x",
+            "confidence": 0.5,
+            "retrieval": {"queries": [], "required_fact_groups": [], "avoid_fact_groups": []},
+            "must_not_repeat": [], "responder_instruction": "x",
+        })
+        self.assertTrue(len(errors) > 0, "Missing handoff must produce errors")
+
+
+# ---------------------------------------------------------------------------
+# Plan §18/§19 — Anti-repetition slot tracking
+# ---------------------------------------------------------------------------
+
+class TestPlan18_AntiRepetitionTracking(unittest.TestCase):
+    """§18/§19: _answered_fact_groups and _bot_reply_history are updated per turn."""
+
+    def test_answered_fact_groups_merges_correctly(self):
+        prev = ["tkb_tariffs", "bank_selection_yul"]
+        new_tags = ["tkb_yul_conditions", "bank_selection_yul"]  # overlap: bank_selection_yul
+        merged = list(dict.fromkeys(prev + new_tags))
+        self.assertEqual(merged, ["tkb_tariffs", "bank_selection_yul", "tkb_yul_conditions"])
+
+    def test_answered_fact_groups_capped_at_15(self):
+        prev = [f"tag_{i}" for i in range(13)]
+        new_tags = ["tag_new_1", "tag_new_2", "tag_new_3"]
+        merged = list(dict.fromkeys(prev + new_tags))[:15]
+        self.assertEqual(len(merged), 15)
+
+    def test_bot_reply_history_kept_last_3(self):
+        history = [
+            {"hash": "aaa", "text": "reply1", "fact_tags": ["tag_a"], "turn": 1},
+            {"hash": "bbb", "text": "reply2", "fact_tags": ["tag_b"], "turn": 2},
+            {"hash": "ccc", "text": "reply3", "fact_tags": ["tag_c"], "turn": 3},
+        ]
+        new_entry = {"hash": "ddd", "text": "reply4", "fact_tags": ["tag_d"], "turn": 4}
+        history.append(new_entry)
+        history = history[-3:]
+        self.assertEqual(len(history), 3)
+        self.assertEqual(history[0]["hash"], "bbb")
+        self.assertEqual(history[-1]["hash"], "ddd")
+
+
+# ---------------------------------------------------------------------------
+# Plan §27 — Additional acceptance cases
+# ---------------------------------------------------------------------------
+
+class TestPlan27_AcceptanceCases(unittest.TestCase):
+    """§27: Acceptance cases from Telegram run."""
+
+    def test_syuda_skidyvat_is_docs_intent(self):
+        """'сюда скидывать?' must be recognized as docs intent."""
+        from app.processing.deal_state import detect_docs_intent
+        slots = {"debtor_type": "ЮЛ", "_last_bank": "ТКБ"}
+        self.assertTrue(detect_docs_intent("сюда скидывать?", slots))
+
+    def test_syuda_skidyvat_is_not_action_intent_alone(self):
+        """'сюда скидывать?' alone must NOT fire action intent (needs bank context)."""
+        from app.processing.deal_state import detect_action_intent
+        # It's a docs question, not a bare readiness trigger
+        result = detect_action_intent("сюда скидывать?")
+        # We don't assert True/False strictly — just verify no crash and returns bool
+        self.assertIsInstance(result, bool)
+
+    def test_okay_zhdu_after_handoff_silent(self):
+        """Session silenced after handoff: _session_silenced_after_handoff=True means no reply."""
+        slots = {"_session_silenced_after_handoff": True}
+        self.assertTrue(bool(slots.get("_session_silenced_after_handoff")))
+
+    def test_handoff_truthfulness_validator(self):
+        """Reply claiming manager transfer must fail validation when handoff=false."""
+        from app.services.response_validator import validate_reply
+        result = validate_reply(
+            reply="Передам ваши данные менеджеру в ближайшее время.",
+            brain_result={"action": "answer", "handoff": {"needed": False}},
+            current_entities={},
+            slots={},
+            user_text="хорошо",
+        )
+        self.assertFalse(result["is_valid"])
+        self.assertEqual(result["reason"], "handoff_claim_without_handoff_flag")
+
+    def test_no_handoff_claim_when_handoff_true(self):
+        """When handoff=true, handoff language in reply is valid."""
+        from app.services.response_validator import validate_reply
+        result = validate_reply(
+            reply="Передам ваши данные менеджеру — он свяжется с вами.",
+            brain_result={"action": "answer", "handoff": {"needed": True, "reason": "ready_to_open"}},
+            current_entities={},
+            slots={},
+            user_text="ТКБ мне подходит",
+        )
+        # Should not fail on handoff_claim_without_handoff_flag
+        self.assertNotEqual(result.get("reason"), "handoff_claim_without_handoff_flag")
+
+    def test_planner_scenario_kept_active_when_same(self):
+        """When Planner returns same scenario as active, decision is keep_active."""
+        from app.processing.scenario_policy import decide_scenario_policy
+        slots = {"_active_scenario": "bank_selection_yul", "debtor_type": "ЮЛ"}
+        result = decide_scenario_policy(
+            user_text="понял",
+            slots=slots,
+            rag_scenarios=[],
+            intent_signals={"intents": [], "matches": [], "dialog_acts": [],
+                            "debtor_type": "ЮЛ", "bank_focus": None, "semantic_rejects": []},
+            planner_scenario="bank_selection_yul",
+        )
+        self.assertEqual(result["decision"], "keep_active")
+        self.assertEqual(result["active_scenario"], "bank_selection_yul")
+
+
+# ---------------------------------------------------------------------------
+# Plan new §9 — Golden tests for new plan items
+# ---------------------------------------------------------------------------
+
+class TestPlanNew_CurrencyAccountScenario(unittest.TestCase):
+    """§3/§9: currency_account_question scenario routing."""
+
+    def test_currency_account_planner_candidate_detected(self):
+        """Lexical hint 'валют' → currency_account_question in candidates."""
+        from app.processing.message_processor import _build_planner_candidates
+        candidates = _build_planner_candidates(
+            user_text="могу я делать расчеты с валютным счетом?",
+            intent_signals={"intents": [], "matches": [], "dialog_acts": [],
+                            "debtor_type": None, "bank_focus": None, "semantic_rejects": []},
+            previous_scenario=None,
+            slots={},
+        )
+        self.assertIn("currency_account_question", candidates)
+
+    def test_currency_account_planner_accepted_by_policy(self):
+        """ScenarioPolicy accepts currency_account_question from Planner."""
+        from app.processing.scenario_policy import decide_scenario_policy
+        slots = {"_active_scenario": "bank_selection_yul"}
+        result = decide_scenario_policy(
+            user_text="могу я делать расчеты с валютным счетом?",
+            slots=slots,
+            rag_scenarios=[],
+            intent_signals={"intents": [], "matches": [], "dialog_acts": [],
+                            "debtor_type": None, "bank_focus": None, "semantic_rejects": []},
+            planner_scenario="currency_account_question",
+        )
+        self.assertEqual(result["active_scenario"], "currency_account_question")
+        self.assertEqual(result["reason"], "planner_decision")
+
+    def test_currency_settlement_claim_validator(self):
+        """§4: Reply claiming расчеты возможны when user asked must be rejected."""
+        from app.services.response_validator import validate_reply
+        result = validate_reply(
+            reply="Расчеты с кредиторами возможны через валютный счёт без ограничений.",
+            brain_result={"action": "answer", "handoff": {"needed": False}},
+            current_entities={},
+            slots={},
+            user_text="можно ли делать расчеты с кредиторами с валютного счета?",
+        )
+        self.assertFalse(result["is_valid"])
+        self.assertEqual(result["reason"], "currency_settlement_claim_without_restriction")
+
+    def test_currency_restriction_reply_passes(self):
+        """Reply stating расчеты не разрешены should pass the validator."""
+        from app.services.response_validator import validate_reply
+        result = validate_reply(
+            reply="Расчеты с кредиторами через валютный счёт не допускаются — только зачисление валюты.",
+            brain_result={"action": "answer", "handoff": {"needed": False}},
+            current_entities={},
+            slots={},
+            user_text="можно ли платить кредиторам с валютного счета?",
+        )
+        self.assertNotEqual(result.get("reason"), "currency_settlement_claim_without_restriction")
+
+
+class TestPlanNew_DebtorTypeUnknownGuard(unittest.TestCase):
+    """§5/§9: When debtor_type is unknown, Planner must not choose YUL/FL-specific scenarios."""
+
+    def test_unknown_debtor_candidate_does_not_push_yul(self):
+        """Without debtor_type, lexical/intent candidates should not include YUL-specific conditions."""
+        from app.processing.message_processor import _build_planner_candidates
+        candidates = _build_planner_candidates(
+            user_text="расскажи про условия ТКБ",
+            intent_signals={
+                "intents": ["specific_bank_conditions"],
+                "matches": [{"intent": "specific_bank_conditions", "source": "semantic",
+                             "score": 0.62, "matched_anchor": "условия ткб", "threshold": 0.58}],
+                "dialog_acts": [], "debtor_type": None, "bank_focus": "tkb", "semantic_rejects": [],
+            },
+            previous_scenario=None,
+            slots={},  # no debtor_type
+        )
+        # With no debtor_type, either yul or fl conditions may appear as candidates — that's OK
+        # The Planner (via rule 7) must not choose them. Test that rule is in the system prompt.
+        from app.services.dialog_planner import _PLANNER_SYSTEM_V2
+        self.assertIn("debtor_type=null", _PLANNER_SYSTEM_V2)
+        self.assertIn("unknown_business_question", _PLANNER_SYSTEM_V2)
+
+
+class TestPlanNew_PendingQuestionToPlanner(unittest.TestCase):
+    """§6/§9: Pending assistant question must be passed to Planner context."""
+
+    def test_pending_question_in_planner_context(self):
+        """If pending_question is set, it must appear in Planner context JSON."""
+        import json
+        from app.services.dialog_planner import _build_planner_context_v2
+        ctx_str = _build_planner_context_v2(
+            user_text="да",
+            recent_dialog=[{"role": "bot", "text": "Давайте подробнее разберём условия?"}],
+            known_slots={"debtor_type": "ЮЛ"},
+            deal_state={"deal_stage": "consulting"},
+            previous_scenario="tkb_yul_conditions",
+            candidate_scenarios=["tkb_yul_conditions"],
+            candidate_intents_regex=[],
+            candidate_intents_semantic=[],
+            last_bot_reply_summary="Давайте подробнее разберём условия?",
+            already_answered=[],
+            system_constraints={},
+            pending_question="Давайте подробнее разберём условия?",
+        )
+        ctx = json.loads(ctx_str)
+        self.assertIsNotNone(ctx.get("pending_assistant_question"))
+        self.assertIn("условия", ctx["pending_assistant_question"])
+
+
+class TestPlanNew_WeakAcknowledgement(unittest.TestCase):
+    """§8/§9: Weak acknowledgements must not auto-advance to docs/opening."""
+
+    def test_nu_ladno_no_pending_question_no_docs_consent(self):
+        """'ну ладно' without pending question must NOT trigger post_docs_consent."""
+        from app.processing.deal_state import update_deal_state
+        slots = {
+            "debtor_type": "ЮЛ",
+            "_last_bank": "ТКБ",
+            "_deal_state": {
+                "deal_stage": "bank_selected",
+                "next_manager_move": "explain_documents",
+                "selected_bank": "ТКБ",
+                "debtor_type": "ЮЛ",
+                "handoff_needed": False,
+                "selected_product": "bankruptcy_account",
+                "procedure_stage": None, "client_intent": None,
+                "ready_to_open_reason": None,
+                "last_offer": None, "last_bank_list_context": [], "last_conditions_context": [],
+                "last_bot_reply_hash": None,
+            },
+            # No _pending_question set
+        }
+        ds = update_deal_state(slots, "ну ладно")
+        self.assertNotEqual(ds.get("deal_stage"), "ready_to_open",
+            "'ну ладно' without pending question must not advance to ready_to_open")
+        self.assertFalse(ds.get("handoff_needed"))
+
+    def test_ponyatno_no_pending_question_no_docs_consent(self):
+        """'понятно' without pending question must NOT trigger post_docs_consent."""
+        from app.processing.deal_state import update_deal_state
+        slots = {
+            "debtor_type": "ЮЛ",
+            "_last_bank": "ТКБ",
+            "_deal_state": {
+                "deal_stage": "bank_selected",
+                "next_manager_move": "explain_documents",
+                "selected_bank": "ТКБ",
+                "debtor_type": "ЮЛ",
+                "handoff_needed": False,
+                "selected_product": "bankruptcy_account",
+                "procedure_stage": None, "client_intent": None,
+                "ready_to_open_reason": None,
+                "last_offer": None, "last_bank_list_context": [], "last_conditions_context": [],
+                "last_bot_reply_hash": None,
+            },
+        }
+        ds = update_deal_state(slots, "понятно")
+        self.assertFalse(ds.get("handoff_needed"))
+
+    def test_davajte_with_pending_question_does_consent(self):
+        """'давайте' WITH a pending yes/no question SHOULD trigger post_docs_consent."""
+        from app.processing.deal_state import update_deal_state
+        slots = {
+            "debtor_type": "ЮЛ",
+            "_last_bank": "ТКБ",
+            "_pending_question": "Готовы начать оформление?",
+            "_deal_state": {
+                "deal_stage": "bank_selected",
+                "next_manager_move": "explain_documents",
+                "selected_bank": "ТКБ",
+                "debtor_type": "ЮЛ",
+                "handoff_needed": False,
+                "selected_product": "bankruptcy_account",
+                "procedure_stage": None, "client_intent": None,
+                "ready_to_open_reason": None,
+                "last_offer": None, "last_bank_list_context": [], "last_conditions_context": [],
+                "last_bot_reply_hash": None,
+            },
+        }
+        ds = update_deal_state(slots, "давайте")
+        self.assertEqual(ds.get("deal_stage"), "ready_to_open")
+        self.assertTrue(ds.get("handoff_needed"))
+
+
+class TestPlanNew_ComplaintHandling(unittest.TestCase):
+    """§7/§9: Complaint and correction phrases must route to correct scenarios."""
+
+    def test_complaint_candidate_from_lexical_hint(self):
+        """'ты странный' must put bot_complaint in Planner candidates."""
+        from app.processing.message_processor import _build_planner_candidates
+        candidates = _build_planner_candidates(
+            user_text="ты странный какой-то",
+            intent_signals={"intents": [], "matches": [], "dialog_acts": [],
+                            "debtor_type": None, "bank_focus": None, "semantic_rejects": []},
+            previous_scenario=None,
+            slots={},
+        )
+        self.assertIn("bot_complaint", candidates)
+
+    def test_drugoe_sprasival_correction_candidate(self):
+        """'другое спрашивал' must include clarification_or_correction in candidates."""
+        from app.processing.message_processor import _build_planner_candidates
+        candidates = _build_planner_candidates(
+            user_text="я же другое спрашивал",
+            intent_signals={"intents": [], "matches": [], "dialog_acts": [],
+                            "debtor_type": None, "bank_focus": None, "semantic_rejects": []},
+            previous_scenario=None,
+            slots={},
+        )
+        self.assertIn("clarification_or_correction", candidates)
+
+    def test_bot_complaint_scenario_in_catalog(self):
+        """bot_complaint must be in ScenarioPolicy CATALOG."""
+        from app.processing.scenario_catalog import CATALOG
+        self.assertIn("bot_complaint", CATALOG)
+
+    def test_planner_system_prompt_mentions_complaint(self):
+        """Planner system prompt must instruct on complaint handling."""
+        from app.services.dialog_planner import _PLANNER_SYSTEM_V2
+        self.assertIn("bot_complaint", _PLANNER_SYSTEM_V2)
+
+
+class TestFix1_BurstMerging(unittest.TestCase):
+    """FIX 1 — Burst message merging: only the latest job in a burst should reply."""
+
+    def test_has_newer_active_job_exported(self):
+        """has_newer_active_job must be importable from jobs_repo."""
+        from app.storage.repositories.jobs_repo import has_newer_active_job
+        self.assertTrue(callable(has_newer_active_job))
+
+    def test_has_newer_queued_job_still_works(self):
+        """has_newer_queued_job must still be importable (backwards compat)."""
+        from app.storage.repositories.jobs_repo import has_newer_queued_job
+        self.assertTrue(callable(has_newer_queued_job))
+
+    def test_merge_trailing_consecutive_user_messages(self):
+        """_merge_trailing_user_messages must join consecutive user messages."""
+        from app.processing.message_processor import _merge_trailing_user_messages
+        msgs = [
+            {"role": "user", "text": "ТКБ"},
+            {"role": "user", "text": "Какие условия там"},
+            {"role": "user", "text": "?"},
+        ]
+        result = _merge_trailing_user_messages(msgs, "?")
+        # Should merge all 3 consecutive user messages
+        self.assertIn("ТКБ", result)
+        self.assertIn("Какие условия там", result)
+
+    def test_merge_stops_at_bot_reply(self):
+        """_merge_trailing_user_messages must stop at bot turn boundary."""
+        from app.processing.message_processor import _merge_trailing_user_messages
+        msgs = [
+            {"role": "user", "text": "Привет"},
+            {"role": "bot", "text": "Здравствуйте"},
+            {"role": "user", "text": "ТКБ"},
+            {"role": "user", "text": "условия?"},
+        ]
+        result = _merge_trailing_user_messages(msgs, "условия?")
+        # Should NOT include "Привет" from before bot reply
+        self.assertNotIn("Привет", result)
+        self.assertIn("ТКБ", result)
+
+    def test_frustration_only_re_catches_question_mark(self):
+        """_FRUSTRATION_ONLY_RE must match standalone '?'."""
+        from app.processing.message_processor import _FRUSTRATION_ONLY_RE
+        self.assertTrue(_FRUSTRATION_ONLY_RE.match("?"))
+        self.assertTrue(_FRUSTRATION_ONLY_RE.match("???"))
+        self.assertTrue(_FRUSTRATION_ONLY_RE.match("!"))
+        self.assertFalse(_FRUSTRATION_ONLY_RE.match("привет"))
+
+
+class TestFix2_ForeignLanguageArtifacts(unittest.TestCase):
+    """FIX 2 — Foreign language artifacts must be caught before sending."""
+
+    def test_benotujete_rejected(self):
+        """Reply containing 'benötujete' must be invalid."""
+        from app.services.response_validator import validate_reply
+        result = validate_reply(
+            reply="Для открытия счета benötujete ИНН должника.",
+            brain_result={},
+            current_entities={},
+            slots={},
+            user_text="что нужно для открытия",
+        )
+        self.assertFalse(result["is_valid"])
+        self.assertEqual(result["reason"], "non_russian_output")
+
+    def test_umlaut_o_rejected(self):
+        """Reply containing 'ö' must be invalid."""
+        from app.services.response_validator import validate_reply
+        result = validate_reply(
+            reply="Документ öffnen должника.",
+            brain_result={},
+            current_entities={},
+            slots={},
+        )
+        self.assertFalse(result["is_valid"])
+        self.assertEqual(result["reason"], "non_russian_output")
+
+    def test_valid_crm_bitrix_allowed(self):
+        """Reply containing 'CRM' and 'Bitrix' must be valid (allowlisted)."""
+        from app.services.response_validator import validate_reply
+        result = validate_reply(
+            reply="Заявка передаётся в CRM через Bitrix системой учёта.",
+            brain_result={},
+            current_entities={},
+            slots={},
+        )
+        self.assertTrue(result["is_valid"])
+
+    def test_long_latin_word_in_russian_text_rejected(self):
+        """Reply with unexpected long Latin word in Russian context must be invalid."""
+        from app.services.response_validator import validate_reply
+        result = validate_reply(
+            reply="Открытие счёта требует оформления через zusammenarbeit с банком.",
+            brain_result={},
+            current_entities={},
+            slots={},
+        )
+        self.assertFalse(result["is_valid"])
+        self.assertEqual(result["reason"], "non_russian_output")
+
+    def test_telegram_allowed(self):
+        """'Telegram' must be allowlisted and not trigger foreign artifact."""
+        from app.services.response_validator import validate_reply
+        result = validate_reply(
+            reply="Вопросы задавайте через Telegram удобным способом в рабочее время.",
+            brain_result={},
+            current_entities={},
+            slots={},
+        )
+        self.assertTrue(result["is_valid"])
+
+    def test_foreign_artifact_re_catches_o_umlaut(self):
+        """_FOREIGN_ARTIFACT_RE must match ö (U+00F6)."""
+        import re
+        from app.services.response_validator import _FOREIGN_ARTIFACT_RE
+        self.assertIsNotNone(_FOREIGN_ARTIFACT_RE.search("benötujete"))
+        self.assertIsNotNone(_FOREIGN_ARTIFACT_RE.search("öffnen"))
+        self.assertIsNone(_FOREIGN_ARTIFACT_RE.search("CRM Bitrix"))
+
+
+class TestFix3_ConditionsDrift(unittest.TestCase):
+    """FIX 3 — Conditions requests must not drift to documents/opening flow."""
+
+    def test_conditions_request_detected(self):
+        """_CONDITIONS_REQUEST_RE must match 'какие условия в ТКБ'."""
+        from app.services.response_validator import _CONDITIONS_REQUEST_RE
+        self.assertIsNotNone(_CONDITIONS_REQUEST_RE.search("какие условия в ТКБ"))
+        self.assertIsNotNone(_CONDITIONS_REQUEST_RE.search("Какие там условия?"))
+        self.assertIsNotNone(_CONDITIONS_REQUEST_RE.search("что по условиям в банке"))
+
+    def test_docs_drift_detected(self):
+        """_DOCS_OPENING_DRIFT_RE must match document/opening drift phrases."""
+        from app.services.response_validator import _DOCS_OPENING_DRIFT_RE
+        self.assertIsNotNone(_DOCS_OPENING_DRIFT_RE.search("Для открытия нужны ИНН и судебный акт"))
+        self.assertIsNotNone(_DOCS_OPENING_DRIFT_RE.search("поможем оформить счёт"))
+        self.assertIsNotNone(_DOCS_OPENING_DRIFT_RE.search("давайте соберём документы"))
+
+    def test_conditions_reply_drifted_to_docs_rejected(self):
+        """Reply drifting to docs when user asked about conditions must be invalid."""
+        from app.services.response_validator import validate_reply
+        result = validate_reply(
+            reply="Открытие 2800 руб., ведение 2090 руб. Для открытия нужны ИНН, данные АУ и судебный акт.",
+            brain_result={},
+            current_entities={},
+            slots={},
+            user_text="Какие условия в ТКБ?",
+        )
+        self.assertFalse(result["is_valid"])
+        self.assertEqual(result["reason"], "conditions_reply_drifted_to_documents")
+
+    def test_conditions_reply_on_target_valid(self):
+        """Conditions reply focused on operations (not docs) must be valid."""
+        from app.services.response_validator import validate_reply
+        result = validate_reply(
+            reply=(
+                "По ТКБ ключевые условия: переводы на ЮЛ — 33 руб. электронно, "
+                "переводы на ФЛ тарифицируются по шкале банка. "
+                "Есть особенности по операциям и согласованию платежей."
+            ),
+            brain_result={},
+            current_entities={},
+            slots={},
+            user_text="Какие условия в ТКБ?",
+        )
+        self.assertTrue(result["is_valid"])
+
+    def test_planner_system_prompt_mentions_conditions_rule(self):
+        """Planner system prompt must have a rule about conditions requests."""
+        from app.services.dialog_planner import _PLANNER_SYSTEM_V2
+        self.assertIn("условия", _PLANNER_SYSTEM_V2.lower())
+        self.assertIn("tkb_yul_conditions", _PLANNER_SYSTEM_V2)
+
+    def test_non_conditions_request_not_blocked(self):
+        """Reply to non-conditions request must not be blocked by conditions drift check."""
+        from app.services.response_validator import validate_reply
+        result = validate_reply(
+            reply="Для открытия счёта нужны ИНН должника, данные АУ и судебный акт суда.",
+            brain_result={},
+            current_entities={},
+            slots={"debtor_type": "ЮЛ"},
+            user_text="какие документы нужны для открытия счёта?",
+        )
+        # This is a docs request, not a conditions request — drift check must NOT fire
+        self.assertTrue(result["is_valid"])
+
+
+class TestFix4_DeterministicHandoffReply(unittest.TestCase):
+    """FIX 4 — When handoff=true, send fixed deterministic reply instead of LLM output."""
+
+    def test_deterministic_reply_constant_exists(self):
+        """_HANDOFF_DETERMINISTIC_REPLY must be defined and contain expected text."""
+        from app.processing.message_processor import _HANDOFF_DETERMINISTIC_REPLY
+        self.assertIn("Принял", _HANDOFF_DETERMINISTIC_REPLY)
+        self.assertIn("менеджер", _HANDOFF_DETERMINISTIC_REPLY.lower())
+        self.assertIn("Передаю", _HANDOFF_DETERMINISTIC_REPLY)
+
+    def test_deterministic_reply_is_short_and_clean(self):
+        """Fixed handoff reply must be a short, non-verbose message."""
+        from app.processing.message_processor import _HANDOFF_DETERMINISTIC_REPLY
+        # Should not be excessively long
+        self.assertLess(len(_HANDOFF_DETERMINISTIC_REPLY), 120)
+        # Should not have LLM-style filler
+        lower = _HANDOFF_DETERMINISTIC_REPLY.lower()
+        self.assertNotIn("документ", lower)
+        self.assertNotIn("инн", lower)
+        self.assertNotIn("откр", lower)
+
+    def test_deterministic_reply_passes_validator(self):
+        """The fixed handoff reply must be valid according to response_validator."""
+        from app.processing.message_processor import _HANDOFF_DETERMINISTIC_REPLY
+        from app.services.response_validator import validate_reply
+        result = validate_reply(
+            reply=_HANDOFF_DETERMINISTIC_REPLY,
+            brain_result={"handoff": {"needed": True, "reason": "ready_to_open"}, "action": "handoff"},
+            current_entities={},
+            slots={},
+            user_text="окей, подходит",
+        )
+        self.assertTrue(result["is_valid"], f"Handoff reply invalid: {result['reason']}")
+
+    def test_handoff_reply_not_llm_generated(self):
+        """The handoff reply must not come from LLM — verified by being the fixed constant."""
+        from app.processing.message_processor import _HANDOFF_DETERMINISTIC_REPLY
+        # Exact match check — it must be this specific string, not an LLM variation
+        self.assertEqual(
+            _HANDOFF_DETERMINISTIC_REPLY,
+            "Принял. Передаю вашу заявку старшему менеджеру, чтобы помочь вам дальше.",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

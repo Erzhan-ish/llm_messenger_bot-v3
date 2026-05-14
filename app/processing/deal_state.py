@@ -22,7 +22,7 @@ _ACTION_INTENT_RE = re.compile(
     r"|давайте\s+(?:открыть|открываем|откроем|оформим|открывать)"
     r"|открыть\s+сч[её]т"
     r"|оформляем|приступаем|запускаем"
-    r"|готов\s+открыть|готовы\s+открыть"
+    r"|готов\s+(?:открыть|запускать)|готовы\s+открыть"
     # Confirmation/question about opening
     r"|откроете\b|откроем\b"
     r"|берёте\s+в\s+работу|берете\s+в\s+работу"
@@ -49,7 +49,7 @@ _DOCS_INTENT_RE = re.compile(
     r"|что\s+мне\s+(?:прислать|нужно|делать\s+дальше)"
     r"|что\s+дальше|дальше\s+что|следующий\s+шаг"
     r"|как\s+дальше|что\s+прислать|что\s+передать"
-    r"|что\s+скинуть|что\s+скидывать"
+    r"|что\s+скинуть|что\s+скидывать|сюда\s+скидывать|сюда\s+скинуть"
     r"|какие\s+документы|какие\s+данные"
     r")",
     re.I | re.U,
@@ -58,15 +58,22 @@ _DOCS_INTENT_RE = re.compile(
 # Short affirmatives after docs explanation — trigger escalation to ready_to_open
 _DOCS_AFFIRM_RE = re.compile(
     r"^\s*(хорошо|ладно|давайте|да|ок|окей|отлично|подходит|принято|годится"
-    r"|договорились|понял|ясно|понятно|всё\s+ясно|всё\s+понятно)\s*[.!?]?\s*$",
+    r"|договорились|понял|ясно|понятно|всё\s+ясно|всё\s+понятно"
+    r"|мне\s+подходит|нам\s+подходит|это\s+подходит|подойдёт|подойдет)\s*[.!?]?\s*$",
+    re.I | re.U,
+)
+
+# §8 — Weak acknowledgements: these must NOT trigger post_docs_consent without a pending question
+_WEAK_AFFIRM_RE = re.compile(
+    r"^\s*(ну\s+ладно|понятно|понял|ясно|хорошо|ок|окей|угу|ага|ладно)\s*[.!?]?\s*$",
     re.I | re.U,
 )
 
 # Informational question phrasing — prevents misclassification as action intent
 _QUESTION_PHRASING_RE = re.compile(
     r"\b(где|как\s+быстро|как\s+скоро|как\s+долго|сколько\s+по\s+времени"
-    r"|сколько\s+времени|сколько\s+дней|за\s+сколько|быстрее\s+всего"
-    r"|быстрее\s+открыть|где\s+быстрее)\b",
+    r"|по\s+времени\s+сколько|сколько\s+времени|сколько\s+дней|за\s+сколько"
+    r"|быстрее\s+всего|быстрее\s+открыть|где\s+быстрее)\b",
     re.I | re.U,
 )
 
@@ -120,11 +127,13 @@ def update_deal_state(
     slots: dict,
     user_text: str,
     intent_signals: Optional[dict] = None,
+    hard_only: bool = False,
 ) -> dict:
     """Update ``slots['_deal_state']`` and return the updated dict.
 
-    Called once per message after intent_signals are computed.
-    The deal_stage is monotone: once ready_to_open, it stays unless reset.
+    hard_only=True: only sync slots, track last reply, and allow ready_to_open
+    with full context (bank + debtor). Skips consulting/comparing_banks assignments
+    so the LLM Planner can set business state first.
     """
     ds: dict = dict(slots.get("_deal_state") or {})
 
@@ -182,37 +191,46 @@ def update_deal_state(
     if is_action:
         ds["client_intent"] = "open_account"
         if bank and debtor_type:
+            # Full context: hard ready_to_open regardless of hard_only mode
             ds["deal_stage"] = "ready_to_open"
             ds["next_manager_move"] = "handoff_to_manager"
             ds["ready_to_open_reason"] = "action_intent_with_context"
             ds["handoff_needed"] = True
-        elif bank or debtor_type:
-            ds["deal_stage"] = "bank_selected" if bank else (ds.get("deal_stage") or "consulting")
-            ds["next_manager_move"] = "collect_missing_slot"
-        else:
-            ds["deal_stage"] = ds.get("deal_stage") or "consulting"
-            ds["next_manager_move"] = "collect_missing_slot"
+        elif not hard_only:
+            # Partial context: only set in full mode (Planner handles ambiguous cases)
+            if bank or debtor_type:
+                ds["deal_stage"] = "bank_selected" if bank else (ds.get("deal_stage") or "consulting")
+                ds["next_manager_move"] = "collect_missing_slot"
+            else:
+                ds["deal_stage"] = ds.get("deal_stage") or "consulting"
+                ds["next_manager_move"] = "collect_missing_slot"
 
     elif (
         ds.get("next_manager_move") == "explain_documents"
         and bank
         and _DOCS_AFFIRM_RE.match(user_text or "")
         and ds.get("deal_stage") not in ("ready_to_open", "collecting_documents", "handoff")
+        # §8: weak acknowledgements only count when there was an explicit pending question
+        and not (
+            _WEAK_AFFIRM_RE.match(user_text or "")
+            and not (slots.get("_pending_question") or slots.get("_last_bot_question"))
+        )
     ):
-        # Post-documents consent: docs were just explained, user affirms → escalate
+        # Post-documents consent: docs were just explained, user explicitly affirms → escalate
         ds["deal_stage"] = "ready_to_open"
         ds["client_intent"] = "open_account"
         ds["next_manager_move"] = "handoff_to_manager"
         ds["ready_to_open_reason"] = "post_docs_consent"
         ds["handoff_needed"] = True
 
-    elif is_docs:
+    elif is_docs and not hard_only:
         ds["client_intent"] = "ask_documents"
         ds["next_manager_move"] = "explain_documents"
         if ds.get("deal_stage") not in ("ready_to_open", "collecting_documents", "handoff"):
             ds["deal_stage"] = "bank_selected" if bank else "consulting"
 
-    elif not ds.get("deal_stage"):
+    elif not ds.get("deal_stage") and not hard_only:
+        # §1: Planner decides business stage — only set defaults in full mode
         if "compare_banks" in intents or "bank_selection" in intents:
             ds["deal_stage"] = "comparing_banks"
             ds["client_intent"] = "compare"

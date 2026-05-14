@@ -14,6 +14,8 @@ from __future__ import annotations
 import re
 from typing import Optional
 
+from app.logging import logger
+
 # ---------------------------------------------------------------------------
 # Keep-active triggers
 # ---------------------------------------------------------------------------
@@ -304,6 +306,18 @@ _BANK_FOCUS_SCENARIOS: dict[str, tuple[str, str]] = {
     "rosbank":  ("rosbank_yul_conditions",  "bank_selection_fl"),
 }
 
+# §8 — Conditions vs tariffs differentiation
+_TARIFF_FOCUSED_SCENARIOS: frozenset[str] = frozenset({
+    "bank_selection_yul", "bank_selection_fl", "bank_pricing_yul", "bank_pricing_fl",
+    "bank_tariff_comparison", "bank_selection_yul_low_cost",
+})
+_CONDITIONS_FOCUSED_SCENARIOS: frozenset[str] = frozenset({
+    "alfabank_yul_conditions", "tkb_yul_conditions", "uralsib_yul_conditions",
+    "tbank_yul_conditions", "mkb_yul_conditions", "rosbank_yul_conditions",
+    "tkb_fl_conditions", "uralsib_fl_conditions",
+})
+_S_CONDITIONS_CORRECTION = 60.0  # hard-route to conditions when user corrects "not tariffs"
+
 # Secondary-intent → required_next_step when this scenario is primary
 _SECONDARY_NEXT_STEP: dict[tuple[str, str], str] = {
     ("bank_selection_yul_low_cost", "tariff_comparison_requested"): "give_tariff_comparison",
@@ -337,6 +351,8 @@ def _compute_scenario_score(
     bank_focus: Optional[str],
     user_text: str,
     stored_debtor_type: Optional[str] = None,
+    is_conditions_correction: bool = False,
+    is_conditions_intent: bool = False,
 ) -> float:
     score = 0.0
     sid = spec.scenario_id
@@ -433,6 +449,19 @@ def _compute_scenario_score(
         if intent in detected_intents:
             score += _S_BLOCK_INTENT
 
+    # §8 — Conditions correction: hard-route to conditions, block tariff scenarios
+    if is_conditions_correction:
+        if sid in _TARIFF_FOCUSED_SCENARIOS:
+            score = -999.0   # hard block — overrides all accumulated score
+        elif sid in _CONDITIONS_FOCUSED_SCENARIOS:
+            score += _S_CONDITIONS_CORRECTION  # +60 ensures win over continuity
+    elif is_conditions_intent:
+        # Soft boost: conditions_details_requested scores above tariff continuity
+        if sid in _CONDITIONS_FOCUSED_SCENARIOS:
+            score += _S_BANK_SWITCH * 0.7   # +35 beats continuity (3) + intent match (2)
+        elif sid in _TARIFF_FOCUSED_SCENARIOS:
+            score -= _S_CONTINUITY           # cancel continuity if active tariff scenario
+
     # Priority tiebreaker (tiny offset)
     score += spec.priority * 0.01
 
@@ -463,6 +492,7 @@ def decide_scenario_policy(
     rag_scenarios: list[dict],
     dialog_state: Optional[str] = None,
     intent_signals: Optional[dict] = None,
+    planner_scenario: Optional[str] = None,
 ) -> dict:
     """Score all catalog scenarios and pick the winner.
 
@@ -532,6 +562,12 @@ def decide_scenario_policy(
     bank_switch_tgt = _bank_pricing_switch_target(user_text, active, slots)
     domain_shift_tgt = _domain_shift_target(user_text, active)
     is_new_topic = bool(_NEW_TOPIC_RE.search(user_text))
+    # §8 — Conditions vs tariffs
+    is_conditions_correction = "correction_not_tariffs_but_conditions" in regex_intents
+    is_conditions_intent = (
+        not is_conditions_correction
+        and "conditions_details_requested" in (regex_intents | semantic_intents)
+    )
 
     # TASK 3 — Repetition complaint: hard override, skips all business scenarios
     if "repetition_complaint" in regex_intents or "repetition_complaint" in semantic_intents:
@@ -544,6 +580,27 @@ def decide_scenario_policy(
             "reason": "repetition_complaint_override",
             "required_next_step": None,
         }
+
+    # §9 — Planner-driven routing: validate Planner scenario and accept it directly
+    if planner_scenario:
+        if planner_scenario in CATALOG:
+            required_next_step = _get_required_next_step(planner_scenario, detected_intents)
+            decision = "switch" if planner_scenario != active else "keep_active"
+            rag_ids = [m["scenario_id"] for m in rag_scenarios]
+            return {
+                "scenario_switch_allowed": decision == "switch",
+                "decision": decision,
+                "active_scenario": planner_scenario,
+                "candidate_scenarios": [sid for sid in rag_ids if sid != planner_scenario][:3],
+                "scores": {planner_scenario: 999.0},
+                "reason": "planner_decision",
+                "required_next_step": required_next_step,
+            }
+        else:
+            logger.warning(
+                "ScenarioPolicy | Planner scenario '{}' not in catalog — falling back to scoring",
+                planner_scenario,
+            )
 
     # Score every catalog scenario
     scored: list[tuple[float, str]] = []
@@ -566,6 +623,8 @@ def decide_scenario_policy(
             bank_focus=bank_focus,
             user_text=user_text,
             stored_debtor_type=stored_debtor_type,
+            is_conditions_correction=is_conditions_correction,
+            is_conditions_intent=is_conditions_intent,
         )
         scored.append((s, sid))
 
@@ -622,6 +681,10 @@ def decide_scenario_policy(
         reasons.append(f"domain_shift:{domain_shift_tgt}")
     if is_new_topic:
         reasons.append("new_topic")
+    if is_conditions_correction:
+        reasons.append("conditions_correction")
+    elif is_conditions_intent:
+        reasons.append("conditions_intent")
     if not reasons:
         reasons.append("scoring")
 

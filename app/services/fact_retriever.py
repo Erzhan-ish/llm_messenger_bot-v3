@@ -847,8 +847,74 @@ async def retrieve_context_for_brain(
                 except Exception:
                     logger.exception("forced specific_bank retrieval failed (ignored)")
 
-        # §7 — primary_chunks fix: when active scenario + bank known, boost matching
-        # scenario chunks to primary so LLM always sees them (fixes primary_chunks=0 issue).
+        # §11 — conditions_details: lift bank conditions + transfer rules + operational specifics
+        if forced_scenarios and "conditions_details" in forced_scenarios:
+            try:
+                si = kb.scenario_index
+                _bank_lower = (bank_focus or "").lower()
+                _ct_lower = (client_type or "").lower()
+                if "альфа" in _bank_lower:
+                    _cond_scens = ["alfabank_yul_conditions"]
+                elif "ткб" in _bank_lower or "транскапитал" in _bank_lower:
+                    _cond_scens = ["tkb_fl_conditions" if "фл" in _ct_lower else "tkb_yul_conditions"]
+                elif "урал" in _bank_lower:
+                    _cond_scens = ["uralsib_fl_conditions" if "фл" in _ct_lower else "uralsib_yul_conditions"]
+                elif "т-банк" in _bank_lower or "тинькофф" in _bank_lower:
+                    _cond_scens = ["tbank_yul_conditions"]
+                elif "мкб" in _bank_lower:
+                    _cond_scens = ["mkb_yul_conditions"]
+                elif "росбанк" in _bank_lower:
+                    _cond_scens = ["rosbank_yul_conditions"]
+                else:
+                    _cond_scens = []
+                for _cscen in _cond_scens:
+                    for ch in si.by_scenario.get(_cscen, [])[:6]:
+                        if getattr(ch, "type", "") in ("pricing", "constraint", "internal_ops", "feature", "docs"):
+                            _t = (getattr(ch, "text", "") or "")[:300]
+                            if not any(f.get("text") == _t for f in _primary_kb_facts):
+                                _primary_kb_facts.append({
+                                    "type": getattr(ch, "type", ""),
+                                    "bank": getattr(ch, "bank", None),
+                                    "fact": getattr(ch, "fact", None),
+                                    "text": _t,
+                                    "_forced_from": f"intent:conditions_details:{_cscen}",
+                                })
+            except Exception:
+                logger.exception("forced conditions_details retrieval failed (ignored)")
+
+        # §11 — no_branch/remote opening questions
+        if forced_scenarios and "no_branch" in forced_scenarios:
+            try:
+                si = kb.scenario_index
+                for _nb_sid in ("no_branch", "remote_opening", "signing_constraints"):
+                    for ch in si.by_scenario.get(_nb_sid, [])[:4]:
+                        if getattr(ch, "type", "") in ("constraint", "internal_ops", "feature"):
+                            _t = (getattr(ch, "text", "") or "")[:300]
+                            if not any(f.get("text") == _t for f in _primary_kb_facts):
+                                _primary_kb_facts.append({
+                                    "type": getattr(ch, "type", ""),
+                                    "bank": getattr(ch, "bank", None),
+                                    "fact": getattr(ch, "fact", None),
+                                    "text": _t,
+                                    "_forced_from": f"intent:no_branch:{_nb_sid}",
+                                })
+                # Also lift no_branch related chunks already in top_chunks
+                for ch in top_chunks:
+                    if getattr(ch, "type", "") in ("constraint", "internal_ops"):
+                        _t = (getattr(ch, "text", "") or "")[:300]
+                        if any(kw in _t.lower() for kw in ("без визита", "без посещения", "онлайн", "дистанционно")):
+                            if not any(f.get("text") == _t for f in _primary_kb_facts):
+                                _primary_kb_facts.append({
+                                    "type": getattr(ch, "type", ""),
+                                    "bank": getattr(ch, "bank", None),
+                                    "fact": getattr(ch, "fact", None),
+                                    "text": _t,
+                                    "_forced_from": "intent:no_branch:top_chunks",
+                                })
+            except Exception:
+                logger.exception("forced no_branch retrieval failed (ignored)")
+
+        # §11 / §7 — fallback: when active scenario + bank known, guarantee primary chunks
         _active_scenario = memory.get("active_scenario") or memory.get("_active_scenario") or ""
         _bank_known = bool(bank_focus)
         if _active_scenario and _bank_known and not _primary_kb_facts:
@@ -874,12 +940,16 @@ async def retrieve_context_for_brain(
 
         dropped = max(0, len(ranked) - 14)
         _sid = session_id if session_id is not None else memory.get("session_id")
+        _primary_scenarios = list(dict.fromkeys(
+            f.get("_forced_from", "").split(":")[0] if ":" in f.get("_forced_from", "") else f.get("_forced_from", "")
+            for f in _primary_kb_facts if f.get("_forced_from")
+        ))
         logger.info(
             "RAGTrace | trace_id={} | session={} | query={!r} | forced_scenarios={} "
-            "| forced_topics={} | primary_chunks={} | raw_chunks={} | dropped={} | scenarios={}",
+            "| forced_topics={} | primary_chunks={} | primary_scenarios={} | raw_chunks={} | dropped={} | scenarios={}",
             trace_id, _sid, user_text[:80],
             forced_scenarios, forced_topics,
-            len(_primary_kb_facts), len(facts), dropped,
+            len(_primary_kb_facts), _primary_scenarios, len(facts), dropped,
             [m["scenario_id"] for m in scenario_matches_list],
         )
 

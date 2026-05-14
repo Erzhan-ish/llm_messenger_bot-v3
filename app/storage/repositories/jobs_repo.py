@@ -109,12 +109,22 @@ async def mark_error(job_id: int, error_text: str) -> None:
 
 async def has_newer_queued_job(current_job_id: int, external_user_id: str) -> bool:
     """True if there is a newer queued inbound job for the same user (still waiting to run)."""
+    return await has_newer_active_job(current_job_id, external_user_id)
+
+
+async def has_newer_active_job(current_job_id: int, external_user_id: str) -> bool:
+    """True if there is a newer queued OR running inbound job for the same user.
+
+    Checks both 'queued' and 'running' so that burst messages picked up in the
+    same worker batch are still properly suppressed: when multiple jobs for the
+    same user are marked 'running' simultaneously, only the highest-id job
+    (the latest message) should produce a reply.
+    """
     from sqlalchemy import text
     async with AsyncSessionLocal() as session:
-        # json_extract works for SQLite; for PostgreSQL use payload->>'external_user_id'
         stmt = text(
             "SELECT COUNT(*) FROM jobs "
-            "WHERE status = 'queued' AND job_type = 'inbound' AND id > :jid "
+            "WHERE status IN ('queued', 'running') AND job_type = 'inbound' AND id > :jid "
             "AND json_extract(payload, '$.external_user_id') = :uid"
         )
         res = await session.execute(stmt, {"jid": current_job_id, "uid": str(external_user_id)})

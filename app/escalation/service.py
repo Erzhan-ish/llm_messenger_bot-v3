@@ -233,15 +233,25 @@ async def escalate_to_manager(session_id: int):
     slots = await get_slots(session.id)
     inn = (slots or {}).get("inn")
     _deal_state = (slots or {}).get("_deal_state") or {}
+    # Normalized enum values for logs (plan §10 — avoid UTF-8 corruption in metadata)
+    _BANK_ENUM = {
+        "Альфа-Банк": "alfabank", "ТКБ": "tkb", "Уралсиб": "uralsib",
+        "Т-Банк": "tbank", "МКБ": "mkb", "Росбанк": "rosbank",
+    }
+    _DEBTOR_ENUM = {"ЮЛ": "legal_entity", "ФЛ": "individual", "ИП": "sole_trader"}
+    _raw_bank = _deal_state.get("selected_bank") or ""
+    _raw_debtor = _deal_state.get("debtor_type") or ""
+    _log_bank = _BANK_ENUM.get(_raw_bank, _raw_bank.lower().replace("-", "").replace(" ", "") or "unknown")
+    _log_debtor = _DEBTOR_ENUM.get(_raw_debtor, _raw_debtor.lower() or "unknown")
     logger.info(
         "EscalationMetadata | session_id={} | external_user_id={} | reason={}"
         " | selected_bank={} | debtor_type={} | deal_stage={} | source=telegram",
         session.id,
         external_user_id,
         (slots or {}).get("_escalation_reason", "unknown"),
-        _deal_state.get("selected_bank"),
-        _deal_state.get("debtor_type"),
-        _deal_state.get("deal_stage"),
+        _log_bank,
+        _log_debtor,
+        _deal_state.get("deal_stage") or "unknown",
     )
     duty_manager_id = settings.DUTY_MANAGER_ID
 

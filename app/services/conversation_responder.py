@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 _SYSTEM_PROMPT = """Ты — Алексей, менеджер-консультант компании «В плюсе».
 Помогаешь арбитражным управляющим открывать банковские счета для должников в банкротных процедурах.
 
+ОБРАЩЕНИЕ:
+Используй ТОЛЬКО формальное обращение: вы, вам, ваш, вашего, вами, вас, вашу, ваши.
+НИКОГДА не используй: ты, тебе, тебя, твой, твоя, твои, твоё, твоего, твоему, твоей.
+
 СТИЛЬ ДИАЛОГА:
 Веди диалог как живой менеджер. Intents и scenarios — это подсказки, а не жёсткий скрипт.
 - Краткость: 1–3 предложения. Telegram-стиль, живой деловой язык.
@@ -311,6 +315,7 @@ async def run_conversation_responder(
     dialog_state: str | None = None,
     fact_pack: dict | None = None,
     trace_ctx: dict | None = None,
+    planner_result: dict | None = None,
 ) -> dict:
     """Call LLM in natural manager mode and return responder result dict."""
     # Expose only user-relevant slots (no internal _ prefixes)
@@ -351,6 +356,24 @@ async def run_conversation_responder(
         payload["banks_hint"] = fp["_banks_hint"]
     if fp.get("_note"):
         payload["note"] = fp["_note"]
+
+    # Inject Planner result as structured instruction for the LLM
+    if planner_result:
+        _pl_instr = planner_result.get("responder_instruction") or ""
+        _pl_must_not = planner_result.get("must_not_repeat") or []
+        _pl_scenario = planner_result.get("scenario") or ""
+        _pl_intent = planner_result.get("user_intent") or ""
+        planner_hint: dict = {}
+        if _pl_scenario:
+            planner_hint["scenario"] = _pl_scenario
+        if _pl_intent:
+            planner_hint["user_intent"] = _pl_intent
+        if _pl_instr:
+            planner_hint["instruction"] = _pl_instr
+        if _pl_must_not:
+            planner_hint["must_not_repeat"] = _pl_must_not
+        if planner_hint:
+            payload["planner"] = planner_hint
 
     messages = [
         {"role": "system", "content": _SYSTEM_PROMPT},

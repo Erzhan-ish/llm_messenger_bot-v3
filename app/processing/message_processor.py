@@ -42,7 +42,7 @@ from app.services.escalation_detector import detect_escalation_signal
 from app.services.fact_retriever import retrieve_context_for_brain
 from app.services.response_validator import validate_reply
 from app.services.transcription_service import transcribe_audio
-from app.storage.repositories.jobs_repo import has_newer_queued_job
+from app.storage.repositories.jobs_repo import has_newer_active_job
 from app.storage.repositories.messages_repo import get_messages_by_session, save_message
 from app.storage.repositories.sessions_repo import (
     get_client_need,
@@ -94,16 +94,11 @@ _QUESTION_PHRASING_RE = re.compile(
 # Сообщения только из знаков (????!, !!!) — сигнал фрустрации
 _FRUSTRATION_ONLY_RE = re.compile(r"^[?!.\s…–—-]+$")
 
-# Короткие подтверждения после мягкого handoff (plan §2)
-_HANDOFF_ACK_RE = re.compile(
-    r"^\s*(ок|окей|хорошо|ладно|понял|ясно|понятно|принято|спасибо|благодарю"
-    r"|жду|жду\s+звонка|буду\s+ждать|отлично|ждем|всё\s+понятно|всё\s+ясно"
-    r"|хорошо\s+спасибо|ок\s+спасибо|спасибо\s+большое)\s*[.!?]?\s*$",
-    re.I | re.U,
-)
-_HANDOFF_LATCH_REPLY = (
-    "Отлично, ваш кейс уже передан менеджеру. Он свяжется с вами в ближайшее время."
-)
+# Флаг полного молчания после хэндоффа (plan §2)
+_SESSION_SILENCED_KEY = "_session_silenced_after_handoff"
+
+# Детерминированный финальный ответ при handoff — всегда фиксированный, без LLM
+_HANDOFF_DETERMINISTIC_REPLY = "Принял. Передаю вашу заявку старшему менеджеру, чтобы помочь вам дальше."
 
 # Вопросы вне домена компании (льготы/скидки/промо — не про банковские бонусы АУ)
 _OUT_OF_DOMAIN_RE = re.compile(
@@ -289,6 +284,103 @@ def _update_slots_from_state(slots: dict, state_update: dict) -> None:
         slots["_sales_context"] = merged
 
 
+# §2 — Intent → candidate scenarios mapping for Planner
+_INTENT_TO_CANDIDATE_SCENARIOS: dict[str, list[str]] = {
+    "tariff_comparison_requested":      ["bank_pricing_yul", "bank_tariff_comparison", "bank_pricing_fl"],
+    "specific_bank_conditions":         ["tkb_yul_conditions", "alfabank_yul_conditions", "uralsib_yul_conditions"],
+    "bank_selection":                   ["bank_selection_yul", "bank_selection_fl"],
+    "direct_bank_objection":            ["direct_bank_objection"],
+    "interest_or_bonus":                ["au_bonus_question", "interest_on_balance"],
+    "bonus_interest":                   ["au_bonus_question", "interest_on_balance"],
+    "timelines":                        ["timeline_question"],
+    "documents_requested":              ["documents_required"],
+    "conditions_details_requested":     ["tkb_yul_conditions", "alfabank_yul_conditions", "uralsib_yul_conditions"],
+    "correction_not_tariffs_but_conditions": ["tkb_yul_conditions", "alfabank_yul_conditions"],
+    "ready_to_open_intent":             ["ready_to_open"],
+    "open_account_intent":              ["ready_to_open"],
+    "repetition_complaint":             ["bot_repetition_complaint"],
+    "confusion_or_correction":          ["clarification_or_correction"],
+}
+
+# Lexical hints: keyword in lowercased user_text → candidate scenario
+_LEXICAL_CANDIDATE_HINTS: list[tuple[str, str]] = [
+    ("валют",           "currency_account_question"),
+    ("красн",           "red_zone_company"),
+    ("нерезид",         "non_resident"),
+    ("иностранн",       "non_resident"),
+    ("ликвид",          "liquidated_yul"),
+    ("умерш",           "deceased_fl"),
+    ("покойн",          "deceased_fl"),
+    ("дистанц",         "no_branch_remote_opening"),
+    ("без офис",        "no_branch_remote_opening"),
+    ("без отдел",       "no_branch_remote_opening"),
+    ("бонус",           "au_bonus_question"),
+    ("процент на остат","interest_on_balance"),
+    ("% на остат",      "interest_on_balance"),
+    ("стадия",          "allowed_stages"),
+    ("процедуры",       "allowed_stages"),
+    ("карт",            "debtor_card_realization"),
+    ("странный",        "bot_complaint"),
+    ("не то говор",     "bot_complaint"),
+    ("не понимаешь",    "bot_complaint"),
+    ("другое спраш",    "clarification_or_correction"),
+]
+
+# Bank keyword → (yul_scenario, fl_scenario)
+_BANK_CANDIDATE_MAP: list[tuple[str, str, str]] = [
+    ("альфа",    "alfabank_yul_conditions", "bank_selection_fl"),
+    ("ткб",      "tkb_yul_conditions",      "tkb_fl_conditions"),
+    ("уралсиб",  "uralsib_yul_conditions",  "uralsib_fl_conditions"),
+    ("т-банк",   "tbank_yul_conditions",    "bank_selection_fl"),
+    ("тинькофф", "tbank_yul_conditions",    "bank_selection_fl"),
+    ("мкб",      "mkb_yul_conditions",      "bank_selection_fl"),
+    ("росбанк",  "rosbank_yul_conditions",  "bank_selection_fl"),
+]
+
+
+def _build_planner_candidates(
+    user_text: str,
+    intent_signals: dict,
+    previous_scenario: Optional[str],
+    slots: dict,
+) -> list[str]:
+    """§2: Build candidate scenario list for Planner from intents + lexical hints."""
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def _add(sid: str) -> None:
+        if sid and sid not in seen:
+            seen.add(sid)
+            candidates.append(sid)
+
+    # Previous scenario as first candidate
+    if previous_scenario:
+        _add(previous_scenario)
+
+    # Intent-derived candidates
+    all_intents = set(intent_signals.get("intents") or [])
+    for m in intent_signals.get("matches", []):
+        all_intents.add(m["intent"])
+    for intent in all_intents:
+        for sid in _INTENT_TO_CANDIDATE_SCENARIOS.get(intent, []):
+            _add(sid)
+
+    # Lexical hints
+    t_low = (user_text or "").lower()
+    for kw, sid in _LEXICAL_CANDIDATE_HINTS:
+        if kw in t_low:
+            _add(sid)
+
+    # Bank keyword → conditions scenario
+    ct = slots.get("client_type") or slots.get("debtor_type") or ""
+    is_yul = ct in ("ЮЛ", "ИП")
+    for kw, yul_s, fl_s in _BANK_CANDIDATE_MAP:
+        if kw in t_low:
+            _add(yul_s if is_yul else fl_s)
+
+    return candidates[:6]
+
+
 async def run_business_analysis(session_id: int, user_text: str, had_unknown_any: bool, message: object):
     try:
         slots = await get_slots(session_id) or {}
@@ -341,6 +433,15 @@ async def process_message(message):
         return
 
     session = await get_or_create_session(channel=message.channel, external_user_id=message.external_user_id)
+
+    # Hard silence after real escalation (plan §2, §4)
+    _early_slots = await get_slots(session.id) or {}
+    if _early_slots.get(_SESSION_SILENCED_KEY):
+        logger.info(
+            "SessionSilence | session={} | suppressed_message=true | reason=handoff_session_silenced",
+            session.id,
+        )
+        return
     try:
         await touch_session_activity(session.id)
     except Exception:
@@ -359,8 +460,12 @@ async def process_message(message):
 
     if job_id:
         await asyncio.sleep(2.0)
-        if await has_newer_queued_job(job_id, str(message.external_user_id)):
-            logger.info("Session {} | Debounce: skipping job {} — newer message from user {} is pending", session.id, job_id, message.external_user_id)
+        if await has_newer_active_job(job_id, str(message.external_user_id)):
+            logger.info(
+                "BurstMerge | session={} | job_skipped=true | reason=newer_message_pending"
+                " | job_id={} | external_user_id={}",
+                session.id, job_id, message.external_user_id,
+            )
             dslots = await get_slots(session.id) or {}
             extract_runtime_slots(message.text or "", dslots)
             if _CONSENT_HARD_RE.search(message.text or ""):
@@ -388,13 +493,24 @@ async def process_message(message):
 
     processing_start = time.monotonic()
 
-    # Merge trailing user messages (debounce)
+    # Merge trailing user messages (debounce / burst merging)
     try:
         msgs_for_merge = await get_messages_by_session(session.id)
         merged = _merge_trailing_user_messages(msgs_for_merge, user_text)
         if merged != user_text:
-            logger.info("Session {} | merged recent user messages for brain", session.id)
+            merged_count = len([m for m in (msgs_for_merge or []) if (m.get("role") if isinstance(m, dict) else getattr(m, "role", None)) == "user"])
+            logger.info(
+                "BurstMerge | session={} | external_user_id={} | merged_count={} | final_text={!r}",
+                session.id, message.external_user_id, merged_count, merged[:120],
+            )
             user_text = merged
+        # Punctuation-only messages must never become standalone turns
+        if _FRUSTRATION_ONLY_RE.match(user_text.strip()):
+            logger.info(
+                "BurstMerge | session={} | punctuation_only_suppressed=true | text={!r}",
+                session.id, user_text[:20],
+            )
+            return
     except Exception:
         logger.exception("merge recent user messages failed (ignored)")
 
@@ -403,13 +519,12 @@ async def process_message(message):
     await set_slots(session.id, slots)
 
     # -----------------------------------------------------------------------
-    # HANDOFF LATCH: short acks after deal-state handoff → polite closure (plan §2)
+    # Session silence check (also handles _escalation_sent from older code path)
     # -----------------------------------------------------------------------
-    if slots.get("_handoff_latch") and _HANDOFF_ACK_RE.match(user_text):
-        logger.info("Session {} | Handoff latch — short ack suppressed", session.id)
-        await send_bot(
-            session, message.channel, message.external_user_id,
-            _HANDOFF_LATCH_REPLY, slots, processing_start=processing_start,
+    if slots.get("_escalation_sent") or slots.get(_SESSION_SILENCED_KEY):
+        logger.info(
+            "SessionSilence | session={} | suppressed_message=true | reason=session_escalated",
+            session.id,
         )
         return
 
@@ -463,12 +578,11 @@ async def process_message(message):
         if _CONSENT_HARD_RE.search(user_text) or (slots.get("_had_consent") and _READY_FOLLOWUP_RE.match(user_text)):
             logger.info("Session {} | Consent signal → fast-path to handoff", session.id)
             slots.pop("_had_consent", None)
-            slots["_had_consent"] = True
-            bridge = _build_handoff_bridge(slots, "ready_to_open")
-            slots.pop("_had_consent", None)
+            slots["_escalation_sent"] = True
+            slots[_SESSION_SILENCED_KEY] = True
             await set_slots(session.id, slots)
             await maybe_escalate(session.id, slots, reason="ready_to_open")
-            await send_bot(session, message.channel, message.external_user_id, bridge, slots, processing_start=processing_start)
+            await send_bot(session, message.channel, message.external_user_id, _HANDOFF_DETERMINISTIC_REPLY, slots, processing_start=processing_start)
             return
 
         # -----------------------------------------------------------------------
@@ -544,10 +658,10 @@ async def process_message(message):
                 session.id, _r["intent"], _r["score"], _r["matched_anchor"], _r["threshold"],
             )
 
-        # DealState — detect sales stage transition and persist in slots
+        # DealState — §1: pre-Planner run only syncs slots and hard triggers
         from app.processing.deal_state import update_deal_state
         _deal_state_before = (slots.get("_deal_state") or {}).get("deal_stage")
-        _deal_state = update_deal_state(slots, user_text, intent_signals=_intent_signals)
+        _deal_state = update_deal_state(slots, user_text, intent_signals=_intent_signals, hard_only=True)
         _deal_stage_after = _deal_state.get("deal_stage")
         if _deal_state.get("deal_stage") or _deal_state.get("handoff_needed"):
             logger.info(
@@ -583,6 +697,93 @@ async def process_message(message):
         current_entities = ctx["current_entities"]
         fact_pack = ctx.get("fact_pack") or {}
         signals = ctx.get("signals") or {}
+
+        # 1.5. LLM Dialog Planner — determines scenario, topic, retrieval strategy
+        _planner_result: Optional[dict] = None
+        _previous_scenario = slots.get("_active_scenario")
+        _last_bot_text = slots.get("_last_bot_text") or ""
+        _already_answered = list(slots.get("_answered_fact_groups") or [])
+        try:
+            from app.services.dialog_planner import run_dialog_planner
+            # §2 — Build meaningful candidate scenarios from intents + lexical hints
+            _regex_intents_for_planner = [
+                m["intent"] for m in _intent_signals.get("matches", [])
+                if m.get("source") == "regex"
+            ]
+            _sem_intents_for_planner = [
+                m["intent"] for m in _intent_signals.get("matches", [])
+                if m.get("source") == "semantic"
+            ]
+            _candidate_scens_for_planner = _build_planner_candidates(
+                user_text=user_text,
+                intent_signals=_intent_signals,
+                previous_scenario=_previous_scenario,
+                slots=slots,
+            )
+            _planner_result = await run_dialog_planner(
+                user_text=user_text,
+                recent_dialog=recent_dialog,
+                known_slots=slots,
+                deal_state=_deal_state,
+                candidate_scenarios=_candidate_scens_for_planner,
+                candidate_intents_regex=_regex_intents_for_planner,
+                candidate_intents_semantic=_sem_intents_for_planner,
+                previous_scenario=_previous_scenario,
+                last_bot_reply_summary=_last_bot_text[:200],
+                already_answered=_already_answered,
+                pending_question=slots.get("_pending_question") or slots.get("_last_bot_question"),
+                system_constraints={
+                    "handoff_already_sent": bool(slots.get("_escalation_sent")),
+                    "session_silenced_after_handoff": bool(slots.get(_SESSION_SILENCED_KEY)),
+                },
+                trace_ctx=_trace_ctx,
+            )
+        except Exception:
+            logger.exception("Dialog Planner call failed (ignored, fallback to ScenarioPolicy)")
+
+        # Apply Planner scenario if valid; otherwise ScenarioPolicy will decide later
+        _planner_scenario: Optional[str] = None
+        _planner_retrieval_queries: list[str] = []
+        _planner_must_not_repeat: list[str] = []
+        _planner_responder_instruction: Optional[str] = None
+        _planner_avoid_fact_groups: list[str] = []
+        if _planner_result:
+            _planner_scenario = _planner_result.get("scenario") or None
+            _pl_ret = _planner_result.get("retrieval") or {}
+            _planner_retrieval_queries = _pl_ret.get("queries") or []
+            _planner_avoid_fact_groups = _pl_ret.get("avoid_fact_groups") or []
+            _planner_must_not_repeat = _planner_result.get("must_not_repeat") or []
+            _planner_responder_instruction = _planner_result.get("responder_instruction") or None
+            # Planner's slot updates
+            _pl_slots = _planner_result.get("slots_update") or {}
+            if _pl_slots.get("debtor_type") and not slots.get("debtor_type"):
+                slots["debtor_type"] = _pl_slots["debtor_type"]
+            if _pl_slots.get("selected_bank") and not slots.get("_last_bank"):
+                slots["_last_bank"] = _pl_slots["selected_bank"]
+            # Planner scenario → active_scenario (pre-set; ScenarioPolicy will validate)
+            if _planner_scenario:
+                slots["_active_scenario"] = _planner_scenario
+                logger.info(
+                    "PlannerScenario | session={} | scenario={} | topic_changed={} | prev={}",
+                    session.id, _planner_scenario,
+                    _planner_result.get("topic_changed"), _previous_scenario,
+                )
+            # §1 — Apply Planner's deal_state_update into _deal_state
+            _pl_ds_update = _planner_result.get("deal_state_update") or {}
+            if _pl_ds_update.get("deal_stage") and not _deal_state.get("handoff_needed"):
+                _deal_state["deal_stage"] = _pl_ds_update["deal_stage"]
+            if _pl_ds_update.get("client_intent"):
+                _deal_state["client_intent"] = _pl_ds_update["client_intent"]
+            if _pl_ds_update.get("next_manager_move"):
+                _deal_state["next_manager_move"] = _pl_ds_update["next_manager_move"]
+            if _planner_result.get("handoff", {}).get("needed"):
+                _deal_state["handoff_needed"] = True
+                _deal_state["deal_stage"] = "ready_to_open"
+            slots["_deal_state"] = _deal_state
+
+        # §1 — Post-Planner full DealState run (fills comparing_banks/consulting if Planner skipped them)
+        if not _deal_state.get("handoff_needed"):
+            _deal_state = update_deal_state(slots, user_text, intent_signals=_intent_signals)
 
         # 2. Retrieve KB facts with scenario matching
         # TASK 5+6 — forced_scenarios always read from catalog.
@@ -650,6 +851,14 @@ async def process_message(message):
                 session.id, user_text[:60], _kb_query[:80],
             )
 
+        # If Planner provided retrieval queries, use the primary one for KB search
+        if _planner_retrieval_queries:
+            _kb_query = " ".join(_planner_retrieval_queries[:2])
+            logger.info(
+                "PlannerRetrieval | session={} | queries={} | avoid={}",
+                session.id, _planner_retrieval_queries[:2], _planner_avoid_fact_groups,
+            )
+
         kb_result = await retrieve_context_for_brain(
             _kb_query, memory, current_entities,
             forced_scenarios=_forced_scenarios,
@@ -676,6 +885,7 @@ async def process_message(message):
             rag_scenarios=scenario_matches,
             dialog_state=str(dialog_state) if dialog_state else None,
             intent_signals=_intent_signals,
+            planner_scenario=_planner_scenario,
         )
         logger.info(
             "ScenarioPolicy | session={} | decision={} | active={} | candidates={} | reason={} | scores={}",
@@ -684,6 +894,17 @@ async def process_message(message):
             scenario_policy.get("scores", {}),
         )
         slots["_active_scenario"] = scenario_policy["active_scenario"]
+
+        # IntentSwitch log: conditions correction overrides tariff intent (plan §17)
+        _prev_intent = slots.get("_last_intent") or ""
+        _cur_intents = set(_intent_signals.get("intents") or [])
+        if "correction_not_tariffs_but_conditions" in _cur_intents:
+            logger.info(
+                "IntentSwitch | session={} | from={} | to=conditions_details_requested | reason=user_explicit_correction",
+                session.id, _prev_intent or "tariff_comparison_requested",
+            )
+        if _cur_intents:
+            slots["_last_intent"] = next(iter(_cur_intents))
 
         # Re-fetch locked scenario facts when they dropped out of RAG results
         if scenario_policy["decision"] in ("keep_active", "compare"):
@@ -787,6 +1008,7 @@ async def process_message(message):
             dialog_state=str(dialog_state) if dialog_state else None,
             fact_pack=fact_pack,
             trace_ctx=_trace_ctx,
+            planner_result=_planner_result,
         )
         brain_result = responder_to_brain_result(_responder_result, known_slots=slots)
 
@@ -839,6 +1061,14 @@ async def process_message(message):
                     trace_ctx={**_trace_ctx, "phase": "brain_tool"},
                 )
 
+        # HandoffDecision log for consultation-only turns (plan §17)
+        _hd_handoff = (brain_result.get("handoff") or {})
+        if not _hd_handoff.get("needed") and (brain_result.get("action") or "answer") == "answer":
+            logger.info(
+                "HandoffDecision | session={} | triggered=false | reason=consultation_only",
+                session.id,
+            )
+
         # 6.5. Code-level handoff override for explicit open-account phrases / DealState
         if should_force_handoff(user_text, brain_result, memory, slots=slots):
             _force_reason = (slots.get("_deal_state") or {}).get("deal_stage") or "ready_to_open"
@@ -866,19 +1096,27 @@ async def process_message(message):
             is_consent = _is_hard_consent or _is_deal_state_consent
 
             if is_consent:
-                bridge_reply = cleanup_text(brain_result.get("reply") or "")
-                if not bridge_reply:
-                    bridge_reply = _build_handoff_bridge(slots, handoff.get("reason") or "ready_to_open")
+                # Always use the fixed deterministic reply — do NOT use LLM output for handoff
+                bridge_reply = _HANDOFF_DETERMINISTIC_REPLY
                 state_update = brain_result.get("state_update") or {}
                 _update_slots_from_state(slots, state_update)
                 if current_entities.get("mentioned_bank"):
                     slots["_last_bank"] = current_entities["mentioned_bank"]
                 slots.pop("_had_consent", None)
-                # Hard consent suppresses bot; DealState consent keeps bot active for follow-up questions
-                if _is_hard_consent:
-                    slots["_escalation_sent"] = True
-                elif _is_deal_state_consent:
-                    slots["_handoff_latch"] = True  # plan §2: latch short acks after soft handoff
+                # All real escalations → full session silence (plan §2, §4)
+                slots["_escalation_sent"] = True
+                slots[_SESSION_SILENCED_KEY] = True
+                logger.info(
+                    "SessionSilence | session={} | silenced_after_handoff=true | reason={} | bank={} | debtor={}",
+                    session.id,
+                    handoff.get("reason") or "ready_to_open",
+                    (slots.get("_deal_state") or {}).get("selected_bank", "?"),
+                    (slots.get("_deal_state") or {}).get("debtor_type", "?"),
+                )
+                logger.info(
+                    "HandoffDecision | session={} | triggered=true | reason={} | reply=deterministic",
+                    session.id, handoff.get("reason") or "ready_to_open",
+                )
                 await set_slots(session.id, slots)
                 await send_bot(
                     session, message.channel, message.external_user_id, bridge_reply, slots,
@@ -903,6 +1141,23 @@ async def process_message(message):
                 scenario_facts=scenario_facts,
             )
             if not val["is_valid"]:
+                _vr = val["reason"] or ""
+                # Structured validation log (plan §17)
+                if "handoff_claim" in _vr:
+                    logger.warning(
+                        "Validation | issue=handoff_claim_without_actual_handoff | session={}",
+                        session.id,
+                    )
+                elif "near_duplicate" in _vr or "repeated" in _vr:
+                    logger.warning(
+                        "Validation | issue=near_duplicate_or_repeated_fact_block | session={} | reason={}",
+                        session.id, _vr,
+                    )
+                elif "informal_address" in _vr:
+                    logger.warning(
+                        "Validation | issue=informal_address_rejected | session={}",
+                        session.id,
+                    )
                 logger.warning(
                     "Session {} | Reply validation failed: {} — calling repair",
                     session.id, val["reason"],
@@ -987,6 +1242,31 @@ async def process_message(message):
                         "Ответь конкретно: ИНН должника, данные арбитражного управляющего, "
                         "судебный акт о введении процедуры. Скажи что уже передаю кейс менеджеру."
                     )
+                elif repair_hint == "informal_address_tu_tebe":
+                    repair_hint = (
+                        "informal_address_tu_tebe: Ответ содержит неформальное обращение (ты/тебе/твой). "
+                        "Замени ВСЕ 'ты' → 'вы', 'тебе' → 'вам', 'твой/твоя' → 'ваш/ваша'. "
+                        "Используй только формальное деловое обращение."
+                    )
+                elif repair_hint == "repeated_tariffs_after_conditions_correction":
+                    repair_hint = (
+                        "repeated_tariffs_after_conditions_correction: Клиент явно попросил условия, а не тарифы. "
+                        "Убери цены (открытие X руб., ведение Y руб.). "
+                        "Расскажи об операционных условиях: переводы, ограничения, дистанционное открытие, "
+                        "особенности работы банка с АУ."
+                    )
+                elif repair_hint == "timeline_question_no_timeline_in_reply":
+                    repair_hint = (
+                        "timeline_question_no_timeline_in_reply: Клиент спросил о сроках. "
+                        "Дай конкретный ответ в днях или неделях из kb_facts. "
+                        "Если сроки зависят от банка — скажи для каждого активного банка."
+                    )
+                elif repair_hint == "bonus_question_no_bonus_in_reply":
+                    repair_hint = (
+                        "bonus_question_no_bonus_in_reply: Клиент спросил о бонусах/процентах. "
+                        "Ответь по существу: есть ли процент на остаток, какова ставка, "
+                        "есть ли бонус для АУ. Используй данные из kb_facts."
+                    )
                 elif repair_hint == "filler_tail_ending":
                     repair_hint = (
                         "filler_tail_ending: Ответ заканчивается фразой-заглушкой ('Всё понял?', 'Окей?' и т.п.). "
@@ -1012,6 +1292,7 @@ async def process_message(message):
                     kb_facts=kb_facts,
                     tool_results=tool_results,
                     fact_pack=fact_pack,
+                    planner_result=_planner_result,
                     trace_ctx=_trace_ctx,
                 )
                 if repaired and repaired.strip():
@@ -1041,6 +1322,7 @@ async def process_message(message):
                                 kb_facts=kb_facts,
                                 dialog_state=str(dialog_state) if dialog_state else None,
                                 fact_pack={**fact_pack, "_retry_hint": repaired_val["reason"]},
+                                planner_result=_planner_result,
                                 trace_ctx={**_trace_ctx, "phase": "responder_retry"},
                             )
                             _retry_reply = cleanup_text(_retry_result.get("reply") or "")
@@ -1083,6 +1365,32 @@ async def process_message(message):
         # 12. Update memory from state_update
         state_update = brain_result.get("state_update") or {}
         _update_slots_from_state(slots, state_update)
+
+        # 12.5. Anti-repetition tracking — store last bot reply and fact groups answered
+        slots["_last_bot_text"] = reply[:400]
+        _fact_tags_this_turn: list[str] = []
+        _active_sid_now = slots.get("_active_scenario") or ""
+        if _active_sid_now:
+            _fact_tags_this_turn.append(_active_sid_now)
+        if _planner_result:
+            _fact_tags_this_turn.extend(_planner_result.get("already_answered") or [])
+        _fact_tags_this_turn.extend(list(scenario_facts.keys())[:3])
+        _fact_tags_this_turn = list(dict.fromkeys(_fact_tags_this_turn))  # dedup, preserve order
+        # Merge into session-level answered list (capped at 15 unique tags)
+        _prev_answered = list(slots.get("_answered_fact_groups") or [])
+        _merged = list(dict.fromkeys(_prev_answered + _fact_tags_this_turn))
+        slots["_answered_fact_groups"] = _merged[:15]
+        # Rolling reply history (last 3 turns)
+        import hashlib as _hashlib
+        _reply_entry = {
+            "hash": _hashlib.md5(reply[:200].encode()).hexdigest()[:8],
+            "text": reply[:200],
+            "fact_tags": _fact_tags_this_turn,
+            "turn": slots.get("_turn_count", 0),
+        }
+        _history = list(slots.get("_bot_reply_history") or [])
+        _history.append(_reply_entry)
+        slots["_bot_reply_history"] = _history[-3:]
 
         # 13. Track last_bank for handoff bridge
         if current_entities.get("mentioned_bank"):

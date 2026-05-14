@@ -53,6 +53,13 @@ async def on_startup():
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_user_columns)
 
+    # Semantic runtime check (plan §1)
+    try:
+        from app.processing.semantic_runtime import log_semantic_status
+        log_semantic_status()
+    except Exception:
+        pass
+
 
 app.include_router(debug_router_wh)
 app.include_router(debug_router_tg)

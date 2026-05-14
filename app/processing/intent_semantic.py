@@ -245,8 +245,16 @@ def _load_model():
     if _model is None:
         try:
             from sentence_transformers import SentenceTransformer
-            _model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
-            logger.info("IntentSemantic | model loaded: paraphrase-multilingual-MiniLM-L12-v2")
+            try:
+                from app.config import settings
+                _device = getattr(settings, "INTENT_EMBEDDINGS_DEVICE", "cpu") or "cpu"
+            except Exception:
+                _device = "cpu"
+            _model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2", device=_device)
+            logger.info(
+                "IntentSemantic | model loaded: paraphrase-multilingual-MiniLM-L12-v2 | device=%s",
+                _device,
+            )
         except Exception as exc:
             logger.warning("IntentSemantic | model load failed: %s — semantic disabled", exc)
             _model = False

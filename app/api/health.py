@@ -25,6 +25,23 @@ async def health_check():
     }
 
 
+@router.get("/debug/semantic")
+async def semantic_status():
+    """Semantic runtime status: intent and KB embeddings (plan §1)."""
+    try:
+        from app.processing.semantic_runtime import get_semantic_status
+        return get_semantic_status()
+    except Exception as e:
+        return {
+            "intent_semantic_enabled": False,
+            "intent_embedding_device": "cpu",
+            "kb_semantic_enabled": False,
+            "kb_embedding_device": "cpu",
+            "embedding_models_loaded": False,
+            "error": str(e),
+        }
+
+
 @router.get("/debug/kb")
 async def kb_status():
     """KB / RAG diagnostic: chunk count, semantic search status, loaded scenarios."""

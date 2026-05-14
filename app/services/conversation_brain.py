@@ -72,22 +72,28 @@ BRAIN_SYSTEM_PROMPT = ""  # populated on first call to run_conversation_brain
 
 REPAIR_PROMPT = """
 Ты — менеджер-консультант «В плюсе». Твой предыдущий ответ содержит ошибку.
-Исправь ТОЛЬКО указанную ошибку. Не меняй тему, не добавляй новые банки или факты, которые пользователь не запрашивал.
+Исправь ТОЛЬКО указанную ошибку. Сохрани текущую тему. Не добавляй новые банки, темы или факты.
 
 Строгие правила исправления:
 - Исправь ТОЛЬКО конкретную ошибку из поля validation_error. Всё остальное оставь как есть.
 - Не добавляй банки, которых не было в исходном ответе, если пользователь про них не спрашивал.
 - Не расширяй ответ без нужды — краткость лучше многословия.
-- Не меняй тему ответа.
+- Не меняй тему ответа. Не превращай целевой ответ в обзорную продажу.
 - Не придумывай цифры. Если данных нет — напиши, что уточнишь.
+- Используй ТОЛЬКО формальное обращение: вы, вам, ваш. НИКОГДА: ты, тебе, твой.
 
 Примеры исправлений по типу ошибки:
+- informal_address_tu_tebe: замени все "ты/тебе/твой" на "вы/вам/ваш".
 - promised_action_without_handoff: не пиши "откроем" / "сделаем" — скажи "поможем оформить, нужны данные".
+- handoff_claim_without_handoff_flag: убери "передам менеджеру" — продолжи консультацию или запроси данные.
+- repeated_tariffs_after_conditions_correction: клиент попросил условия, а не тарифы. Убери цены — расскажи об операционных условиях банка.
 - wrong_topic_fact / repeated_intro: перепиши только проблемную часть без запрещённых фраз.
 - missing_primary_fact: добавь только нужный факт из fact_pack.answer_contract.must_include.
 - repeated_intro: убери приветствие, начни сразу по сути.
 - did_not_explain_reason: объясни причину простыми словами, не повторяй прошлый ответ.
 - filler_tail_ending: убери последнюю фразу-заглушку, заверши содержательным утверждением.
+- timeline_question_no_timeline_in_reply: ответь конкретно на вопрос о сроках в днях/неделях.
+- bonus_question_no_bonus_in_reply: ответь конкретно на вопрос о бонусах/процентах.
 - Соблюдай fact_pack.answer_contract.do_not_include — эти слова/фразы запрещены.
 
 Верни только исправленный текст ответа, без JSON и без объяснений.
@@ -383,6 +389,7 @@ async def conversation_brain_repair(
     kb_facts: list[dict],
     tool_results: dict | None = None,
     fact_pack: dict | None = None,
+    planner_result: dict | None = None,
     trace_ctx: dict | None = None,
 ) -> str | None:
     """Попросить LLM исправить неверный текст ответа."""
@@ -395,6 +402,18 @@ async def conversation_brain_repair(
         "tool_results": tool_results,
         "memory": memory,
     }
+    if planner_result:
+        _pl_hint: dict = {}
+        if planner_result.get("scenario"):
+            _pl_hint["scenario"] = planner_result["scenario"]
+        if planner_result.get("user_intent"):
+            _pl_hint["user_intent"] = planner_result["user_intent"]
+        if planner_result.get("responder_instruction"):
+            _pl_hint["instruction"] = planner_result["responder_instruction"]
+        if planner_result.get("must_not_repeat"):
+            _pl_hint["must_not_repeat"] = planner_result["must_not_repeat"]
+        if _pl_hint:
+            payload["planner"] = _pl_hint
     messages = [
         {"role": "system", "content": REPAIR_PROMPT},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},

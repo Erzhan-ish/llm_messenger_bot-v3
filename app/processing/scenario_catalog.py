@@ -385,6 +385,22 @@ _SPECS: List[ScenarioSpec] = [
         description="Complex case requiring expert review",
         trigger_intents=["complex_case"],
     ),
+    ScenarioSpec(
+        scenario_id="ready_to_open",
+        description="Client is ready to open the account — handoff to manager",
+        trigger_intents=["ready_to_open", "open_account_intent"],
+        deterministic_playbook=True,
+    ),
+    ScenarioSpec(
+        scenario_id="currency_account_question",
+        description="Questions about currency account operations: settlements, payments to creditors",
+        trigger_intents=["currency_account_question"],
+    ),
+    ScenarioSpec(
+        scenario_id="bot_complaint",
+        description="User is dissatisfied with the bot or says it's answering wrong",
+        trigger_intents=["bot_complaint", "confusion_or_correction"],
+    ),
 
 ]
 

@@ -217,12 +217,23 @@ class KnowledgeBase:
             from sentence_transformers import SentenceTransformer
             import numpy as np
             if self._embed_model is None:
-                self._embed_model = SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
+                try:
+                    from app.config import settings
+                    _device = getattr(settings, "KB_EMBEDDINGS_DEVICE", "cpu") or "cpu"
+                except Exception:
+                    _device = "cpu"
+                self._embed_model = SentenceTransformer(
+                    "paraphrase-multilingual-mpnet-base-v2", device=_device
+                )
+                logger.info(
+                    "KB | semantic model loaded: paraphrase-multilingual-mpnet-base-v2 | device={}",
+                    _device,
+                )
             texts = [ch.search_text if ch.search_text else ch.text for ch in self._chunks]
             self._embeddings = self._embed_model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
             return True
-        except Exception:
-            logger.warning("Semantic search unavailable (sentence-transformers not loaded)")
+        except Exception as exc:
+            logger.warning("Semantic search unavailable (sentence-transformers not loaded): {}", exc)
             return False
 
     def _semantic_scores(self, query: str) -> list:
