@@ -13,7 +13,7 @@ from app.storage.repositories.jobs_repo import (
     mark_done,
     retry_or_give_up,
 )
-from app.processing.message_processor import process_message
+from app.processing.simple_message_processor import process_message
 from app.services.transcription_service import transcribe_audio
 from app.services.whatsapp_media import download_whatsapp_media
 
