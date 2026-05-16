@@ -24,6 +24,11 @@ def _fireworks_model(model: str | None) -> str | None:
     return settings.FIREWORKS_MODEL or None
 
 
+def _deepinfra_model(model: str | None) -> str | None:
+    """Return the configured DeepInfra model (ignores Ollama-specific model names)."""
+    return settings.DEEPINFRA_MODEL or None
+
+
 async def ask_llm(
     messages: list[dict[str, Any]],
     model: str | None = None,
@@ -40,6 +45,8 @@ async def ask_llm(
         _model = model or settings.TIMEWEB_AI_MODEL
     elif provider == "fireworks":
         _model = model or settings.FIREWORKS_MODEL
+    elif provider == "deepinfra":
+        _model = model or settings.DEEPINFRA_MODEL
     else:
         _model = model or settings.OLLAMA_MODEL
     logger.info(
@@ -60,6 +67,9 @@ async def ask_llm(
         elif provider == "fireworks":
             from app.llm.providers.fireworks import ask_fireworks
             raw = await ask_fireworks(messages, model=_fireworks_model(model), max_tokens=max_tokens)
+        elif provider == "deepinfra":
+            from app.llm.providers.deepinfra import ask_deepinfra
+            raw = await ask_deepinfra(messages, model=_deepinfra_model(model), max_tokens=max_tokens)
         else:
             raw = await ask_stub(messages)
     except Exception as exc:

@@ -47,11 +47,17 @@ class Settings(BaseSettings):
     TIMEWEB_AI_BASE_URL: str = ""
     TIMEWEB_AI_MODEL: str = "deepseek-v3"
     TIMEWEB_AI_ANALYZER_MODEL: str = ""  # falls back to TIMEWEB_AI_MODEL if empty
+    TIMEWEB_REASONING_EFFORT: str = ""   # e.g. "low" | "medium" | "high" | "" to disable
 
     # Fireworks AI (OpenAI-compatible)
     FIREWORKS_API_KEY: str = ""
     FIREWORKS_BASE_URL: str = "https://api.fireworks.ai/inference/v1"
     FIREWORKS_MODEL: str = "llama-v3p3-70b-instruct"
+
+    # DeepInfra (OpenAI-compatible)
+    DEEPINFRA_API_KEY: str = ""
+    DEEPINFRA_BASE_URL: str = "https://api.deepinfra.com/v1/openai"
+    DEEPINFRA_MODEL: str = "meta-llama/Meta-Llama-3.1-70B-Instruct"
 
     # Provider-aware token budgets
     TIMEWEB_RENDER_MAX_TOKENS: int = 3000
