@@ -1,912 +1,1105 @@
 # IMPLEMENTATION PLAN
-# Create a new simplified LLM-first branch for llm_messenger_bot-v3
+# simple-llm branch — implement 5 parallel workers safely
 
 ## Goal
 
-Create a separate branch with a **much simpler and more stable conversation pipeline**.
+Scale the `simple-llm` branch from a single sequential worker to **5 parallel worker processes** while preserving the current bot behavior:
 
-The new branch must preserve only the useful infrastructure features we already built:
+- BurstMerge must continue to merge rapid user messages.
+- Different users must be processed in parallel.
+- One and the same conversation must never be processed concurrently by multiple workers.
+- No duplicated bot replies.
+- No broken session history.
+- No broken escalation silence.
+- `/reset` must remain safe.
+- The simplified LLM-first pipeline must remain unchanged.
 
-- Telegram message batching / BurstMerge;
-- sessions and `/reset`;
-- conversation history;
-- RAG from the current knowledge base;
-- prompt-debug / LLM tracing;
-- minimal response validation;
-- escalation detection;
-- full silence after escalation.
-
-But remove the over-engineered orchestration layer:
-
-- no `ScenarioPolicy` routing;
-- no `ScenarioPlaybook`;
-- no `ScenarioCatalog` as a business router;
-- no `DialogPlanner`;
-- no code-driven scenario decisions;
-- no code-driven next-step hints;
-- no forced conversation flow from Python;
-- no hardcoded scenario examples injected into the model.
-
-The new design should be:
+The target behavior:
 
 ```text
-System Prompt
-+ Relevant KB chunks
-+ Conversation history
-+ Current user message
-= LLM answer
-```
-
-The only business control left in code is:
-
-```text
-Escalation detector
+Parallel across different users.
+Strictly serialized inside one conversation.
 ```
 
 ---
 
-# 1. Create a separate branch
+# 1. Current architecture to preserve
 
-Create a new branch from the current project state:
+The simplified pipeline must remain:
 
-```bash
-git checkout -b simple-llm-rag-pipeline
+```text
+Webhook
+→ enqueue inbound job
+→ worker picks job
+→ simple_message_processor
+→ dedup / rate limit
+→ reset / silence checks
+→ save user message
+→ BurstMerge
+→ EscalationDetector
+→ if escalate=true:
+       fixed handoff reply + session silence
+   else:
+       SimpleRAG + LLM responder
+→ send bot reply
 ```
 
-or another clear name:
+Do NOT reintroduce:
+- ScenarioPolicy;
+- DialogPlanner;
+- Playbooks;
+- code-driven business scenarios.
 
-```bash
-git checkout -b llm-first-simple-pipeline
-```
-
-This branch is an alternative implementation, not a patch over the current complex Planner architecture.
+This task is only about **safe parallel worker execution**.
 
 ---
 
-# 2. Target architecture
+# 2. High-level target architecture
 
-## Final simplified pipeline
+## New runtime model
 
 ```text
-1. Receive Telegram message
-2. Handle /reset immediately
-3. If session is silenced after escalation:
-      - ignore all messages except /reset
-4. Apply BurstMerge:
-      - merge rapid consecutive messages from same user
-5. Save merged user message into session history
-6. Run escalation detector
-7. If escalation=true:
-      - execute real handoff
-      - send fixed final handoff message
-      - silence session until /reset
-      - stop
-8. If escalation=false:
-      - retrieve relevant KB chunks
-      - build one simple LLM prompt
-      - call LLM responder
-      - run minimal response validation
-      - send reply
-9. Save assistant reply into history
+run.py
+ ├── uvicorn app
+ ├── worker process #1
+ ├── worker process #2
+ ├── worker process #3
+ ├── worker process #4
+ └── worker process #5
+```
+
+## Processing principle
+
+```text
+User A can be processed in parallel with User B.
+
+But:
+User A message #1 and User A message #2
+must never run through the LLM pipeline at the same time.
 ```
 
 ---
 
-# 3. Remove the complex business-orchestration layer
+# 3. Database requirement for 5-worker mode
 
-## Remove or fully bypass in the new branch
+## 3.1. Multi-worker mode should require PostgreSQL
 
-The new branch must not use these layers for normal dialogue:
-
-- `DialogPlanner`
-- `ScenarioPolicy`
-- `ScenarioPlaybook`
-- scenario stickiness
-- scenario score calculations
-- forced scenarios
-- deal-stage reasoning for ordinary answers
-- active-scenario context injection
-- business intent routing that tells the LLM what to answer
-
-If it is easier, the files may remain in the repository but must not be called by the active message pipeline.
-
-## Important
-
-Do not leave half-active routing logic in the background.
-
-The new simplified path must not secretly do:
+The current queue locking uses:
 
 ```text
-message → intents → scenario → forced KB → responder
+SELECT ... FOR UPDATE SKIP LOCKED
 ```
 
-It must do:
+This is the correct mechanism for multiple workers, but it is reliable in PostgreSQL.
+
+## Required behavior
+
+Add a startup check:
+
+```python
+if WORKER_COUNT > 1 and DATABASE_URL points to sqlite:
+    raise RuntimeError(
+        "WORKER_COUNT > 1 requires PostgreSQL for safe concurrent job locking."
+    )
+```
+
+or, if preferred for local dev:
+
+```python
+if sqlite and WORKER_COUNT > 1:
+    log warning
+    force WORKER_COUNT = 1
+```
+
+## Recommendation
+
+Use strict mode:
 
 ```text
-message → KB search → responder
+5 workers = PostgreSQL required.
 ```
 
-with escalation checked separately.
+Do not pretend SQLite is production-safe for this.
 
 ---
 
-# 4. Keep and preserve these features
+# 4. Add worker configuration
 
-## 4.1. BurstMerge / debounce
+## File
 
-Keep the current ability to merge multiple fast Telegram messages:
+```text
+app/config.py
+```
 
-Example:
+## Add settings
+
+```python
+WORKER_COUNT: int = 5
+WORKER_POLL_INTERVAL: float = 0.5
+WORKER_BATCH_SIZE: int = 1
+
+CONVERSATION_LOCK_TTL_SECONDS: int = 180
+JOB_STALE_LOCK_TTL_SECONDS: int = 300
+```
+
+## Why `WORKER_BATCH_SIZE=1`
+
+Right now a worker can fetch multiple jobs at once and then process them one by one.
+
+With 5 workers, if each one fetches 10 jobs:
+- first worker may reserve many jobs;
+- other workers can sit idle;
+- parallelism becomes worse.
+
+For fair distribution:
+
+```text
+each worker fetches exactly 1 job at a time
+```
+
+Set:
+
+```python
+WORKER_BATCH_SIZE = 1
+```
+
+---
+
+# 5. Update `run.py` to start 5 worker processes
+
+## Current behavior
+
+`run.py` starts:
+- uvicorn;
+- one worker.
+
+## Required behavior
+
+Spawn:
+
+```text
+WORKER_COUNT worker subprocesses
+```
+
+## Target implementation
+
+```python
+import os
+import signal
+import subprocess
+import sys
+from app.config import settings
+
+
+def main():
+    processes = []
+
+    # Web app
+    p_web = subprocess.Popen([
+        sys.executable,
+        "-m",
+        "uvicorn",
+        "app.main:app",
+        "--reload",
+    ])
+    processes.append(p_web)
+
+    # Workers
+    worker_count = settings.WORKER_COUNT
+
+    for index in range(worker_count):
+        env = os.environ.copy()
+        env["WORKER_ID"] = f"worker-{index + 1}"
+
+        p_worker = subprocess.Popen(
+            [sys.executable, "-m", "app.worker"],
+            env=env,
+        )
+        processes.append(p_worker)
+
+    try:
+        for p in processes:
+            p.wait()
+    except KeyboardInterrupt:
+        for p in processes:
+            p.terminate()
+
+        for p in processes:
+            try:
+                p.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                p.kill()
+
+
+if __name__ == "__main__":
+    main()
+```
+
+## Requirements
+
+- Every worker must have its own `WORKER_ID`.
+- Logs must show which worker claimed and processed which job.
+- Graceful shutdown must terminate all worker processes.
+
+---
+
+# 6. Update `app/worker.py`
+
+## 6.1. Read worker id
+
+Add:
+
+```python
+import os
+
+WORKER_ID = os.getenv("WORKER_ID", "worker-unknown")
+```
+
+## 6.2. Log worker startup
+
+```python
+logger.info(
+    "Worker started | worker_id={} | poll_interval={} | batch_size={}",
+    WORKER_ID,
+    settings.WORKER_POLL_INTERVAL,
+    settings.WORKER_BATCH_SIZE,
+)
+```
+
+## 6.3. Use config-driven polling
+
+Replace hardcoded:
+
+```python
+worker_loop(poll_interval=0.7, batch_size=10)
+```
+
+with:
+
+```python
+worker_loop(
+    poll_interval=settings.WORKER_POLL_INTERVAL,
+    batch_size=settings.WORKER_BATCH_SIZE,
+)
+```
+
+## 6.4. Include worker id in job logs
+
+Change:
+
+```python
+logger.info("Job running | id={} | type={}", job.id, job.job_type)
+```
+
+to:
+
+```python
+logger.info(
+    "Job running | worker_id={} | id={} | type={}",
+    WORKER_ID,
+    job.id,
+    job.job_type,
+)
+```
+
+Same for:
+- done;
+- failed;
+- retry/defer events.
+
+---
+
+# 7. Add conversation-level locking
+
+## Why this is mandatory
+
+With 5 workers, two jobs from the same user can otherwise run at the same time:
+
+```text
+Worker 1 → processing User A message #1
+Worker 2 → processing User A message #2
+```
+
+This can cause:
+- broken history;
+- two replies in wrong order;
+- escalation races;
+- bot replying after it should be silenced;
+- BurstMerge instability.
+
+## Required rule
+
+```text
+Only one active processing pipeline per conversation key.
+```
+
+Use:
+
+```text
+conversation_key = f"{channel}:{external_user_id}"
+```
+
+Do not lock only by external_user_id, because the same external id may exist across channels.
+
+---
+
+# 8. Add `ConversationLock` model
+
+## File
+
+```text
+app/storage/models.py
+```
+
+## Add table
+
+```python
+class ConversationLock(Base):
+    __tablename__ = "conversation_locks"
+
+    conversation_key: Mapped[str] = mapped_column(
+        String(160),
+        primary_key=True,
+    )
+
+    locked_by: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+
+    locked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+```
+
+## Notes
+
+- Primary key must be `conversation_key`.
+- One active row = one active conversation lock.
+- Expiration protects against worker crashes.
+
+---
+
+# 9. Add conversation lock repository
+
+## New file
+
+```text
+app/storage/repositories/conversation_locks_repo.py
+```
+
+## Functions
+
+### 9.1. `try_acquire_conversation_lock`
+
+```python
+async def try_acquire_conversation_lock(
+    *,
+    conversation_key: str,
+    worker_id: str,
+    ttl_seconds: int,
+) -> bool:
+```
+
+### Behavior
+
+1. Delete expired lock for this conversation if exists.
+2. Try to insert a new lock row.
+3. If insert succeeds → lock acquired.
+4. If unique constraint fails → another worker owns the lock.
+
+### Pseudocode
+
+```python
+async with AsyncSessionLocal() as session:
+    now = utcnow()
+    expires_at = now + timedelta(seconds=ttl_seconds)
+
+    # Remove expired stale lock
+    await session.execute(
+        delete(ConversationLock).where(
+            ConversationLock.conversation_key == conversation_key,
+            ConversationLock.expires_at < now,
+        )
+    )
+
+    try:
+        session.add(
+            ConversationLock(
+                conversation_key=conversation_key,
+                locked_by=worker_id,
+                expires_at=expires_at,
+            )
+        )
+        await session.commit()
+        return True
+    except IntegrityError:
+        await session.rollback()
+        return False
+```
+
+---
+
+### 9.2. `release_conversation_lock`
+
+```python
+async def release_conversation_lock(
+    *,
+    conversation_key: str,
+    worker_id: str,
+) -> None:
+```
+
+Delete lock only if owned by the same worker:
+
+```python
+delete(ConversationLock).where(
+    ConversationLock.conversation_key == conversation_key,
+    ConversationLock.locked_by == worker_id,
+)
+```
+
+---
+
+### 9.3. `refresh_conversation_lock` — optional but recommended
+
+If LLM calls can last long, refresh lock before/after heavy LLM phases.
+
+```python
+async def refresh_conversation_lock(
+    *,
+    conversation_key: str,
+    worker_id: str,
+    ttl_seconds: int,
+) -> None:
+```
+
+This prevents long processing from hitting lock TTL.
+
+---
+
+# 10. Add job deferral support
+
+## Why
+
+If Worker 2 receives a job for a conversation currently locked by Worker 1, it must not:
+- process concurrently;
+- mark the job done;
+- drop the message.
+
+It should simply try again later.
+
+## File
+
+```text
+app/storage/repositories/jobs_repo.py
+```
+
+## Add function
+
+```python
+async def defer_job(
+    job_id: int,
+    *,
+    delay_seconds: int = 2,
+    reason: str = "conversation_locked",
+) -> None:
+```
+
+## Behavior
+
+Update job:
+
+```python
+status = "queued"
+run_after = now + delay_seconds
+locked_at = NULL
+updated_at = now
+last_error = optional diagnostic reason
+```
+
+Do not increment retry attempts.
+
+---
+
+# 11. Refactor processing flow to use the conversation lock
+
+## File
+
+```text
+app/processing/simple_message_processor.py
+```
+
+## Current important fact
+
+The processor currently:
+- saves incoming user message;
+- waits 2 seconds;
+- checks for newer active jobs;
+- lets only latest burst message produce the reply.
+
+This BurstMerge logic must remain.
+
+## New safe flow
+
+### Recommended order
+
+```text
+1. dedup
+2. rate limit
+3. create/get session
+4. save user message into DB
+5. BurstMerge quiet wait
+6. if newer active job exists → skip this job
+7. acquire conversation lock
+8. if lock not acquired → defer job and return
+9. inside lock:
+      - re-check session silence
+      - re-check whether a newer active job now exists
+      - process reset if needed
+      - load slots/history
+      - merge recent user messages
+      - escalation detector
+      - RAG + LLM responder
+      - dispatch answer
+10. finally release conversation lock
+```
+
+---
+
+# 12. Important change: `/reset` must also be protected by conversation lock
+
+## Problem
+
+With 5 workers:
+- one worker may be generating a response;
+- another worker may process `/reset` simultaneously.
+
+This can lead to:
+- stale reply being sent after reset;
+- session inconsistency.
+
+## Required behavior
+
+`/reset` should be handled inside the same conversation lock.
+
+### Implementation
+
+Do not immediately return from `/reset` before lock acquisition.
+
+Instead:
+
+1. Save or identify the reset job;
+2. acquire lock;
+3. reset session inside the lock;
+4. send reset reply;
+5. release lock.
+
+This guarantees no other worker is sending a reply concurrently.
+
+---
+
+# 13. Add stale job recovery
+
+## Problem
+
+If a worker crashes after marking a job as `running`, the job may remain stuck forever.
+
+## Add repository function
+
+```python
+async def requeue_stale_running_jobs(
+    *,
+    stale_after_seconds: int,
+) -> int:
+```
+
+## Behavior
+
+Find jobs:
+
+```text
+status = "running"
+locked_at < now - stale_after_seconds
+```
+
+Reset them:
+
+```text
+status = "queued"
+locked_at = NULL
+run_after = now
+```
+
+## Where to call
+
+At worker startup:
+
+```python
+await requeue_stale_running_jobs(
+    stale_after_seconds=settings.JOB_STALE_LOCK_TTL_SECONDS,
+)
+```
+
+Optionally also periodically in worker loop.
+
+---
+
+# 14. Add stale conversation lock cleanup
+
+## Problem
+
+If a worker crashes while holding a conversation lock, that conversation can become permanently blocked.
+
+## Solution
+
+Locks have `expires_at`.
+
+In `try_acquire_conversation_lock()`:
+- delete stale expired lock;
+- then acquire normally.
+
+Also add startup cleanup:
+
+```python
+async def delete_expired_conversation_locks() -> int:
+```
+
+Call once when worker starts.
+
+---
+
+# 15. Improve `has_newer_active_job`
+
+## Current issue
+
+Current logic appears to identify newer active jobs by `external_user_id`.
+
+For multi-channel safety, it must use:
+
+```text
+channel + external_user_id
+```
+
+## Change signature
+
+From:
+
+```python
+has_newer_active_job(
+    current_job_id: int,
+    external_user_id: str,
+)
+```
+
+To:
+
+```python
+has_newer_active_job(
+    current_job_id: int,
+    channel: str,
+    external_user_id: str,
+)
+```
+
+## Required query logic
+
+Only compare newer jobs that have:
+
+```text
+same channel
+same external_user_id
+same job_type="inbound"
+status in ("queued", "running")
+id > current_job_id
+```
+
+This avoids collisions between:
+- Telegram user `123`;
+- WhatsApp user `123`.
+
+---
+
+# 16. Preserve BurstMerge behavior with 5 workers
+
+## Expected burst behavior
+
+User sends:
 
 ```text
 ТКБ
-Какие условия там
+какие условия
 ?
 ```
 
-must be processed as one user turn.
-
-The already implemented logic should remain:
-
-- old jobs suppressed if newer messages are pending;
-- punctuation-only messages merged;
-- only one final bot reply for one logical burst.
-
-Keep logs like:
+Jobs:
 
 ```text
-BurstMerge |
-session=... |
-merged_count=3 |
-final_text="ТКБ\nКакие условия там\n?"
+J1, J2, J3
 ```
 
----
-
-## 4.2. Sessions and `/reset`
-
-Keep:
-
-- session persistence;
-- conversation history;
-- `/reset` clears context and silence flags;
-- new session starts clean.
-
----
-
-## 4.3. Full silence after escalation
-
-Keep strict rule:
+Expected:
 
 ```text
-After real escalation:
-- send one final handoff reply;
-- then no more bot replies until /reset.
+J1 skipped because newer active job exists
+J2 skipped because newer active job exists
+J3 acquires conversation lock
+J3 merges all recent user messages
+J3 sends exactly one reply
 ```
-
-Use the exact final handoff message:
-
-```text
-Принял. Передаю вашу заявку старшему менеджеру, чтобы помочь вам дальше.
-```
-
-After sending it:
-
-```python
-slots["_session_silenced_after_handoff"] = True
-slots["_escalation_sent"] = True
-```
-
-At the beginning of processing:
-
-```python
-if session_is_silenced_after_handoff and user_message != "/reset":
-    return without outbound reply
-```
-
----
-
-# 5. New simplified message processor
-
-Create a new simplified processing function or fully refactor the existing one.
-
-Suggested shape:
-
-```python
-async def process_message_simple(...):
-    if is_reset(message):
-        reset_session()
-        send_reset_reply()
-        return
-
-    if session_is_silenced_after_handoff(session):
-        log_suppressed_after_handoff()
-        return
-
-    merged_message = merge_burst_messages(...)
-
-    append_user_message_to_history(session, merged_message)
-
-    escalation = await escalation_detector.detect(
-        history=session.history,
-        current_message=merged_message,
-    )
-
-    if escalation.needed:
-        await execute_handoff(...)
-        await send_fixed_handoff_reply(...)
-        silence_session_after_handoff(...)
-        return
-
-    kb_chunks = retrieve_relevant_kb_chunks(
-        message=merged_message,
-        history=session.history,
-    )
-
-    prompt_payload = build_simple_responder_payload(
-        system_prompt=load_system_prompt(),
-        kb_chunks=kb_chunks,
-        history=session.history,
-        current_message=merged_message,
-    )
-
-    reply = await llm.generate(prompt_payload)
-
-    reply = validate_or_repair_minimally(reply)
-
-    send_reply(reply)
-    append_assistant_message_to_history(session, reply)
-```
-
----
-
-# 6. Simplify the LLM prompt
-
-## Core philosophy
-
-The model should receive:
-
-1. role / behavior instructions;
-2. trusted KB facts;
-3. conversation history;
-4. current user message.
-
-No scenario prompts from code.
-No examples based on scenario routing.
-No `active_scenario`, `next_manager_move`, `scenario_policy`, or similar fields.
-
----
-
-## Suggested system prompt
-
-Use a single clean prompt file, for example:
-
-```text
-app/llm/prompts/manager/simple_system_prompt.md
-```
-
-Suggested contents:
-
-```text
-Ты — Алексей, консультант компании «В плюсе».
-
-Компания помогает арбитражным управляющим открывать и сопровождать счета должников в процедурах банкротства.
-
-Твоя задача:
-- отвечать на вопросы клиента естественно, спокойно и по делу;
-- объяснять банки, тарифы, условия, документы, ограничения и выгоды сотрудничества;
-- использовать только факты из блока KNOWLEDGE;
-- учитывать историю текущего диалога;
-- не повторяться без необходимости;
-- не выдумывать тарифы, проценты, сроки, документы и условия;
-- если в KNOWLEDGE нет достаточных фактов, честно скажи, что этот момент нужно уточнить у менеджера;
-- обращаться к клиенту только на «вы»;
-- писать естественным деловым русским языком;
-- не использовать иностранные слова или мусорные вставки;
-- не обещать подключение менеджера самостоятельно — это контролирует система отдельно.
-```
-
----
-
-# 7. Prompt payload structure
-
-The responder LLM should get something like:
-
-```text
-SYSTEM:
-[system prompt]
-
-KNOWLEDGE:
-[Chunk 1]
-[Chunk 2]
-[Chunk 3]
-
-DIALOG HISTORY:
-User: ...
-Assistant: ...
-User: ...
-
-CURRENT USER MESSAGE:
-...
-```
-
-or equivalent JSON/chat-message structure.
 
 ## Important
 
-Do not pass:
-
-- planner result;
-- scenario ids;
-- forced topic names;
-- active scenario;
-- code-written interpretation of user intent;
-- examples selected by code based on scenarios.
+When a worker gets a lock:
+- re-check if it is still the latest active job;
+- if not latest, release lock and skip/defer appropriately.
 
 ---
 
-# 8. RAG retrieval in the simple branch
+# 17. Preserve escalation silence
 
-## Goal
-
-Retrieve relevant KB chunks directly from:
-
-- current merged message;
-- optionally recent dialog context.
-
-Do not rely on business scenario routing.
-
-## Suggested search query
-
-Build retrieval query using:
+Current `simple_message_processor` already supports:
 
 ```text
-current_user_message
-+ optional short context from last 1–2 user messages
+_session_silenced_after_handoff
+_escalation_sent
 ```
 
-Example:
+This must remain safe with 5 workers.
 
-User history:
+## Required behavior
+
+If one worker triggers escalation:
 
 ```text
-User: у меня ФЛ
-Assistant: Для ФЛ есть ТКБ...
-User: а какие условия там?
+SessionSilence | silenced_after_handoff=true
 ```
 
-retrieval query can be:
+then any other worker that later resumes a queued job from the same user must:
 
 ```text
-ФЛ условия ТКБ какие условия
+silence-check after lock acquisition
+→ suppress message
+→ no reply
 ```
 
-This query can be built simply from:
-- current message;
-- recent known textual entities found in history;
-- no scenario engine.
+## Add test
 
-## Acceptable lightweight context extraction
+Two jobs queued close together:
+- job A triggers escalation;
+- job B processes after it.
 
-You may keep only very small utility extraction if useful:
-
-- detect explicit bank names: ТКБ, Альфа-Банк, Уралсиб;
-- detect explicit debtor type: ФЛ, ЮЛ.
-
-This is not scenario routing.
-It is only query enrichment for RAG.
-
-Example:
-
-```text
-current_message = "а какие условия там?"
-last_bank_mention = "ТКБ"
-last_debtor_type = "ФЛ"
-
-retrieval_query = "ТКБ ФЛ условия какие условия"
-```
-
-This is allowed.
+Expected:
+- job A sends the fixed handoff message;
+- job B sends nothing.
 
 ---
 
-# 9. Minimal memory helper for RAG only
+# 18. Add worker-aware logging
 
-Keep a very small state object only for retrieval convenience:
+## Required logs
 
+### Worker lifecycle
+
+```text
+Worker started |
+worker_id=worker-1 |
+poll_interval=0.5 |
+batch_size=1
+```
+
+### Job claim
+
+```text
+Job running |
+worker_id=worker-3 |
+job_id=...
+type=inbound
+```
+
+### Conversation lock
+
+```text
+ConversationLock |
+action=acquired |
+worker_id=worker-2 |
+conversation_key=telegram:5747517813
+```
+
+```text
+ConversationLock |
+action=deferred |
+worker_id=worker-4 |
+conversation_key=telegram:5747517813 |
+reason=already_locked
+```
+
+```text
+ConversationLock |
+action=released |
+worker_id=worker-2 |
+conversation_key=telegram:5747517813
+```
+
+### Stale recovery
+
+```text
+StaleJobsRecovery |
+requeued=3
+```
+
+```text
+StaleConversationLocksCleanup |
+deleted=1
+```
+
+---
+
+# 19. Add queue health/debug visibility
+
+## Optional but strongly recommended
+
+Add a debug endpoint available only when debug endpoints are enabled:
+
+```text
+GET /debug/jobs
+```
+
+Return:
 ```json
 {
-  "last_bank_mention": "tkb",
-  "last_debtor_type": "fl"
+  "queued": 12,
+  "running": 5,
+  "done_recent": 120,
+  "error": 0,
+  "active_workers_configured": 5
 }
 ```
 
-Allowed use:
-- enrich KB search query;
-- help retrieve more relevant chunks.
-
-Forbidden use:
-- choosing the conversation scenario;
-- forcing what the answer must say;
-- replacing the model’s dialogue reasoning.
-
----
-
-# 10. Escalation detector
-
-## Purpose
-
-Escalation remains the only business decision handled separately.
-
-The detector answers one question:
+Also useful:
 
 ```text
-Is the user ready for a human manager / ready to proceed?
+GET /debug/conversation-locks
 ```
 
-## Recommended implementation
+Return active lock count and oldest lock age.
 
-Use a small dedicated LLM classifier.
-
-Input:
-- recent conversation history;
-- current merged message.
-
-Output strict JSON:
-
-```json
-{
-  "escalate": true,
-  "reason": "ready_to_open"
-}
-```
-
-or:
-
-```json
-{
-  "escalate": false,
-  "reason": null
-}
-```
+This is optional for production but very useful during testing.
 
 ---
 
-## Escalation should trigger for cases like
+# 20. Update docs and `.env.example`
 
-- `хочу открыть`
-- `мне подходит`
-- `давайте открывать`
-- `что от меня требуется?`
-- `что скинуть?`
-- `куда отправлять документы?`
-- `сюда скидывать?`
-- `передайте менеджеру`
-- `готов запускать`
-- `оформляем`
-- `берём`
-- clear contextual acceptance after bank/conditions explanation:
-  - `хорошо`
-  - `нормально`
-  - `давайте`
-  when history clearly shows that a concrete option was discussed.
+## Add environment variables
 
----
-
-## Escalation must NOT trigger for
-
-- normal questions;
-- tariff requests;
-- conditions questions;
-- bank comparison;
-- “подробнее”;
-- “какие банки есть?”;
-- “зачем мне посредники?”;
-- ordinary acknowledgements without readiness context.
-
----
-
-# 11. Escalation flow
-
-If detector returns:
-
-```json
-{
-  "escalate": true
-}
+```env
+WORKER_COUNT=5
+WORKER_POLL_INTERVAL=0.5
+WORKER_BATCH_SIZE=1
+CONVERSATION_LOCK_TTL_SECONDS=180
+JOB_STALE_LOCK_TTL_SECONDS=300
 ```
 
-then:
-
-1. Call actual handoff service.
-2. Save escalation metadata if needed.
-3. Send exact fixed reply:
+## Add deployment note
 
 ```text
-Принял. Передаю вашу заявку старшему менеджеру, чтобы помочь вам дальше.
-```
-
-4. Set silence flags.
-5. Stop processing.
-
-Do not call the responder LLM after escalation has been detected.
-
----
-
-# 12. Remove LLM-generated handoff text
-
-The responder prompt should explicitly say:
-
-```text
-Do not promise that a manager will be connected.
-Do not say that the request is being transferred.
-Escalation is controlled by the system separately.
-```
-
-The message processor should also validate:
-- if normal responder output contains handoff-like wording;
-- reject and repair or replace it.
-
-Examples to block in normal responder output:
-
-- `передам менеджеру`
-- `передаю менеджеру`
-- `менеджер свяжется`
-- `передам заявку`
-- `подключу старшего менеджера`
-
-If the system did not trigger escalation, such wording is invalid.
-
----
-
-# 13. Minimal response validation
-
-Keep only validators that protect visible quality.
-
-## Keep validators for:
-
-### 13.1. Empty or broken replies
-
-Reject:
-- empty text;
-- whitespace-only text;
-- malformed technical output.
-
-### 13.2. Foreign-language artifacts
-
-Reject replies containing unexpected words like:
-
-```text
-benötujete
-```
-
-Keep whitelist only for legitimate technical terms if needed:
-- CRM
-- Telegram
-- Bitrix
-- API
-
-### 13.3. Informal tone
-
-Reject:
-- `ты`
-- `тебе`
-- `твой`
-- `тебя`
-
-### 13.4. Unauthorized handoff promises
-
-Reject manager-transfer phrases when escalation was not triggered by detector.
-
----
-
-# 14. Optional minimal repetition guard
-
-For presentation stability, keep a lightweight anti-repeat check.
-
-If the new reply is near-identical to the immediately previous assistant reply:
-- try one short repair;
-- or send a concise alternative.
-
-But do not rebuild a complicated anti-repetition fact-group system in this simple branch.
-
-Allowed simple approach:
-- normalized string similarity;
-- compare last reply only.
-
----
-
-# 15. What to remove from normal answer generation
-
-Remove all of this from the active simple branch:
-
-```text
-- Scenario Planner
-- Scenario Catalog
-- Scenario Policy routing
-- Scenario Playbook enrichment
-- forced_scenarios
-- scenario-based forced KB retrieval
-- deal-state-driven responder prompts
-- required_next_step
-- hard business repair flows
-- complex fact-group anti-repetition system
-- scenario scores
-- code-defined “what the user means”
-```
-
-The new branch should remain intentionally simple.
-
----
-
-# 16. Keep logs, but simplify them
-
-## Keep useful logs
-
-### Burst merge
-
-```text
-BurstMerge |
-session=... |
-merged_count=... |
-final_text="..."
-```
-
-### KB retrieval
-
-```text
-SimpleRAG |
-session=... |
-query="..." |
-chunks=...
-```
-
-### Escalation detector
-
-```text
-EscalationDetector |
-session=... |
-escalate=true |
-reason=ready_to_open
-```
-
-### Silence after handoff
-
-```text
-SessionSilence |
-session=... |
-silenced_after_handoff=true
-```
-
-### LLM responder call
-
-```text
-ResponderCall |
-session=... |
-history_turns=... |
-kb_chunks=...
+WORKER_COUNT > 1 requires PostgreSQL.
 ```
 
 ---
 
-# 17. Debug endpoint / trace
+# 21. Required tests
 
-Keep prompt debug so that we can inspect:
-
-- exact system prompt;
-- exact KB chunks inserted;
-- dialog history sent to the model;
-- current user message;
-- final raw LLM reply;
-- whether escalation detector fired.
-
-This will be more valuable than scenario traces in the simplified branch.
-
----
-
-# 18. Tests
-
-## Test group A — BurstMerge
+## Test Group A — Worker count / startup
 
 ### A1
-Messages:
+Run `python run.py`.
+
+Expected logs:
+
+```text
+Worker started | worker_id=worker-1
+Worker started | worker_id=worker-2
+Worker started | worker_id=worker-3
+Worker started | worker_id=worker-4
+Worker started | worker_id=worker-5
+```
+
+---
+
+## Test Group B — Parallel users
+
+### B1
+Queue two independent users:
+
+```text
+telegram:userA
+telegram:userB
+```
+
+Expected:
+- jobs may run at the same time on different workers;
+- both get responses without waiting for one another sequentially.
+
+---
+
+## Test Group C — Same user serialization
+
+### C1
+Queue two jobs for the same user close together.
+
+Expected:
+- only one conversation lock held at a time;
+- second job is deferred or skipped according to BurstMerge rules;
+- no overlapping LLM responder calls for same conversation.
+
+---
+
+## Test Group D — BurstMerge with 5 workers
+
+### D1
+User sends:
 
 ```text
 ТКБ
-какие условия там
+какие условия
 ?
 ```
 
 Expected:
-- one merged message;
-- one LLM answer.
-
-### A2
-Messages:
-
-```text
-у меня ФЛ
-какой банк подойдет
-```
-
-Expected:
-- merged before processing.
+- exactly one final bot reply;
+- older jobs skipped;
+- latest job merges all fragments;
+- no duplicate answers.
 
 ---
 
-## Test group B — Normal RAG answers
+## Test Group E — Handoff silence
 
-### B1
-User:
+### E1
+Job A triggers escalation.
 
-```text
-зачем мне посредники?
-```
+Immediately after, another job B from same user is queued.
 
 Expected:
-- response uses KB facts about benefits;
-- no scenario code involved.
-
-### B2
-User:
-
-```text
-у меня ФЛ, какие банки и тарифы?
-```
-
-Expected:
-- response uses relevant KB facts.
-
-### B3
-User:
-
-```text
-ТКБ, какие условия?
-```
-
-Expected:
-- response uses relevant TKB conditions facts;
-- no documents unless KB/context naturally requires it.
+- A sends fixed handoff message;
+- B sees `_session_silenced_after_handoff=true`;
+- B sends nothing.
 
 ---
 
-## Test group C — Escalation
+## Test Group F — Reset safety
 
-### C1
-Conversation:
+### F1
+A long-running user turn is in progress.
+Then `/reset` arrives.
 
-```text
-У меня ФЛ.
-ТКБ подходит.
-Что скинуть?
-```
+Expected acceptable behavior:
+- `/reset` waits for lock;
+- reset is processed without concurrent reply corruption;
+- no stale later reply after reset finishes.
 
-Expected:
-- escalation detector returns true;
-- fixed handoff reply;
-- session silenced.
-
-### C2
-Conversation:
-
-```text
-Какие условия в ТКБ?
-```
-
-Expected:
-- no escalation.
-
-### C3
-Conversation after handoff:
-
-```text
-окей
-хорошо
-ещё вопрос
-```
-
-Expected:
-- no replies at all.
+If this cannot be guaranteed with the first implementation, explicitly document the behavior and add a follow-up task for session revision checking.
 
 ---
 
-## Test group D — Hand-off phrase guard
+## Test Group G — Stale jobs and locks
 
-If normal responder output includes:
-
-```text
-Передам заявку менеджеру.
-```
-
-while detector returned `escalate=false`:
+### G1
+Create a running job with very old `locked_at`.
 
 Expected:
-- reject or repair;
-- do not dispatch manager promise.
+- worker startup requeues it.
 
----
-
-## Test group E — Foreign garbage
-
-Reply candidate:
-
-```text
-Для открытия счета benötujete ИНН.
-```
+### G2
+Create an expired conversation lock.
 
 Expected:
-- invalid;
-- never dispatched.
+- next worker acquisition removes stale lock and proceeds.
 
 ---
 
-## Test group F — Tone
+# 22. Performance acceptance
 
-Reply candidate:
+With 5 workers and PostgreSQL:
 
-```text
-Тебе подойдет ТКБ.
-```
+## Expected qualitative improvement
 
-Expected:
-- invalid;
-- repaired or rejected.
+- Different users can be handled concurrently.
+- Queue wait time decreases under multi-user load.
+- One slow LLM call no longer blocks all users.
 
----
+## Minimum target
 
-# 19. Manual Telegram smoke test
+Under a simple load test with 5 users sending one turn each at nearly the same time:
 
-Run this test manually after implementation:
-
-```text
-/reset
-привет
-я же сам могу пойти
-в чем моя выгода?
-хм
-хорошо
-у меня ФЛ
-давайте
-а условия какие
-нормально
-хорошо
-окей жду
-```
-
-Expected behavior:
-
-1. Bot answers objection naturally.
-2. Bot answers about FL bank option naturally.
-3. Bot answers conditions naturally.
-4. On clear readiness signal, escalation detector fires.
-5. Bot sends exactly:
-
-```text
-Принял. Передаю вашу заявку старшему менеджеру, чтобы помочь вам дальше.
-```
-
-6. After that, bot stays silent.
+- all 5 jobs should enter processing in parallel or near-parallel;
+- they should not execute strictly one after another;
+- logs should show multiple distinct `worker_id`s actively processing jobs.
 
 ---
 
-# 20. Definition of Done
+# 23. Files expected to change
 
-The new branch is complete when:
+Likely modified:
 
-1. A separate simple branch exists.
-2. Normal conversation no longer uses ScenarioPolicy / Planner / Playbook / Catalog routing.
-3. The answer pipeline is:
-   ```text
-   prompt + KB + history + current message
-   ```
-4. BurstMerge still works.
-5. `/reset` works.
-6. RAG still works.
-7. Escalation detector works independently.
-8. Handoff sends only the fixed final message.
-9. Session is fully silent after escalation.
-10. Normal responder never promises a manager if detector did not escalate.
-11. Visible replies contain no foreign garbage.
-12. Visible replies use formal “вы”.
-13. Telegram smoke test feels more natural and less code-controlled.
-14. This branch is stable enough for presentation and can be compared against the complex orchestrated branch.
+```text
+run.py
+app/config.py
+app/worker.py
+app/storage/models.py
+app/storage/repositories/jobs_repo.py
+app/processing/simple_message_processor.py
+```
+
+New file:
+
+```text
+app/storage/repositories/conversation_locks_repo.py
+```
+
+Optional:
+
+```text
+app/api/debug_jobs.py
+or
+app/api/health.py
+```
+
+Tests:
+
+```text
+tests/test_worker_concurrency.py
+tests/test_conversation_locks.py
+tests/test_burst_merge_multiworker.py
+tests/test_handoff_silence_multiworker.py
+```
+
+---
+
+# 24. Definition of Done
+
+The task is complete only when:
+
+1. `run.py` starts exactly 5 worker processes by default via `WORKER_COUNT=5`.
+2. Each worker has a distinct `WORKER_ID`.
+3. Worker batch size is 1 so jobs are fairly distributed.
+4. PostgreSQL is required or explicitly enforced for multi-worker mode.
+5. Conversation-level DB lock prevents concurrent processing of the same user.
+6. Different users are processed in parallel.
+7. Same-user jobs never run LLM pipelines concurrently.
+8. BurstMerge still works exactly as before.
+9. Escalation silence still works exactly as before.
+10. `/reset` is safe under concurrent workers.
+11. Stale jobs are recoverable.
+12. Stale conversation locks are recoverable.
+13. Logging clearly shows worker id, locks, defer/release flow.
+14. All new concurrency tests pass.
+15. Manual test with 5 simultaneous users shows real throughput improvement without duplicate replies.

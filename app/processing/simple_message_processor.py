@@ -1,7 +1,7 @@
 """Simplified LLM-first message processor (simple-llm branch).
 
 Pipeline:
-  /reset           -> reset session, reply, return
+  /reset           -> acquire conversation lock, reset session, reply, return
   session_silenced -> ignore silently
   BurstMerge       -> merge rapid messages from same user
   EscalationDetector -> if escalated: handoff reply + silence
@@ -35,13 +35,22 @@ from app.processing.utils import (
 )
 from app.services.escalation_detector import detect_escalation_signal
 from app.services.transcription_service import transcribe_audio
-from app.storage.repositories.jobs_repo import has_newer_active_job
+from app.storage.repositories.jobs_repo import has_newer_active_job, defer_job
+from app.storage.repositories.conversation_locks_repo import (
+    try_acquire_conversation_lock,
+    release_conversation_lock,
+)
 from app.storage.repositories.messages_repo import get_messages_by_session, save_message
 from app.storage.repositories.sessions_repo import (
     get_slots,
     set_slots,
     touch_session_activity,
 )
+
+
+class JobDeferred(Exception):
+    """Raised by process_message to signal that the job was deferred back to the queue."""
+
 
 # ── constants ──────────────────────────────────────────────────────────────────
 _SESSION_SILENCED_KEY = "_session_silenced_after_handoff"
@@ -89,7 +98,6 @@ _INFORMAL_RE = re.compile(
     re.I | re.U,
 )
 # Detect characters outside ASCII printable + Cyrillic + common typographic symbols.
-# Built programmatically to avoid encoding issues with raw string literals.
 _FOREIGN_GARBAGE_RE = re.compile(
     "[^"
     + chr(0x20) + "-" + chr(0x7E)   # ASCII printable (space to ~)
@@ -128,7 +136,6 @@ def _load_system_prompt() -> str:
 
 # ── RAG helpers ────────────────────────────────────────────────────────────────
 def _build_rag_query(user_text: str, rag_memory: dict) -> str:
-    """Build retrieval query from current message + lightweight entity memory."""
     parts = [user_text]
     bank = rag_memory.get("last_bank_mention") or ""
     debtor = rag_memory.get("last_debtor_type") or ""
@@ -149,7 +156,6 @@ def _retrieve_kb_chunks(query: str, *, top_k: int = 6) -> list[str]:
 
 
 def _update_rag_memory(user_text: str, rag_memory: dict) -> None:
-    """Persist bank/debtor-type mentions for future KB query enrichment."""
     bank_m = _BANK_RE.search(user_text or "")
     if bank_m:
         rag_memory["last_bank_mention"] = bank_m.group(0)
@@ -169,7 +175,6 @@ async def _run_responder(
     session_id: int,
     trace_id: str,
 ) -> str:
-    """Call LLM: SYSTEM prompt + KNOWLEDGE + DIALOG HISTORY + CURRENT MESSAGE."""
     system_prompt = _load_system_prompt()
 
     knowledge_block = ""
@@ -273,6 +278,8 @@ def _merge_trailing_user_messages(msgs: list, current_text: str, *, max_items: i
 async def process_message(message) -> None:
     print("RUNNING simple_message_processor FROM:", __file__, "PID:", os.getpid())
 
+    worker_id = os.getenv("WORKER_ID", "worker-unknown")
+
     if isinstance(message, dict):
         job_id = message.pop("_job_id", None)
         from app.channels.base import UnifiedMessage
@@ -298,14 +305,33 @@ async def process_message(message) -> None:
     except RateLimitExceeded:
         return
 
-    # ── /reset ──
+    conversation_key = f"{message.channel}:{message.external_user_id}"
+
+    # ── /reset (protected by conversation lock) ──
     if message.text and message.text.strip() == "/reset":
-        await reset_session(message.channel, message.external_user_id)
-        await OutboundDispatcher.send(
-            channel=message.channel,
-            external_user_id=message.external_user_id,
-            text="Контекст диалога сброшен. Начнём заново.",
-        )
+        if job_id:
+            lock_acquired = await try_acquire_conversation_lock(
+                conversation_key=conversation_key,
+                worker_id=worker_id,
+                ttl_seconds=settings.CONVERSATION_LOCK_TTL_SECONDS,
+            )
+            if not lock_acquired:
+                await defer_job(job_id, delay_seconds=2, reason="conversation_locked")
+                raise JobDeferred()
+
+        try:
+            await reset_session(message.channel, message.external_user_id)
+            await OutboundDispatcher.send(
+                channel=message.channel,
+                external_user_id=message.external_user_id,
+                text="Контекст диалога сброшен. Начнём заново.",
+            )
+        finally:
+            if job_id:
+                await release_conversation_lock(
+                    conversation_key=conversation_key,
+                    worker_id=worker_id,
+                )
         return
 
     session = await get_or_create_session(
@@ -348,10 +374,10 @@ async def process_message(message) -> None:
         external_message_id=message.message_id,
     )
 
-    # ── BurstMerge: skip if a newer job is already queued ──
+    # ── BurstMerge: wait then skip if a newer job is already queued ──
     if job_id:
         await asyncio.sleep(2.0)
-        if await has_newer_active_job(job_id, str(message.external_user_id)):
+        if await has_newer_active_job(job_id, message.channel, str(message.external_user_id)):
             logger.info(
                 "BurstMerge | session={} | job_skipped=true | reason=newer_message_pending"
                 " | job_id={} | external_user_id={}",
@@ -359,142 +385,169 @@ async def process_message(message) -> None:
             )
             return
 
-    slots = await get_slots(session.id) or {}
-
-    # ── post-BurstMerge silence re-check ──
-    if slots.get(_SESSION_SILENCED_KEY) or slots.get("_escalation_sent"):
-        logger.info(
-            "SessionSilence | session={} | suppressed_message=true | reason=session_escalated",
-            session.id,
+    # ── acquire conversation lock (or defer job) ──
+    if job_id:
+        lock_acquired = await try_acquire_conversation_lock(
+            conversation_key=conversation_key,
+            worker_id=worker_id,
+            ttl_seconds=settings.CONVERSATION_LOCK_TTL_SECONDS,
         )
-        return
+        if not lock_acquired:
+            await defer_job(job_id, delay_seconds=2, reason="conversation_locked")
+            raise JobDeferred()
 
-    user_text = (message.text or "").strip()
-    if not user_text:
-        await send_bot(
-            session, message.channel, message.external_user_id,
-            "Не вижу текста сообщения. Напишите, пожалуйста, вопрос текстом.", slots,
-        )
-        return
-
-    # ── BurstMerge: merge consecutive user messages into one turn ──
     try:
-        msgs = await get_messages_by_session(session.id)
-        merged = _merge_trailing_user_messages(msgs, user_text)
-        if merged != user_text:
-            merged_count = sum(
-                1 for m in (msgs or [])
-                if (m.get("role") if isinstance(m, dict) else getattr(m, "role", None)) == "user"
-            )
+        # ── re-check newer job after acquiring lock ──
+        if job_id:
+            if await has_newer_active_job(job_id, message.channel, str(message.external_user_id)):
+                logger.info(
+                    "BurstMerge | session={} | job_skipped=true | reason=newer_message_after_lock"
+                    " | job_id={}",
+                    session.id, job_id,
+                )
+                return
+
+        slots = await get_slots(session.id) or {}
+
+        # ── post-BurstMerge silence re-check ──
+        if slots.get(_SESSION_SILENCED_KEY) or slots.get("_escalation_sent"):
             logger.info(
-                "BurstMerge | session={} | merged_count={} | final_text={!r}",
-                session.id, merged_count, merged[:120],
-            )
-            user_text = merged
-        # Punctuation-only burst fragment -- suppress silently
-        if _FRUSTRATION_RE.match(user_text.strip()):
-            logger.info(
-                "BurstMerge | session={} | punctuation_only_suppressed=true | text={!r}",
-                session.id, user_text[:20],
-            )
-            return
-    except Exception:
-        logger.exception("BurstMerge failed (ignored)")
-
-    # ── update lightweight RAG memory (bank / debtor-type extraction) ──
-    rag_memory: dict = slots.get("_rag_memory") or {}
-    _update_rag_memory(user_text, rag_memory)
-    slots["_rag_memory"] = rag_memory
-    await set_slots(session.id, slots)
-
-    processing_start = time.monotonic()
-
-    async with _TypingScope(message.channel, message.external_user_id):
-
-        # ── escalation detector ──
-        msgs_full = await get_messages_by_session(session.id)
-        dialog_text = _build_dialog_context(msgs_full, max_items=8, max_chars=1600)
-        esc_signal = await detect_escalation_signal(dialog_text)
-        logger.info(
-            "EscalationDetector | session={} | escalate={} | reason={} | score={}",
-            session.id, esc_signal["escalate"], esc_signal["reason"], esc_signal["interest_score"],
-        )
-
-        if esc_signal["escalate"]:
-            slots["_escalation_sent"] = True
-            slots[_SESSION_SILENCED_KEY] = True
-            await set_slots(session.id, slots)
-            logger.info(
-                "SessionSilence | session={} | silenced_after_handoff=true | reason={}",
-                session.id, esc_signal["reason"],
-            )
-            try:
-                from app.processing.utils import maybe_escalate
-                await maybe_escalate(session.id, slots, reason=esc_signal["reason"])
-            except Exception:
-                logger.exception("maybe_escalate failed (ignored)")
-            await send_bot(
-                session, message.channel, message.external_user_id,
-                _HANDOFF_REPLY, slots, processing_start=processing_start,
-            )
-            return
-
-        # ── simple RAG retrieval (no scenario routing) ──
-        rag_query = _build_rag_query(user_text, rag_memory)
-        kb_chunks = _retrieve_kb_chunks(rag_query, top_k=6)
-        logger.info(
-            "SimpleRAG | session={} | query={!r} | chunks={}",
-            session.id, rag_query[:80], len(kb_chunks),
-        )
-
-        # ── LLM responder ──
-        from app.services.llm_trace import make_trace_id
-        trace_id = make_trace_id()
-
-        reply = await _run_responder(
-            user_text=user_text,
-            kb_chunks=kb_chunks,
-            dialog_msgs=msgs_full,
-            session_id=session.id,
-            trace_id=trace_id,
-        )
-
-        # ── minimal validation + repair ──
-        is_valid, reason = _validate_reply(reply, escalation_fired=False)
-        if not is_valid:
-            logger.warning(
-                "Validation | session={} | issue={} | attempting_repair",
-                session.id, reason,
-            )
-            repaired = _repair_reply(reply, reason)
-            if repaired.strip():
-                is_valid2, _ = _validate_reply(repaired, escalation_fired=False)
-                if is_valid2:
-                    logger.info("Validation | session={} | repair_accepted", session.id)
-                reply = repaired
-            else:
-                reply = ""
-
-        # ── fallback if still empty ──
-        if not reply or not reply.strip():
-            logger.warning(
-                "Validation | session={} | no_valid_reply -- using fallback", session.id
-            )
-            reply = "Уточните, пожалуйста, вопрос — постараюсь помочь точнее."
-
-        # ── lightweight anti-repetition ──
-        last_bot_text = slots.get("_last_bot_text") or ""
-        if last_bot_text and _is_near_duplicate(reply, last_bot_text):
-            logger.info(
-                "Validation | session={} | near_duplicate -- appending clarification prompt",
+                "SessionSilence | session={} | suppressed_message=true | reason=session_escalated",
                 session.id,
             )
-            reply = reply + "\n\nЕсли нужны дополнительные подробности — уточните вопрос."
+            return
 
-        # ── send reply (send_bot saves bot message and updates slots internally) ──
-        await send_bot(
-            session, message.channel, message.external_user_id,
-            reply, slots,
-            processing_start=processing_start,
-            client_msg_len=len(user_text),
-        )
+        user_text = (message.text or "").strip()
+        if not user_text:
+            await send_bot(
+                session, message.channel, message.external_user_id,
+                "Не вижу текста сообщения. Напишите, пожалуйста, вопрос текстом.", slots,
+            )
+            return
+
+        # ── BurstMerge: merge consecutive user messages into one turn ──
+        try:
+            msgs = await get_messages_by_session(session.id)
+            merged = _merge_trailing_user_messages(msgs, user_text)
+            if merged != user_text:
+                merged_count = sum(
+                    1 for m in (msgs or [])
+                    if (m.get("role") if isinstance(m, dict) else getattr(m, "role", None)) == "user"
+                )
+                logger.info(
+                    "BurstMerge | session={} | merged_count={} | final_text={!r}",
+                    session.id, merged_count, merged[:120],
+                )
+                user_text = merged
+            if _FRUSTRATION_RE.match(user_text.strip()):
+                logger.info(
+                    "BurstMerge | session={} | punctuation_only_suppressed=true | text={!r}",
+                    session.id, user_text[:20],
+                )
+                return
+        except Exception:
+            logger.exception("BurstMerge failed (ignored)")
+
+        # ── update lightweight RAG memory (bank / debtor-type extraction) ──
+        rag_memory: dict = slots.get("_rag_memory") or {}
+        _update_rag_memory(user_text, rag_memory)
+        slots["_rag_memory"] = rag_memory
+        await set_slots(session.id, slots)
+
+        processing_start = time.monotonic()
+
+        async with _TypingScope(message.channel, message.external_user_id):
+
+            # ── escalation detector ──
+            msgs_full = await get_messages_by_session(session.id)
+            dialog_text = _build_dialog_context(msgs_full, max_items=8, max_chars=1600)
+            esc_signal = await detect_escalation_signal(dialog_text)
+            logger.info(
+                "EscalationDetector | session={} | escalate={} | reason={} | score={}",
+                session.id, esc_signal["escalate"], esc_signal["reason"], esc_signal["interest_score"],
+            )
+
+            if esc_signal["escalate"]:
+                slots["_escalation_sent"] = True
+                slots[_SESSION_SILENCED_KEY] = True
+                await set_slots(session.id, slots)
+                logger.info(
+                    "SessionSilence | session={} | silenced_after_handoff=true | reason={}",
+                    session.id, esc_signal["reason"],
+                )
+                try:
+                    from app.processing.utils import maybe_escalate
+                    await maybe_escalate(session.id, slots, reason=esc_signal["reason"])
+                except Exception:
+                    logger.exception("maybe_escalate failed (ignored)")
+                await send_bot(
+                    session, message.channel, message.external_user_id,
+                    _HANDOFF_REPLY, slots, processing_start=processing_start,
+                )
+                return
+
+            # ── simple RAG retrieval (no scenario routing) ──
+            rag_query = _build_rag_query(user_text, rag_memory)
+            kb_chunks = _retrieve_kb_chunks(rag_query, top_k=6)
+            logger.info(
+                "SimpleRAG | session={} | query={!r} | chunks={}",
+                session.id, rag_query[:80], len(kb_chunks),
+            )
+
+            # ── LLM responder ──
+            from app.services.llm_trace import make_trace_id
+            trace_id = make_trace_id()
+
+            reply = await _run_responder(
+                user_text=user_text,
+                kb_chunks=kb_chunks,
+                dialog_msgs=msgs_full,
+                session_id=session.id,
+                trace_id=trace_id,
+            )
+
+            # ── minimal validation + repair ──
+            is_valid, reason = _validate_reply(reply, escalation_fired=False)
+            if not is_valid:
+                logger.warning(
+                    "Validation | session={} | issue={} | attempting_repair",
+                    session.id, reason,
+                )
+                repaired = _repair_reply(reply, reason)
+                if repaired.strip():
+                    is_valid2, _ = _validate_reply(repaired, escalation_fired=False)
+                    if is_valid2:
+                        logger.info("Validation | session={} | repair_accepted", session.id)
+                    reply = repaired
+                else:
+                    reply = ""
+
+            # ── fallback if still empty ──
+            if not reply or not reply.strip():
+                logger.warning(
+                    "Validation | session={} | no_valid_reply -- using fallback", session.id
+                )
+                reply = "Уточните, пожалуйста, вопрос — постараюсь помочь точнее."
+
+            # ── lightweight anti-repetition ──
+            last_bot_text = slots.get("_last_bot_text") or ""
+            if last_bot_text and _is_near_duplicate(reply, last_bot_text):
+                logger.info(
+                    "Validation | session={} | near_duplicate -- appending clarification prompt",
+                    session.id,
+                )
+                reply = reply + "\n\nЕсли нужны дополнительные подробности — уточните вопрос."
+
+            await send_bot(
+                session, message.channel, message.external_user_id,
+                reply, slots,
+                processing_start=processing_start,
+                client_msg_len=len(user_text),
+            )
+
+    finally:
+        if job_id:
+            await release_conversation_lock(
+                conversation_key=conversation_key,
+                worker_id=worker_id,
+            )

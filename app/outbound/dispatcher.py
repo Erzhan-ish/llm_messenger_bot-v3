@@ -26,6 +26,11 @@ class OutboundDispatcher:
             await send_wazzup(external_user_id=external_user_id, text=text)
             return
 
+        if channel == "telegram_personal":
+            from app.outbound.pyrogram_telegram import send_pyrogram_telegram
+            await send_pyrogram_telegram(external_user_id, text)
+            return
+
         raise ValueError(f"Unknown channel: {channel}")
 
     @staticmethod
@@ -39,6 +44,11 @@ class OutboundDispatcher:
 
         if channel == "wazzup":
             await send_wazzup_typing(external_user_id)
+            return
+
+        if channel == "telegram_personal":
+            from app.outbound.pyrogram_telegram import send_pyrogram_typing
+            await send_pyrogram_typing(external_user_id)
             return
 
         return

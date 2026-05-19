@@ -1,4 +1,5 @@
 aiosqlite==0.22.1
+asyncpg==0.31.0
 annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio==4.12.0
@@ -52,6 +53,7 @@ nvidia-nvtx-cu12==12.8.90
 onnxruntime==1.23.2
 openai-whisper==20250625
 protobuf==6.33.3
+pyrogram==2.0.106
 pydantic==2.12.5
 pydantic-settings==2.12.0
 pydantic_core==2.41.5

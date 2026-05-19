@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
 
@@ -91,6 +91,30 @@ class Settings(BaseSettings):
     # Debug endpoints
     ENABLE_DEBUG_ENDPOINTS: bool = False
 
+    # Pyrogram (personal Telegram account)
+    PYROGRAM_ENABLED: bool = False
+    PYROGRAM_API_ID: int | None = None
+    PYROGRAM_API_HASH: str = ""
+    PYROGRAM_SESSION_NAME: str = "pyrogram_session"
+    # Comma-separated list of session names for multiple accounts.
+    # If empty, uses PYROGRAM_SESSION_NAME as a single session.
+    # Example: "manager1,manager2,manager3"
+    PYROGRAM_SESSIONS: str = ""
+
+    def pyrogram_session_list(self) -> list[str]:
+        """Returns the list of active Pyrogram session names."""
+        raw = self.PYROGRAM_SESSIONS.strip()
+        if raw:
+            return [s.strip() for s in raw.split(",") if s.strip()]
+        return [self.PYROGRAM_SESSION_NAME]
+
+    # Workers
+    WORKER_COUNT: int = 5
+    WORKER_POLL_INTERVAL: float = 0.5
+    WORKER_BATCH_SIZE: int = 1
+    CONVERSATION_LOCK_TTL_SECONDS: int = 180
+    JOB_STALE_LOCK_TTL_SECONDS: int = 300
+
     # Application
     APP_ENV: str = Field(default="development")  # development | production
     LOG_LEVEL: str = "INFO"
@@ -131,12 +155,25 @@ class Settings(BaseSettings):
         extra="ignore",  # чтобы лишние .env не валили запуск
     )
 
-    @field_validator("DUTY_MANAGER_ID", "BITRIX_DISK_FOLDER_ID", mode="before")
+    @field_validator("DUTY_MANAGER_ID", "BITRIX_DISK_FOLDER_ID", "PYROGRAM_API_ID", mode="before")
     @classmethod
     def _empty_str_to_none(cls, v):
         if v == "" or v is None:
             return None
         return v
+
+    @model_validator(mode="after")
+    def _check_worker_db_compat(self) -> "Settings":
+        if self.WORKER_COUNT > 1 and "sqlite" in self.DATABASE_URL.lower():
+            import warnings
+            warnings.warn(
+                f"WORKER_COUNT={self.WORKER_COUNT} is not safe with SQLite. "
+                "Forcing WORKER_COUNT=1. Use PostgreSQL for multi-worker mode.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            self.WORKER_COUNT = 1
+        return self
 
 
 settings = Settings()

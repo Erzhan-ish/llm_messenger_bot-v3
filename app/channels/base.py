@@ -5,7 +5,7 @@ from typing import Literal, Optional
 
 @dataclass
 class UnifiedMessage:
-    channel: Literal["telegram", "whatsapp", "wazzup"]
+    channel: Literal["telegram", "whatsapp", "wazzup", "telegram_personal"]
 
     external_user_id: str
     message_id: str

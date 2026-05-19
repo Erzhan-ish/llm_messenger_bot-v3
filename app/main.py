@@ -13,6 +13,7 @@ from app.webhooks.debug.debug_history import debug_router_his
 from app.webhooks.debug.debug_session import debug_router_sess
 from app.webhooks.debug.debug_outbound_fail import debug_router_out
 from app.webhooks.debug.debug_llm_traces import debug_router_llm_traces
+from app.webhooks.debug.debug_pyrogram import debug_router_pyrogram
 
 
 
@@ -68,6 +69,7 @@ app.include_router(debug_router_jobs)
 app.include_router(debug_router_out)
 app.include_router(debug_router_sess)
 app.include_router(debug_router_llm_traces)
+app.include_router(debug_router_pyrogram)
 
 
 app.include_router(telegram_router, prefix="/telegram/webhook")

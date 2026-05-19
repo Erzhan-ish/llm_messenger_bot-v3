@@ -88,7 +88,7 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    job_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    job_type: Mapped[str] = mapped_column(String(128), nullable=False)
 
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
 
@@ -103,3 +103,28 @@ class Job(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ConversationLock(Base):
+    __tablename__ = "conversation_locks"
+
+    conversation_key: Mapped[str] = mapped_column(
+        String(160),
+        primary_key=True,
+    )
+
+    locked_by: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+
+    locked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )

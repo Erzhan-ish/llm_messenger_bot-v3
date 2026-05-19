@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select, update, func
 from sqlalchemy.orm import load_only
 from app.storage.db import async_session
-from app.storage.models import Job
+from app.storage.models import Job, ConversationLock
+from app.config import settings
 
 debug_router_jobs = APIRouter(prefix="/debug", tags=["debug"])
 
@@ -70,9 +71,7 @@ async def debug_jobs_get(job_id: int):
 
 @debug_router_jobs.post("/jobs/{job_id}/requeue")
 async def debug_jobs_requeue(job_id: int, seconds: int = Query(default=0, ge=0, le=3600)):
-    """
-    Принудительно возвращает job в queued (например если застряла в error/running).
-    """
+    """Принудительно возвращает job в queued (например если застряла в error/running)."""
     run_after = datetime.utcnow() + timedelta(seconds=seconds)
 
     async with async_session() as session:
@@ -88,4 +87,68 @@ async def debug_jobs_requeue(job_id: int, seconds: int = Query(default=0, ge=0, 
         await session.commit()
 
     return {"ok": True, "job_id": job_id, "status": "queued", "run_after": run_after}
+
+
+@debug_router_jobs.get("/jobs/summary")
+async def debug_jobs_summary():
+    """Сводная статистика по очереди и воркерам."""
+    now = datetime.now(timezone.utc)
+    done_cutoff = now - timedelta(hours=1)
+
+    async with async_session() as session:
+        queued = (await session.execute(
+            select(func.count()).select_from(Job).where(Job.status == "queued")
+        )).scalar() or 0
+
+        running = (await session.execute(
+            select(func.count()).select_from(Job).where(Job.status == "running")
+        )).scalar() or 0
+
+        done_recent = (await session.execute(
+            select(func.count()).select_from(Job).where(
+                Job.status == "done", Job.updated_at >= done_cutoff
+            )
+        )).scalar() or 0
+
+        error = (await session.execute(
+            select(func.count()).select_from(Job).where(Job.status == "error")
+        )).scalar() or 0
+
+    return {
+        "queued": queued,
+        "running": running,
+        "done_recent_1h": done_recent,
+        "error": error,
+        "active_workers_configured": settings.WORKER_COUNT,
+    }
+
+
+@debug_router_jobs.get("/conversation-locks")
+async def debug_conversation_locks():
+    """Активные conversation locks: количество и возраст самого старого."""
+    now = datetime.now(timezone.utc)
+
+    async with async_session() as session:
+        locks = (await session.execute(
+            select(ConversationLock).order_by(ConversationLock.locked_at.asc())
+        )).scalars().all()
+
+    active = [lk for lk in locks if lk.expires_at > now]
+    oldest_age_seconds = None
+    if active:
+        oldest_age_seconds = int((now - active[0].locked_at).total_seconds())
+
+    return {
+        "active_lock_count": len(active),
+        "oldest_lock_age_seconds": oldest_age_seconds,
+        "locks": [
+            {
+                "conversation_key": lk.conversation_key,
+                "locked_by": lk.locked_by,
+                "locked_at": lk.locked_at,
+                "expires_at": lk.expires_at,
+            }
+            for lk in active
+        ],
+    }
 
