@@ -133,10 +133,10 @@ class Settings(BaseSettings):
     STT_COMPUTE_TYPE: str = Field(default="int8")
 
     # LLM system prompt — path relative to project root or absolute
-    LLM_SYSTEM_PROMPT_PATH: str = Field(default="app/llm/prompts/manager/simple_system_prompt.md")
+    LLM_SYSTEM_PROMPT_PATH: str = Field(default="projects/au_consultant/system_prompt.md")
 
     # Escalation classifier prompt — path relative to project root or absolute
-    ESCALATION_PROMPT_PATH: str = Field(default="app/llm/prompts/escalation_prompt.md")
+    ESCALATION_PROMPT_PATH: str = Field(default="projects/au_consultant/escalation_prompt.md")
 
     # Text sent to client when handing off to a human manager
     HANDOFF_REPLY: str = Field(default="Принял. Передаю вашу заявку старшему менеджеру, чтобы помочь вам дальше.")

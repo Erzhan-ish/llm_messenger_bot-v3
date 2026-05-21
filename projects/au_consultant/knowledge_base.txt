@@ -1,0 +1,1050 @@
+---CHUNK---
+TYPE: company_info
+SCENARIO: partner_banks
+TOPIC: about
+FACT: ООО «В плюсе» — партнер банков Альфа-Банк, ТКБ, Уралсиб, МКБ, Т-Банк и Росбанк. Компания помогает арбитражным управляющим открывать и сопровождать счета должников в процедурах банкротства.
+TAGS: company_info, about, partners
+
+---CHUNK---
+TYPE: feature
+SCENARIO: partner_banks
+TOPIC: benefits
+FACT: Компания предоставляет льготные тарифы по сравнению с прямым обращением в банк и помогает с бюрократией, документами, коммуникацией с банками и финмониторингом.
+TAGS: feature, benefits, tariffs, service
+
+---CHUNK---
+TYPE: availability
+SCENARIO: partner_banks
+BANK: Альфа-Банк
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+ALIASES: альфа, alfabank, alpha
+FACT: Альфа-Банк открывает счета только юридическим лицам.
+TAGS: availability, bank, yul, active
+
+---CHUNK---
+TYPE: availability
+SCENARIO: partner_banks
+BANK: ТКБ
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+ALIASES: ткб, транскапиталбанк, transcapitalbank
+FACT: ТКБ открывает счета юридическим лицам.
+TAGS: availability, bank, yul, active
+
+---CHUNK---
+TYPE: availability
+SCENARIO: partner_banks
+BANK: ТКБ
+CLIENT_TYPE: ФЛ
+STATUS: ACTIVE
+ALIASES: ткб, транскапиталбанк, transcapitalbank
+FACT: ТКБ открывает счета физическим лицам.
+TAGS: availability, bank, fl, active
+
+---CHUNK---
+TYPE: availability
+SCENARIO: partner_banks
+BANK: Уралсиб
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+SEGMENT: Малый бизнес
+ALIASES: уралсиб, uralsib
+FACT: Уралсиб открывает счета юридическим лицам в сегменте «Малый бизнес».
+TAGS: availability, bank, yul, active, small_business
+
+---CHUNK---
+TYPE: availability
+SCENARIO: partner_banks
+BANK: Уралсиб
+CLIENT_TYPE: ЮЛ
+STATUS: PAUSE
+SEGMENT: Средний бизнес
+ALIASES: уралсиб, uralsib
+FACT: Уралсиб в сегменте «Средний бизнес» временно не открывает счета.
+TAGS: availability, bank, yul, pause, medium_business
+
+---CHUNK---
+TYPE: availability
+SCENARIO: partner_banks
+BANK: Т-Банк
+CLIENT_TYPE: ЮЛ
+STATUS: PAUSE
+ALIASES: т-банк, тинькофф, tbank, tinkoff
+FACT: Т-Банк открывает счета только юридическим лицам, но сейчас открытие временно приостановлено.
+TAGS: availability, bank, yul, pause
+
+---CHUNK---
+TYPE: availability
+SCENARIO: partner_banks
+BANK: МКБ
+CLIENT_TYPE: ЮЛ
+STATUS: PAUSE
+ALIASES: мкб, mkb
+FACT: МКБ открывает счета только юридическим лицам, но сейчас открытие временно приостановлено.
+TAGS: availability, bank, yul, pause
+
+---CHUNK---
+TYPE: availability
+SCENARIO: partner_banks
+BANK: Росбанк
+CLIENT_TYPE: ЮЛ
+STATUS: PAUSE
+ALIASES: росбанк, rosbank
+FACT: Росбанк открывает счета юридическим лицам, но сейчас открытие временно приостановлено.
+TAGS: availability, bank, yul, pause
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: alfabank_yul_conditions
+BANK: Альфа-Банк
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+FIELD: opening_fee
+VALUE_NUM: 800
+VALUE_TEXT: 800 руб.
+ALIASES: альфа, alfabank, alpha
+FACT: Открытие счета для юридического лица в Альфа-Банке стоит 800 руб.
+TAGS: pricing, opening_fee, yul, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: alfabank_yul_conditions
+BANK: Альфа-Банк
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+FIELD: monthly_fee
+VALUE_NUM: 800
+VALUE_TEXT: 800 руб.
+ALIASES: альфа, alfabank, alpha
+FACT: Ведение счета для юридического лица в Альфа-Банке стоит 800 руб.
+TAGS: pricing, monthly_fee, yul, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: alfabank_yul_conditions
+BANK: Альфа-Банк
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+FIELD: bankruptcy_control_fee
+VALUE_NUM: 0
+VALUE_TEXT: 0 руб.
+ALIASES: альфа, alfabank, alpha
+FACT: Контроль банкротных операций в Альфа-Банке бесплатен.
+TAGS: pricing, control_fee, yul, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: alfabank_yul_conditions
+BANK: Альфа-Банк
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+FIELD: transfer_to_yul_fee
+VALUE_NUM: 35
+VALUE_TEXT: 35 руб.
+ALIASES: альфа, alfabank, alpha
+FACT: Перевод на юридическое лицо в Альфа-Банке стоит 35 руб.
+TAGS: pricing, transfer_fee, yul, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: alfabank_yul_conditions
+BANK: Альфа-Банк
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+FIELD: transfer_to_fl_fee
+VALUE_TEXT: до 150 000 руб. — 0%; свыше 150 000 руб. — 0.5%
+ALIASES: альфа, alfabank, alpha
+FACT: Переводы на физических лиц, возврат задатков и вознаграждение АУ на ФЛ в Альфа-Банке стоят 0% до 150 000 руб. и 0.5% свыше 150 000 руб.
+TAGS: pricing, transfer_fee, fl, yul, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: alfabank_yul_conditions
+BANK: Альфа-Банк
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+FIELD: au_reward_to_yul_fee
+VALUE_NUM: 35
+VALUE_TEXT: 35 руб.
+ALIASES: альфа, alfabank, alpha
+FACT: Вознаграждение АУ на юридическое лицо в Альфа-Банке стоит 35 руб.
+TAGS: pricing, au_reward, yul, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: tkb_yul_conditions
+BANK: ТКБ
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+FIELD: opening_fee
+VALUE_NUM: 2800
+VALUE_TEXT: 2 800 руб.
+ALIASES: ткб, транскапиталбанк, transcapitalbank
+FACT: Открытие счета для юридического лица в ТКБ снижено с базовых 25 000 руб. до 2 800 руб.
+TAGS: pricing, opening_fee, yul, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: tkb_yul_conditions
+BANK: ТКБ
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+FIELD: monthly_fee
+VALUE_NUM: 2090
+VALUE_TEXT: 2 090 руб.
+ALIASES: ткб, транскапиталбанк, transcapitalbank
+FACT: Ведение счета для юридического лица в ТКБ стоит 2 090 руб.
+TAGS: pricing, monthly_fee, yul, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: tkb_yul_conditions
+BANK: ТКБ
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+FIELD: transfer_to_yul_fee
+VALUE_TEXT: 33 руб. электронно; 400 руб. на бумажном носителе
+ALIASES: ткб, транскапиталбанк, transcapitalbank
+FACT: Переводы на юридических лиц в ТКБ стоят 33 руб. электронно и 400 руб. на бумажном носителе.
+TAGS: pricing, transfer_fee, yul, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: tkb_yul_conditions
+BANK: ТКБ
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+FIELD: transfer_to_fl_fee
+VALUE_TEXT: до 150 000 руб. — 0.5% + 33 руб.; 150 001–500 000 руб. — 1% + 33 руб.; 500 001–1 500 000 руб. — 1.7% + 33 руб.; 1 500 001–5 000 000 руб. — 3.5% + 33 руб.; свыше 5 000 000 руб. — 4% + 33 руб.
+ALIASES: ткб, транскапиталбанк, transcapitalbank
+FACT: Переводы на физических лиц в ТКБ тарифицируются по сумме и дополнительно включают 33 руб. за платежку.
+TAGS: pricing, transfer_fee, fl, yul, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: tkb_yul_conditions
+BANK: ТКБ
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+FIELD: au_reward_to_yul_fee
+VALUE_NUM: 33
+VALUE_TEXT: 33 руб.
+ALIASES: ткб, транскапиталбанк, transcapitalbank
+FACT: Вознаграждение АУ на юридическое лицо в ТКБ стоит 33 руб.
+TAGS: pricing, au_reward, yul, active
+
+---CHUNK---
+TYPE: feature
+SCENARIO: tkb_fl_conditions
+BANK: ТКБ
+CLIENT_TYPE: ФЛ
+STATUS: ACTIVE
+FIELD: operations_review
+ALIASES: ткб, транскапиталбанк, transcapitalbank, согласование, юристы банка, расходные операции
+FACT: Все расходные операции по физическим лицам в ТКБ проходят согласование через юристов банка, документы нужно присылать заранее.
+TAGS: feature, operations_review, fl, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: tkb_fl_conditions
+BANK: ТКБ
+CLIENT_TYPE: ФЛ
+STATUS: ACTIVE
+FIELD: opening_fee
+VALUE_NUM: 1500
+VALUE_TEXT: 1 500 руб.
+ALIASES: ткб, транскапиталбанк, transcapitalbank
+FACT: Открытие счета для физического лица в ТКБ снижено до 1 500 руб.
+TAGS: pricing, opening_fee, fl, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: tkb_fl_conditions
+BANK: ТКБ
+CLIENT_TYPE: ФЛ
+STATUS: ACTIVE
+FIELD: monthly_fee
+VALUE_NUM: 0
+VALUE_TEXT: 0 руб.
+ALIASES: ткб, транскапиталбанк, transcapitalbank
+FACT: Ведение счета для физического лица в ТКБ бесплатно.
+TAGS: pricing, monthly_fee, fl, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: tkb_fl_conditions
+BANK: ТКБ
+CLIENT_TYPE: ФЛ
+STATUS: ACTIVE
+FIELD: external_transfer_fee
+VALUE_TEXT: 1.2% от суммы; минимум 50 руб.; максимум 1 500 руб.
+ALIASES: ткб, транскапиталбанк, transcapitalbank
+FACT: Внешние платежи для физического лица в ТКБ стоят 1.2% от суммы, минимум 50 руб. и максимум 1 500 руб.
+TAGS: pricing, transfer_fee, external, fl, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: tkb_fl_conditions
+BANK: ТКБ
+CLIENT_TYPE: ФЛ
+STATUS: ACTIVE
+FIELD: internal_transfer_fee
+VALUE_NUM: 0
+VALUE_TEXT: 0 руб.
+ALIASES: ткб, транскапиталбанк, transcapitalbank
+FACT: Внутрибанковские переводы для физического лица в ТКБ без комиссии.
+TAGS: pricing, transfer_fee, internal, fl, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: uralsib_yul_conditions
+BANK: Уралсиб
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+SEGMENT: Малый бизнес
+FIELD: opening_fee
+VALUE_NUM: 3500
+VALUE_TEXT: 3 500 руб.
+ALIASES: уралсиб, uralsib
+FACT: Открытие счета для юридического лица в Уралсибе стоит 3 500 руб.
+TAGS: pricing, opening_fee, yul, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: uralsib_yul_conditions
+BANK: Уралсиб
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+SEGMENT: Малый бизнес
+FIELD: monthly_fee
+VALUE_NUM: 1600
+VALUE_TEXT: 1 600 руб.
+ALIASES: уралсиб, uralsib
+FACT: Ведение счета для юридического лица в Уралсибе стоит 1 600 руб.
+TAGS: pricing, monthly_fee, yul, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: uralsib_yul_conditions
+BANK: Уралсиб
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+SEGMENT: Малый бизнес
+FIELD: bankruptcy_control_fee
+VALUE_NUM: 150
+VALUE_TEXT: 150 руб.
+ALIASES: уралсиб, uralsib
+FACT: Контроль банкротных операций в Уралсибе стоит 150 руб. за каждую операцию.
+TAGS: pricing, control_fee, yul, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: uralsib_yul_conditions
+BANK: Уралсиб
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+SEGMENT: Малый бизнес
+FIELD: transfer_to_yul_fee
+VALUE_TEXT: 35 руб. + 150 руб. за контроль
+ALIASES: уралсиб, uralsib
+FACT: Перевод на юридическое лицо в Уралсибе стоит 35 руб., дополнительно взимается 150 руб. за контроль банкротной операции.
+TAGS: pricing, transfer_fee, yul, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: uralsib_yul_conditions
+BANK: Уралсиб
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+SEGMENT: Малый бизнес
+FIELD: transfer_to_fl_fee
+VALUE_TEXT: до 100 000 руб. — без комиссии; свыше 100 000 руб. — 0.2%
+ALIASES: уралсиб, uralsib
+FACT: Переводы на физических лиц в Уралсибе до 100 000 руб. без комиссии, свыше 100 000 руб. — 0.2%.
+TAGS: pricing, transfer_fee, fl, yul, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: uralsib_yul_conditions
+BANK: Уралсиб
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+SEGMENT: Малый бизнес
+FIELD: cash_withdrawal_fee
+VALUE_TEXT: до 100 000 руб. — 1.5%; 100 000–500 000 руб. — 2%; 500 000–1 500 000 руб. — 3%; 1 500 000–3 000 000 руб. — 5%; свыше 3 000 000 руб. — 10%
+ALIASES: уралсиб, uralsib
+FACT: Снятие наличных в Уралсибе зависит от суммы и составляет от 1.5% до 10%.
+TAGS: pricing, cash_withdrawal, yul, active
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: tbank_yul_conditions
+BANK: Т-Банк
+CLIENT_TYPE: ЮЛ
+STATUS: PAUSE
+FIELD: opening_fee
+VALUE_NUM: 3900
+VALUE_TEXT: 3 900 руб.
+ALIASES: т-банк, тинькофф, tbank, tinkoff
+FACT: Открытие счета для юридического лица в Т-Банке стоит 3 900 руб., но открытие сейчас приостановлено.
+TAGS: pricing, opening_fee, yul, pause
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: tbank_yul_conditions
+BANK: Т-Банк
+CLIENT_TYPE: ЮЛ
+STATUS: PAUSE
+FIELD: monthly_fee
+VALUE_NUM: 1800
+VALUE_TEXT: 1 800 руб.
+ALIASES: т-банк, тинькофф, tbank, tinkoff
+FACT: Ведение счета для юридического лица в Т-Банке стоит 1 800 руб., но открытие сейчас приостановлено.
+TAGS: pricing, monthly_fee, yul, pause
+
+---CHUNK---
+TYPE: pricing
+SCENARIO: tbank_yul_conditions
+BANK: Т-Банк
+CLIENT_TYPE: ЮЛ
+STATUS: PAUSE
+FIELD: transfer_to_yul_fee
+VALUE_NUM: 36
+VALUE_TEXT: 36 руб.
+ALIASES: т-банк, тинькофф, tbank, tinkoff
+FACT: Перевод на юридическое лицо в Т-Банке стоит 36 руб., но открытие сейчас приостановлено.
+TAGS: pricing, transfer_fee, yul, pause
+
+---CHUNK---
+TYPE: feature
+SCENARIO: mkb_yul_conditions
+BANK: МКБ
+CLIENT_TYPE: ЮЛ
+STATUS: PAUSE
+FIELD: internal_transfers_process
+ALIASES: мкб, mkb
+FACT: Внутрибанковские переводы в МКБ требуют рукописного заявления и личного визита арбитражного управляющего.
+TAGS: feature, process, yul, pause
+
+---CHUNK---
+TYPE: feature
+SCENARIO: mkb_yul_conditions
+BANK: МКБ
+CLIENT_TYPE: ЮЛ
+STATUS: PAUSE
+FIELD: payments_process
+ALIASES: мкб, mkb
+FACT: Платежи в МКБ проводятся вручную; после создания платежа в личном кабинете нужно уведомлять менеджеров банка по email.
+TAGS: feature, process, yul, pause
+
+---CHUNK---
+TYPE: bonus
+SCENARIO: bonus_formula
+TOPIC: formula
+FACT: Бонусное вознаграждение рассчитывается по формуле ((∑S × P) / D) × O × 0,93. Баланс для расчета фиксируется ежедневно в 09:00 по МСК.
+TAGS: bonus, formula
+
+---CHUNK---
+TYPE: bonus
+SCENARIO: bonus_referral
+TOPIC: referral
+FACT: По программе «Приведи друга» выплачивается от 0,2% до 1% годовых от остатков привлеченных коллег.
+TAGS: bonus, referral
+
+---CHUNK---
+TYPE: bonus
+SCENARIO: uralsib_yul_conditions
+BANK: Уралсиб
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+FIELD: bonus_rate
+FACT: Бонус в Уралсибе для ЮЛ (малый бизнес): до 10 млн руб. — 4%; 10–50 млн — 4.5%; 50–250 млн — 5.5%; 250–500 млн — 6%; 500–750 млн — 6.5%; 750 млн–1 млрд — 7.5%; свыше 1 млрд руб. — 8.5%.
+TAGS: bonus, yul, active, uralsib
+
+---CHUNK---
+TYPE: bonus
+SCENARIO: tkb_yul_conditions
+BANK: ТКБ
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+FIELD: bonus_rate
+FACT: Бонус в ТКБ для ЮЛ: до 10 млн руб. — 4.5%; 10–50 млн — 5%; 50–250 млн — 6%; 250–500 млн — 6.5%; 500–750 млн — 7%; 750 млн–1 млрд — 8%; свыше 1 млрд руб. — 9%.
+TAGS: bonus, yul, active, tkb
+
+---CHUNK---
+TYPE: bonus
+SCENARIO: tkb_fl_conditions
+BANK: ТКБ
+CLIENT_TYPE: ФЛ
+STATUS: ACTIVE
+FIELD: bonus_rate
+FACT: Бонус в ТКБ для ФЛ: до 5 млн руб. — 4%; 5–10 млн — 4.5%; 10–25 млн — 5%; 25–50 млн — 5.5%; свыше 50 млн руб. — 6%.
+TAGS: bonus, fl, active, tkb
+
+---CHUNK---
+TYPE: bonus
+SCENARIO: alfabank_yul_conditions
+BANK: Альфа-Банк
+CLIENT_TYPE: ЮЛ
+STATUS: ACTIVE
+FIELD: bonus_rate
+FACT: Бонус в Альфа-Банке для ЮЛ: до 10 млн руб. — 4%; 10–50 млн — 4.5%; 50–250 млн — 5.5%; 250–500 млн — 6%; 500–750 млн — 6.5%; 750 млн–1 млрд — 7.5%; свыше 1 млрд руб. — 8.5%.
+TAGS: bonus, yul, active, alfabank
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: capitalization_none
+TOPIC: capitalization
+ALIASES: капитализация, проценты на остаток, начисление процентов, накопление, доход на остаток
+FACT: Капитализации нет ни в одном из банков-партнеров.
+TAGS: constraint, capitalization
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: special_account_without_main
+TOPIC: special_account_without_main
+ALIASES: спецсчет без основного, только спецсчет, специальный без расчетного, спецсчет отдельно, задатковый, залоговый счет без основного
+ANSWER_HINT: Объяснить что спецсчёт открывается только вместе с основным.
+FACT: Открыть только специальный счет без открытия основного счета нельзя.
+TAGS: constraint, special_account, main_account
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: online_signing
+TOPIC: online_signing
+ALIASES: онлайн подписание, удаленное подписание, электронная подпись, эцп, подписать по интернету, дистанционно подписать, без визита подписать
+FACT: Подписание документов на открытие счета онлайн невозможно.
+TAGS: constraint, online_signing
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: personal_signing
+TOPIC: personal_signing
+ALIASES: лично подписать, визит в банк, приехать в банк, нужно приходить, личное присутствие, подписание лично, приезжать, в офис банка
+FACT: Подписание документов арбитражным управляющим происходит лично в любом регионе РФ, где есть ближайшее отделение банка-партнера.
+TAGS: constraint, signing, personal_visit
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: deceased_fl
+TOPIC: deceased_fl
+CLIENT_TYPE: ФЛ
+ALIASES: умерший, умершему, покойный, скончался, смерть, после смерти, умер человек
+ANSWER_HINT: Мягко объяснить что счёт умершему не откроем. Предложить уточнить детали.
+FACT: Счета умершим физическим лицам не открываются.
+TAGS: constraint, fl, deceased
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: liquidated_yul
+TOPIC: liquidated_yul
+CLIENT_TYPE: ЮЛ
+ALIASES: ликвидация, ликвидирован, ликвидируемое, компания закрыта, в процессе ликвидации, уже ликвидирован
+FACT: Если ликвидация юридического лица еще в процессе, счет открыть можно. Если должник уже ликвидирован, открыть счет можно только в тех банках, где раньше у него были счета.
+TAGS: constraint, yul, liquidation
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: non_resident
+TOPIC: non_resident
+APPLIES_TO: ЮЛ
+ALIASES: нерезидент, иностранец, иностранная компания, иностранная организация, нерезидент рф, зарубежная компания, апостиль, торговая палата
+FACT: Счета нерезидентам открыть можно, но требуется выписка из торговой палаты с апостилем по месту регистрации.
+TAGS: constraint, non_resident, yul
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: power_of_attorney
+TOPIC: power_of_attorney
+CLIENT_TYPE: ЮЛ
+ALIASES: доверенность, по доверенности, доверитель, представитель, нотариальная доверенность, доверенное лицо, подписать по доверенности
+FACT: Подписание по доверенности возможно только для юридических лиц при наличии оригинала бумажной нотариальной доверенности.
+TAGS: constraint, yul, power_of_attorney
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: no_branch
+TOPIC: no_branch
+ALIASES: нет отделения, нет офиса, нет банка в городе, регион, другой город, командировка, ближайший офис, филиал
+FACT: Если в регионе клиента нет отделения банка-партнера, нужно уточнить, бывает ли он в командировках в крупных городах или ближайших регионах, где есть отделение.
+TAGS: constraint, branch, geography
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: early_opening
+TOPIC: early_opening
+ALIASES: открыть заранее, счет заранее, нет движений, пустой счет, без операций, комиссия без поступлений, ведение без движений
+FACT: Если счет нужен не сразу, его можно открыть заранее. Пока движений по счету нет, комиссия за ведение не взимается, но стоимость открытия при закрытии без поступлений оплатить придется.
+TAGS: constraint, opening, timing
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: large_transfer_fl
+TOPIC: large_transfer_to_fl
+ALIASES: крупный перевод, большая сумма, перевод физлицу, лимит перевода, реестр кредиторов, предупредить банк, свыше лимита
+FACT: Если кредитору-физлицу нужно перевести крупную сумму свыше лимитов, банк нужно предупредить за два дня и предоставить реестр кредиторов; тогда комиссия составит 0.2%.
+TAGS: constraint, transfer, fl, large_amount
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: cash_withdrawal_bankruptcy
+TOPIC: cash_withdrawal_bankruptcy
+ALIASES: снять наличные, наличные с банкротного счета, обналичить, вывести наличными, судебное решение наличные, выдача наличными
+ANSWER_HINT: Не путать с вопросом про карту. Нужно судебное решение о выдаче наличными.
+NEXT_QUESTION: Есть ли уже судебное решение о выдаче наличными?
+FACT: Снять наличные по банкротным средствам можно только после вынесения судебного решения о выдаче наличными.
+TAGS: constraint, cash, court_order
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: internet_bank_fl_ip
+TOPIC: internet_bank_fl_ip
+CLIENT_TYPE: ФЛ_ИП
+ALIASES: интернет банк, онлайн банк, личный кабинет, доступ в банк, приложение банка, мобильный банк, доступ финансового управляющего
+FACT: Если открывается счет для гражданина-банкрота или ИП, финансовому управляющему не подключается доступ в интернет-банк.
+TAGS: constraint, internet_bank, fl_ip
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: restructuring_ip
+TOPIC: restructuring_ip
+CLIENT_TYPE: ИП
+ALIASES: реструктуризация ип, реструктуризация долгов ип, согласие финансового управляющего, платежи без согласия
+FACT: Если в отношении ИП введена реструктуризация долгов, банк не исполняет платежи без письменного согласия финансового управляющего.
+TAGS: constraint, ip, restructuring
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: debtor_card_realization
+TOPIC: implementation_fl_card
+CLIENT_TYPE: ФЛ
+ALIASES: карта, карту, банковская карта, оформить карту, карточка должника, реализация имущества, карта банкрота, карту должнику
+ANSWER_HINT: Не путать с наличными. Если клиент спрашивает про карту при реализации имущества — объяснить роль финансового управляющего. Не упоминать наличные.
+NEXT_QUESTION: Реализация имущества уже введена?
+FACT: Если у гражданина введена реализация имущества, новая банковская карточка оформляется и подписывается исключительно финансовым управляющим.
+TAGS: constraint, fl, card, implementation
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: external_management_cards
+TOPIC: external_management_cards
+CLIENT_TYPE: ЮЛ
+ALIASES: внешнее управление, конкурсное производство, корпоративные карты, заблокировать карты, новые карты юрлицо, карты при банкротстве юл
+FACT: Если у юридического лица введено внешнее управление или конкурсное производство, действующие корпоративные карты должны быть заблокированы без права выпуска новых.
+TAGS: constraint, yul, cards, external_management, bankruptcy
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: pension_payment_fl
+TOPIC: pension_payment_fl
+CLIENT_TYPE: ФЛ
+FACT: Если финансовый управляющий дает распоряжение выдать банкроту-пенсионеру пенсию, банк вправе выполнить такую выдачу.
+TAGS: constraint, fl, pension
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: payroll_project_none
+TOPIC: payroll_project
+ALIASES: зарплатный проект, зарплата, бесплатные переводы, зарплатные карты
+FACT: Зарплатного проекта для банкротов с бесплатными переводами нет.
+TAGS: constraint, payroll_project
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: red_zone_company
+TOPIC: red_zone_company
+CLIENT_TYPE: ЮЛ
+ALIASES: красная зона, рисковая компания, отказ банка, индивидуальное рассмотрение, сложный клиент, проблемная компания
+FACT: Если компания находится в красной зоне, открытие счета возможно только как исключение после индивидуального рассмотрения.
+TAGS: constraint, yul, red_zone, exception
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: active_company_uralsib
+TOPIC: active_company
+CLIENT_TYPE: ЮЛ
+FACT: Если компания действующая и не находится в процедуре банкротства, открыть счет можно в Уралсибе по стандартной тарифной сетке.
+TAGS: constraint, yul, active_company, uralsib
+
+---CHUNK---
+TYPE: docs
+SCENARIO: docs_tkb_fl
+BANK: ТКБ
+CLIENT_TYPE: ФЛ
+DOCS_LIST: заявка в Битрикс24; скан паспорта АУ; решение суда; копия паспорта должника или справка из МВД
+FACT: Для открытия счета в ТКБ для ФЛ нужны заявка в Битрикс24, скан паспорта АУ, решение суда и копия паспорта должника или справка из МВД.
+TAGS: docs, tkb, fl
+
+---CHUNK---
+TYPE: docs
+SCENARIO: docs_tkb_yul
+BANK: ТКБ
+CLIENT_TYPE: ЮЛ
+DOCS_LIST: заявка в Битрикс24; скан паспорта АУ (разворот и регистрация); решение суда
+FACT: Для открытия счета юридическому лицу в ТКБ нужны заявка в Битрикс24, скан паспорта АУ и решение суда.
+TAGS: docs, tkb, yul
+
+---CHUNK---
+TYPE: docs
+SCENARIO: docs_tbank_yul
+BANK: Т-Банк
+CLIENT_TYPE: ЮЛ
+DOCS_LIST: заявка в Битрикс24; скан паспорта АУ (разворот и регистрация); решение суда
+FACT: Для открытия счета юридическому лицу в Т-Банке нужны заявка в Битрикс24, скан паспорта АУ и решение суда.
+TAGS: docs, tbank, yul
+
+---CHUNK---
+TYPE: docs
+SCENARIO: docs_alfabank_yul
+BANK: Альфа-Банк
+CLIENT_TYPE: ЮЛ
+DOCS_LIST: название или ИНН должника; перечень счетов
+FACT: Для открытия счета в Альфа-Банке по ЮЛ сканы документов от АУ не нужны, достаточно названия или ИНН должника и перечня счетов.
+TAGS: docs, alfabank, yul
+
+---CHUNK---
+TYPE: docs
+SCENARIO: docs_uralsib_yul
+BANK: Уралсиб
+CLIENT_TYPE: ЮЛ
+DOCS_LIST: название или ИНН должника; перечень счетов
+FACT: Для открытия счета в Уралсибе по ЮЛ сканы документов от АУ не нужны, достаточно названия или ИНН должника и перечня счетов.
+TAGS: docs, uralsib, yul
+
+---CHUNK---
+TYPE: docs
+SCENARIO: docs_mkb_yul
+BANK: МКБ
+CLIENT_TYPE: ЮЛ
+DOCS_LIST: название или ИНН должника; перечень счетов
+FACT: Для открытия счета в МКБ по ЮЛ сканы документов от АУ не нужны, достаточно названия или ИНН должника и перечня счетов.
+TAGS: docs, mkb, yul
+
+---CHUNK---
+TYPE: docs
+SCENARIO: docs_rosbank_yul
+BANK: Росбанк
+CLIENT_TYPE: ЮЛ
+SEGMENT: АО_ЗАО
+DOCS_LIST: актуальный реестр акционеров не старше 3 месяцев или официальное письмо от конкурсного управляющего
+FACT: Для открытия счета АО или ЗАО дополнительно нужен актуальный реестр акционеров или официальное письмо от конкурсного управляющего.
+TAGS: docs, rosbank, yul, ao, zao
+
+---CHUNK---
+TYPE: docs
+SCENARIO: docs_non_resident
+TOPIC: non_resident
+DOCS_LIST: выписка или реестр из торговой палаты с апостилем и переводом
+FACT: Для открытия счета организации-нерезиденту требуется выписка из торговой палаты с апостилем и переводом.
+TAGS: docs, non_resident
+
+---CHUNK---
+TYPE: selection
+SCENARIO: bank_selection_fl
+CLIENT_TYPE: ФЛ
+BANK: ТКБ
+STATUS: ACTIVE
+SUMMARY_PRIORITY: selection
+ALIASES: физлицо, физическое лицо, фл, банкрот гражданин, физик
+POSITIONING: Для физического лица ТКБ — рабочий вариант: открытие 1 500 руб., ведение 0 руб., внешние платежи 1.2%, внутрибанковские переводы 0 руб. Важная особенность: расходные операции согласуются через юристов банка.
+TAGS: selection, fl, tkb, active
+
+---CHUNK---
+TYPE: selection
+SCENARIO: bank_selection_yul
+CLIENT_TYPE: ЮЛ
+BANK: Альфа-Банк
+STATUS: ACTIVE
+SUMMARY_PRIORITY: selection
+ALIASES: юрлицо, юридическое лицо, юл, ооо, ип
+POSITIONING: Для юридического лица Альфа-Банк — один из самых бюджетных вариантов: открытие 800 руб., ведение 800 руб., контроль банкротных операций 0 руб., перевод на ЮЛ 35 руб.
+TAGS: selection, yul, alfabank, active
+
+---CHUNK---
+TYPE: selection
+SCENARIO: bank_selection_yul
+CLIENT_TYPE: ЮЛ
+BANK: Уралсиб
+STATUS: ACTIVE
+SUMMARY_PRIORITY: selection
+ALIASES: юрлицо, юридическое лицо, юл, ооо, ип
+POSITIONING: Для юридического лица Уралсиб — рабочий вариант малого бизнеса: открытие 3 500 руб., ведение 1 600 руб., переводы на ЮЛ 35 руб., переводы на ФЛ до 100 000 руб. без комиссии, но есть 150 руб. за контроль каждой банкротной операции.
+TAGS: selection, yul, uralsib, active
+
+---CHUNK---
+TYPE: selection
+SCENARIO: bank_selection_yul
+CLIENT_TYPE: ЮЛ
+BANK: ТКБ
+STATUS: ACTIVE
+SUMMARY_PRIORITY: selection
+ALIASES: юрлицо, юридическое лицо, юл, ооо, ип
+POSITIONING: Для юридического лица ТКБ — вариант с открытием 2 800 руб. и ведением 2 090 руб.; переводы на ЮЛ стоят 33 руб. электронно, а переводы на ФЛ тарифицируются процентом от суммы плюс 33 руб. за платежку.
+TAGS: selection, yul, tkb, active
+
+---CHUNK---
+TYPE: selection
+SCENARIO: tbank_yul_conditions
+CLIENT_TYPE: ЮЛ
+BANK: Т-Банк
+STATUS: PAUSE
+SUMMARY_PRIORITY: selection
+POSITIONING: Для юридического лица Т-Банк исторически имел открытие 3 900 руб., ведение 1 800 руб. и переводы на ЮЛ 36 руб., но сейчас открытие временно приостановлено.
+TAGS: selection, yul, tbank, pause
+
+---CHUNK---
+TYPE: selection
+SCENARIO: mkb_yul_conditions
+CLIENT_TYPE: ЮЛ
+BANK: МКБ
+STATUS: PAUSE
+SUMMARY_PRIORITY: selection
+POSITIONING: Для юридического лица МКБ сейчас недоступен для открытия. Особенности банка: внутрибанковские переводы требуют рукописного заявления и визита, а платежи проводятся вручную с уведомлением по email.
+TAGS: selection, yul, mkb, pause
+
+---CHUNK---
+TYPE: selection
+SCENARIO: rosbank_yul_conditions
+CLIENT_TYPE: ЮЛ
+BANK: Росбанк
+STATUS: PAUSE
+SUMMARY_PRIORITY: selection
+POSITIONING: Для юридического лица Росбанк сейчас недоступен для открытия. Исторически он подходит для ЮЛ, но для АО и ЗАО требует дополнительный реестр акционеров или письмо от конкурсного управляющего.
+TAGS: selection, yul, rosbank, pause
+
+---CHUNK---
+TYPE: selection
+SCENARIO: bank_selection_yul_low_cost
+CLIENT_TYPE: ЮЛ
+TOPIC: comparison_low_cost
+ALIASES: подешевле, дешевле, самый дешевый, минимальная стоимость, недорого, бюджетно
+POSITIONING: Для юридических лиц по стоимости открытия сейчас выгоднее всего выглядит Альфа-Банк (800 руб.), затем ТКБ (2 800 руб.), затем Уралсиб (3 500 руб.). Т-Банк, МКБ и Росбанк сейчас неактивны для нового открытия.
+TAGS: selection, yul, comparison, opening_cost
+
+---CHUNK---
+TYPE: selection
+SCENARIO: bank_selection_fl
+CLIENT_TYPE: ФЛ
+TOPIC: comparison_default
+ALIASES: физлицо, физическое лицо, фл, банкрот гражданин
+POSITIONING: Для физических лиц в партнерской сетке рабочий вариант — ТКБ: открытие 1 500 руб., ведение 0 руб., но расходные операции нужно заранее согласовывать с юристами банка.
+TAGS: selection, fl, comparison, default
+
+---CHUNK---
+TYPE: feature
+SCENARIO: otstupnoe
+TOPIC: otstupnoe
+ALIASES: отступное, замена денег на имущество, имущество кредитору, вместо денег, неликвид
+FACT: Кредитор может получить имущество должника вместо денег (например, если имущество неликвидно); это называется предложением о погашении требований кредиторов путем предоставления отступного.
+TAGS: feature, property, creditors
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: allowed_stages
+TOPIC: allowed_stages
+ALIASES: стадия наблюдения, внешнее управление, конкурсное производство, на каких стадиях, стадия банкротства
+FACT: Счета можно открывать на любых стадиях: наблюдения, внешнего управления, конкурсного производства и даже если компания в процессе ликвидации.
+TAGS: constraint, stages, opening
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: proxy_payments
+TOPIC: proxy_payments
+ALIASES: платежи представителем, оплатить по доверенности, переводы по доверенности, нотариальная доверенность платежи, помощник переведет
+FACT: Осуществление платежей представителем финансового управляющего возможно, если у него есть нотариальная доверенность.
+TAGS: constraint, proxy, payments, poa
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: account_reattach
+TOPIC: account_reattach
+ALIASES: перезакрепить должника, перевести к вам, закрыть и открыть заново, перевести счет, уже открыт напрямую, свой счет
+FACT: Если счет уже открыт напрямую, перезакрепить его за нами можно только через закрытие (срок ожидания в Т-Банке — 3 месяца, в Альфа-Банке — 2 месяца), поэтому вместо перезакрепления клиенту рекомендуется просто открыть счет в другом нашем банке-партнере.
+TAGS: constraint, account, reattach
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: currency_account
+TOPIC: currency_account
+ALIASES: валютный счет, счет в валюте, иностранная валюта, доллары, евро, расчеты в валюте, валюта
+FACT: Валютный счет должника может использоваться исключительно для зачисления иностранной валюты от третьих лиц (дебиторов); расчеты с кредиторами с валютного счета проводить нельзя.
+TAGS: constraint, currency, limits
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: multiple_accounts
+TOPIC: multiple_accounts
+ALIASES: несколько основных счетов, два счета, счета в разных банках, одинаковые счета, несколько банков
+FACT: По регламенту арбитражный управляющий не может иметь несколько одинаковых основных счетов в разных банках; при переходе на новое обслуживание старые счета должны быть закрыты.
+TAGS: constraint, multiple_accounts, closing
+
+---CHUNK---
+TYPE: constraint
+SCENARIO: change_au
+TOPIC: change_au
+ALIASES: смена ау, сменили управляющего, назначили нового, другой управляющий, суд поменял ау, льготы при смене
+FACT: Если арбитражного управляющего меняют по решению суда, льготы на счете сохранятся, они исчезнут только в том случае, если новый АУ решит сменить счет.
+TAGS: constraint, au_change, benefits
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_timelines
+TOPIC: timelines
+ALIASES: сколько дней, когда откроют, сроки открытия, как быстро, время открытия, за сколько, дней открывается, срок счета
+FACT: Полное открытие счета обычно занимает около недели с момента заявки; после подписания документов в банке открытие занимает до двух дней.
+TAGS: internal_ops, timelines
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_priorities
+TOPIC: priorities
+FACT: Приоритеты заявок: не срочный — в течение месяца, стандартный — в течение двух недель, срочный — в течение недели, горящий — в течение трех дней, катастрофа — сегодня.
+TAGS: internal_ops, priorities
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_overdue_priority
+TOPIC: overdue_priority
+FACT: Если заявка получила статус «Просрочено», изменить дату открытия счета может только сотрудник отдела контроля качества.
+TAGS: internal_ops, priority, overdue
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_funds_available
+TOPIC: funds_available
+FACT: Если на открываемом счете уже есть средства, заявка получает приоритет «Срочно», и у клиента нужно запросить выписку об остатках.
+TAGS: internal_ops, priority, urgent, funds
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_urgent_auction
+TOPIC: urgent_auction
+FACT: Если торги проходят через неделю и счет нужен срочно, заявку нужно согласовать с руководителем отдела продаж и отправить с пометкой о срочности.
+TAGS: internal_ops, urgent, auction
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_stage_meeting_prep
+TOPIC: stage_meeting_prep
+FACT: На стадии согласования встречи с банком менеджер обязан лично связаться с клиентом и подтвердить факт согласования встречи банком.
+TAGS: internal_ops, meeting, stage
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_stage_meeting_today
+TOPIC: stage_meeting_today
+FACT: Стадия «Сегодня встреча / Ждем АУ» требует повышенного контроля; менеджер обязан связаться с АУ и контролировать посещение банка.
+TAGS: internal_ops, meeting, stage
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_stage_longterm
+TOPIC: stage_longterm
+FACT: Если заявка отложена по уважительной причине, ее можно перевести в статус «Долгосрок» максимум на один месяц.
+TAGS: internal_ops, longterm, stage
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_stage_requisites
+TOPIC: stage_requisites
+FACT: Этап получения реквизитов и доступов является критическим; закрывать заявку без подтверждения смены временного пароля нельзя.
+TAGS: internal_ops, requisites, access
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_bank_call_consent
+TOPIC: bank_call_consent
+FACT: Когда документы готовы, менеджер обязан уточнить у клиента, можно ли передать его телефон банку для согласования встречи.
+TAGS: internal_ops, meeting, consent
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_no_call_from_bank
+TOPIC: no_call_from_bank
+FACT: Если банк не позвонил клиенту для назначения встречи, сотрудник бэк-офиса должен срочно связаться с менеджером банка.
+TAGS: internal_ops, bank_communication, meeting
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_date_mismatch
+TOPIC: date_mismatch
+FACT: Если данные о времени встречи от банка и клиента расходятся, бэк-офис обязан срочно уточнить корректную информацию.
+TAGS: internal_ops, bank_communication, mismatch
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_meeting_reschedule_client
+TOPIC: meeting_reschedule_client
+FACT: Если клиент переносит встречу, заявка возвращается на стадию согласования, а менеджер фиксирует новую дату.
+TAGS: internal_ops, meeting, reschedule_client
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_meeting_reschedule_bank
+TOPIC: meeting_reschedule_bank
+FACT: Если банк переносит встречу, менеджер должен срочно связаться с клиентом и договориться о новой дате.
+TAGS: internal_ops, meeting, reschedule_bank
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_signing_issue
+TOPIC: signing_issue
+FACT: Если в день подписания документов возникла проблема, клиент не должен уходить из отделения, а менеджер должен решать вопрос через бэк-офис на месте.
+TAGS: internal_ops, signing, issue
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_delay_access
+TOPIC: delay_access
+FACT: Если через 1–2 дня после подписания документов клиент не получил реквизиты и доступы, менеджер обязан срочно сообщить о проблеме.
+TAGS: internal_ops, access, delay
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_negative_experience
+TOPIC: negative_experience
+FACT: Если клиент ушел из банка без подписания документов из-за плохого обслуживания, заявка переводится в статус сбоя и подключается руководство.
+TAGS: internal_ops, negative, issue, escalation
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_duplicate_requests
+TOPIC: duplicate_requests
+FACT: Если срочная заявка была подана сразу в несколько банков, после успешного открытия счета в одном банке остальные заявки нужно аннулировать.
+TAGS: internal_ops, duplicates
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_missing_data
+TOPIC: missing_data
+FACT: Если в новой заявке не хватает данных, а менеджер не отвечает бэк-офису в течение часа, об этом нужно срочно сообщить руководителю отдела продаж.
+TAGS: internal_ops, missing_data, escalation
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_extra_benefits
+TOPIC: extra_benefits
+FACT: Если клиент просит дополнительные льготы, их сначала нужно согласовать с руководителем отдела продаж, а затем передать задачу в бэк-офис.
+TAGS: internal_ops, benefits, approval
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_bank_denies_benefit
+TOPIC: bank_denies_benefit
+FACT: Если банк не согласовывает нужную льготу, сотрудник бэк-офиса должен связаться с руководителем отдела продаж банка или департаментом по банкротству.
+TAGS: internal_ops, benefits, escalation
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_non_resident_check
+TOPIC: non_resident_check
+FACT: Если счет открывается для нерезидента, сначала в банк отправляют заявку с ИНН должника для предварительной проверки, и только после ответа банка заказывают реестр.
+TAGS: internal_ops, non_resident, verification
+
+---CHUNK---
+TYPE: internal_ops
+SCENARIO: internal_ops_non_standard_account
+TOPIC: non_standard_account
+FACT: Если клиенту нужен нестандартный счет, менеджер должен выяснить точное название счета, цели использования и статью ФЗ-127, после чего бэк-офис уточняет возможность открытия у банка.
+TAGS: internal_ops, non_standard_account, verification
