@@ -132,8 +132,14 @@ class Settings(BaseSettings):
     STT_DEVICE: str = Field(default="cpu")
     STT_COMPUTE_TYPE: str = Field(default="int8")
 
-    # LLM system prompt (brain)
-    LLM_SYSTEM_PROMPT_PATH: str = Field(default="app/llm/prompts/manager/system_prompt.md")
+    # LLM system prompt — path relative to project root or absolute
+    LLM_SYSTEM_PROMPT_PATH: str = Field(default="app/llm/prompts/manager/simple_system_prompt.md")
+
+    # Escalation classifier prompt — path relative to project root or absolute
+    ESCALATION_PROMPT_PATH: str = Field(default="app/llm/prompts/escalation_prompt.md")
+
+    # Text sent to client when handing off to a human manager
+    HANDOFF_REPLY: str = Field(default="Принял. Передаю вашу заявку старшему менеджеру, чтобы помочь вам дальше.")
 
     # Knowledge Base
     KB_SOURCE_PATH: str = Field(default="")

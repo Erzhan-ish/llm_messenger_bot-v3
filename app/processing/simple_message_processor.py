@@ -54,15 +54,7 @@ class JobDeferred(Exception):
 
 # ── constants ──────────────────────────────────────────────────────────────────
 _SESSION_SILENCED_KEY = "_session_silenced_after_handoff"
-_HANDOFF_REPLY = (
-    "Принял. Передаю"
-    " вашу заявку"
-    " старшему"
-    " менеджеру,"
-    " чтобы"
-    " помочь вам"
-    " дальше."
-)
+_HANDOFF_REPLY = settings.HANDOFF_REPLY
 _FRUSTRATION_RE = re.compile(r"^[?!.\s…–—-]+$")
 
 # Lightweight entity extraction for RAG query enrichment only (not scenario routing)
@@ -111,26 +103,28 @@ _FOREIGN_GARBAGE_RE = re.compile(
 )
 
 # ── system prompt (loaded once) ────────────────────────────────────────────────
-_PROMPT_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "app" / "llm" / "prompts" / "manager" / "simple_system_prompt.md"
-)
 _SYSTEM_PROMPT_CACHE: Optional[str] = None
+
+_FALLBACK_PROMPT = (
+    "Ты — помощник. Отвечай кратко и по делу, "
+    "используй только факты из KNOWLEDGE. "
+    "Обращайся к клиенту только на «вы»."
+)
 
 
 def _load_system_prompt() -> str:
     global _SYSTEM_PROMPT_CACHE
-    if _SYSTEM_PROMPT_CACHE is None:
-        try:
-            _SYSTEM_PROMPT_CACHE = _PROMPT_PATH.read_text(encoding="utf-8").strip()
-        except Exception:
-            logger.exception("simple_system_prompt.md not found -- using inline fallback")
-            _SYSTEM_PROMPT_CACHE = (
-                "Ты — Алексей, консультант компании «В плюсе». "
-                "Помогаешь арбитражным управляющим открывать счета должников. "
-                "Отвечай кратко и по делу, используй только факты из KNOWLEDGE. "
-                "Обращайся к клиенту только на «вы»."
-            )
+    if _SYSTEM_PROMPT_CACHE is not None:
+        return _SYSTEM_PROMPT_CACHE
+    prompt_path = Path(settings.LLM_SYSTEM_PROMPT_PATH)
+    if not prompt_path.is_absolute():
+        prompt_path = Path(__file__).resolve().parents[2] / prompt_path
+    try:
+        _SYSTEM_PROMPT_CACHE = prompt_path.read_text(encoding="utf-8").strip()
+        logger.info("SystemPrompt loaded | path={}", str(prompt_path))
+    except Exception:
+        logger.exception("System prompt not found | path={} -- using fallback", str(prompt_path))
+        _SYSTEM_PROMPT_CACHE = _FALLBACK_PROMPT
     return _SYSTEM_PROMPT_CACHE
 
 

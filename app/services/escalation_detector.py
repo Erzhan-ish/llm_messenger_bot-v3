@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import Optional, TypedDict, Literal
 
 from app.llm.providers import ask_llm
@@ -47,46 +48,29 @@ ALLOWED_NEEDS = {
     "UNKNOWN",
 }
 
-SYSTEM_PROMPT = """
-Ты — классификатор эскалации. Ты НЕ пишешь клиенту.
-Твоя задача: по диалогу решить, нужно ли подключить менеджера прямо сейчас.
+_ESCALATION_PROMPT_CACHE: Optional[str] = None
 
-ВАЖНО:
-- Вопросы про тарифы/комиссии/проценты/условия САМИ ПО СЕБЕ НЕ являются причиной эскалации.
-  Если клиент просто уточняет тарифы/условия без явной готовности к действию — ставь:
-  - escalate=false
-  - reason="pricing"
-  - interest_score <= 45
-  - next_step="ask_clarify" или "none"
+_FALLBACK_ESCALATION_PROMPT = (
+    "Ты — классификатор эскалации. Реши по диалогу, нужно ли подключить менеджера.\n"
+    "Верни строго JSON: {\"escalate\": true|false, \"reason\": \"other\", "
+    "\"interest_score\": 0, \"confidence\": 0.0, \"next_step\": \"none\", "
+    "\"client_need\": \"UNKNOWN\", \"reasons\": []}"
+)
 
-Эскалация НУЖНА (escalate=true, next_step="handoff_manager", interest_score>=85, confidence>=0.85), если:
-1) Клиент явно готов к следующему шагу, выражает прямое намерение открыть счет, выбрал банк или просит помочь:
-   "оформляем", "давайте начнем", "что дальше?", "куда оплатить?", "готов", "открывайте", "мне нужен счет", "хочу открыть счет", "поможете?", "сможете помочь?", "давайте [название банка]", "давайте росбанк".
-   -> reason="ready_to_open", client_need="OPEN_ACCOUNT" или "CONDITIONS" (по смыслу)
-2) Клиент просит человека/менеджера/звонок/контакт:
-   "позвоните", "перезвоните", "дайте номер", "подключите менеджера", "оператор".
-   -> reason="human_request" (или "callback" если прямо про звонок), client_need="CONSULTATION"
-3) Конфликт/жалоба/агрессия/исправление:
-   Клиент недоволен, ругается ИЛИ прямо исправляет бота (например, "я же сказал", "нет, не умерший", "я не ИП", "Вы не поняли").
-   -> reason="complex_case" или "unknown_kb", client_need="SUPPORT"
-4) Сложный/нестандартный случай или тупик:
-   много уточнений, нет данных в KB, had_unknown_kb=true несколько раз, либо бот ходит по кругу.
-   -> reason="complex_case" или "unknown_kb", client_need="CONSULTATION"
 
-ЖЁСТКОЕ ПРАВИЛО:
-Если next_step не "handoff_manager", то escalate должен быть false.
+def _load_escalation_prompt() -> str:
+    global _ESCALATION_PROMPT_CACHE
+    if _ESCALATION_PROMPT_CACHE is not None:
+        return _ESCALATION_PROMPT_CACHE
+    prompt_path = Path(settings.ESCALATION_PROMPT_PATH)
+    if not prompt_path.is_absolute():
+        prompt_path = Path(__file__).resolve().parents[2] / prompt_path
+    try:
+        _ESCALATION_PROMPT_CACHE = prompt_path.read_text(encoding="utf-8").strip()
+    except Exception:
+        _ESCALATION_PROMPT_CACHE = _FALLBACK_ESCALATION_PROMPT
+    return _ESCALATION_PROMPT_CACHE
 
-Верни строго JSON:
-{
-  "escalate": true|false,
-  "reason": "<pricing|callback|ready_to_open|documents|complex_case|unknown_kb|angry|human_request|other>",
-  "interest_score": 0..100,
-  "confidence": 0..1,
-  "next_step": "none|ask_clarify|handoff_manager",
-  "client_need": "<OPEN_ACCOUNT|OPEN_SPECIAL_ACCOUNT|CONDITIONS|DOCUMENTS|CONSULTATION|SUPPORT|UNKNOWN>",
-  "reasons": ["короткие причины (опционально)"]
-}
-""".strip()
 
 _JSON_OBJ_RE = re.compile(r"\{.*\}", re.DOTALL)
 
@@ -174,7 +158,7 @@ async def detect_escalation_signal(
         user_payload += "\n\n[CONTEXT] had_unknown_kb=true (в диалоге были вопросы без ответа из базы знаний)."
 
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": _load_escalation_prompt()},
         {"role": "user", "content": user_payload},
     ]
 
