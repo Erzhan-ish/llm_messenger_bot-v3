@@ -174,3 +174,13 @@ poetry.toml
 pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
+
+SVP.txt
+test.txt
+ТЗ.txt
+requirements_utf8.txt
+project_context.txt
+scenarios.txt
+plan.txt
+pipeline.md
+
